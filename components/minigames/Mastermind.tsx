@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { ConfigEditorProps, MiniGameDef, MiniGameProps } from "./types";
-import { rngFromSeed, seededInt } from "@/lib/game/prng";
+import { rngFromSeed, seededInt, seededShuffle } from "@/lib/game/prng";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import Button from "@/components/ui/Button";
@@ -22,6 +22,8 @@ const COLORS = [
 interface MastermindConfig {
   slots: number;
   colors: number;
+  /** false (défaut) = toutes les couleurs du code sont différentes */
+  allow_repeats?: boolean;
 }
 
 interface Attempt {
@@ -57,11 +59,18 @@ function MastermindGame({ config, seed, onComplete }: MiniGameProps) {
   const slots = Math.min(5, Math.max(3, cfg.slots || 4));
   const colorCount = Math.min(COLORS.length, Math.max(4, cfg.colors || 6));
 
+  // Sans doublons, le jeu est beaucoup plus lisible (et déductible)
+  const allowRepeats = cfg.allow_repeats === true || colorCount < slots;
+
   // Combinaison déterministe par équipe : introuvable dans la config (anti-triche)
   const secret = useMemo(() => {
     const rand = rngFromSeed(`mastermind:${seed}`);
-    return Array.from({ length: slots }, () => seededInt(rand, colorCount));
-  }, [seed, slots, colorCount]);
+    if (allowRepeats) {
+      return Array.from({ length: slots }, () => seededInt(rand, colorCount));
+    }
+    const pool = Array.from({ length: colorCount }, (_, i) => i);
+    return seededShuffle(pool, rand).slice(0, slots);
+  }, [seed, slots, colorCount, allowRepeats]);
 
   const [current, setCurrent] = useState<(number | null)[]>(() => Array(slots).fill(null));
   const [attempts, setAttempts] = useState<Attempt[]>([]);
@@ -113,8 +122,12 @@ function MastermindGame({ config, seed, onComplete }: MiniGameProps) {
       {/* Règles, toujours accessibles */}
       <div className="rounded-xl border-[3px] border-ink/20 bg-white/50 p-3">
         <p className="font-bold text-ink/80">
-          🎯 Un coffre à combinaison secrète de <strong>{slots} couleurs</strong> ! Propose une
-          combinaison, et les indices te diront si tu chauffes.
+          🎯 Un coffre à combinaison secrète de <strong>{slots} couleurs</strong> !{" "}
+          {allowRepeats ? (
+            <span className="text-crimson">Attention : les couleurs peuvent se répéter.</span>
+          ) : (
+            <span className="text-leaf">Indice : les {slots} couleurs sont toutes différentes.</span>
+          )}
         </p>
         <button
           className="font-bold text-leaf underline text-sm mt-1"
@@ -131,7 +144,12 @@ function MastermindGame({ config, seed, onComplete }: MiniGameProps) {
               à la bonne position. <span className="text-ink">« mal placée »</span> = la couleur
               existe dans le code, mais ailleurs.
             </li>
-            <li>Déduis, recommence, et trouve le code ! (les couleurs peuvent se répéter)</li>
+            <li>
+              Déduis, recommence, et trouve le code !{" "}
+              {allowRepeats
+                ? "(les couleurs peuvent se répéter)"
+                : "(chaque couleur n'apparaît qu'une seule fois)"}
+            </li>
           </ol>
         )}
       </div>
@@ -242,8 +260,10 @@ function MastermindEditor({ value, onChange }: ConfigEditorProps) {
   const cfg = value as unknown as MastermindConfig;
   const slots = cfg.slots ?? 4;
   const colors = cfg.colors ?? 6;
+  const repeats = cfg.allow_repeats === true;
+  const score = slots + colors + (repeats ? 4 : 0);
   const difficulty =
-    slots + colors <= 9 ? "🟢 Facile" : slots + colors <= 11 ? "🟡 Corsé" : "🔴 Très difficile";
+    score <= 9 ? "🟢 Facile" : score <= 11 ? "🟡 Corsé" : "🔴 Très difficile";
 
   return (
     <div className="space-y-3">
@@ -281,9 +301,18 @@ function MastermindEditor({ value, onChange }: ConfigEditorProps) {
           ))}
         </div>
       </div>
+      <label className="flex items-center gap-2 font-bold text-ink/70">
+        <input
+          type="checkbox"
+          className="w-5 h-5 accent-[#F5A623]"
+          checked={repeats}
+          onChange={(e) => onChange({ ...value, allow_repeats: e.target.checked })}
+        />
+        Autoriser les couleurs en double (beaucoup plus dur !)
+      </label>
       <p className="font-bold text-sm text-ink/70">
         Difficulté estimée : {difficulty}
-        {slots + colors > 11 && " — prévois 10 à 20 minutes pour une équipe !"}
+        {score > 11 && " — prévois 10 à 20 minutes pour une équipe !"}
       </p>
       <p className="text-sm font-bold text-ink/60">
         Le conseil TOYAH : 4 cases / 6 couleurs, c&apos;est déjà un vrai défi. La combinaison est
