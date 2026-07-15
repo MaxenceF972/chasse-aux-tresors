@@ -1,0 +1,77 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+
+export const runtime = "nodejs";
+
+const ALLOWED_EXT = new Set(["webp", "jpg", "jpeg", "png", "gif", "mp4", "webm", "mov", "m4v"]);
+
+function adminClient() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } }
+  );
+}
+
+/**
+ * Délivre une URL d'upload signée vers le bucket `media`, réservée à
+ * l'organisateur de la partie. Les octets partent ensuite directement du
+ * client vers Supabase Storage (pas de limite de body serveur, pas de
+ * dépendance aux policies RLS de storage.objects).
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const token = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
+    if (!token) {
+      return NextResponse.json({ error: "Non authentifié" }, { status: 401 });
+    }
+
+    const admin = adminClient();
+    const { data: userData, error: userErr } = await admin.auth.getUser(token);
+    if (userErr || !userData.user) {
+      return NextResponse.json({ error: "Session invalide — reconnecte-toi" }, { status: 401 });
+    }
+
+    const body = (await req.json()) as { game_id?: string; ext?: string };
+    const gameId = body.game_id ?? "";
+    const ext = (body.ext ?? "").toLowerCase();
+    if (!gameId || !ALLOWED_EXT.has(ext)) {
+      return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
+    }
+
+    const { data: game } = await admin
+      .from("games")
+      .select("id, created_by")
+      .eq("id", gameId)
+      .single();
+    if (!game || game.created_by !== userData.user.id) {
+      return NextResponse.json(
+        { error: "Seul l'organisateur de la partie peut envoyer des médias" },
+        { status: 403 }
+      );
+    }
+
+    // Auto-réparation : crée le bucket s'il n'existe pas encore
+    await admin.storage.createBucket("media", {
+      public: true,
+      fileSizeLimit: 52428800,
+      allowedMimeTypes: ["image/*", "video/*"],
+    });
+
+    const path = `${gameId}/${crypto.randomUUID()}.${ext}`;
+    const { data, error } = await admin.storage.from("media").createSignedUploadUrl(path);
+    if (error || !data) {
+      return NextResponse.json(
+        { error: error?.message ?? "Création de l'URL d'upload impossible" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ path: data.path, token: data.token });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Erreur serveur" },
+      { status: 500 }
+    );
+  }
+}
