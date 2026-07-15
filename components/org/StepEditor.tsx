@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { sb } from "@/lib/supabase/client";
 import type { Hint, MinigameKind, Step, StepSecrets, StepType } from "@/lib/types";
-import { newTagId, randomCode } from "@/lib/game/codes";
+import { newTagId, randomCode, tagUrl } from "@/lib/game/codes";
 import { MINIGAMES, MINIGAME_LIST } from "@/components/minigames/registry";
 import MediaUpload from "./MediaUpload";
 import Button from "@/components/ui/Button";
@@ -72,6 +72,7 @@ export default function StepEditor({
   const [hints, setHints] = useState<Hint[]>(secrets?.hints ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const minigameDef = MINIGAMES[minigameKind];
   const showAnswers = type === "text" || (type === "minigame" && minigameDef.needsAnswer);
@@ -179,11 +180,32 @@ export default function StepEditor({
         {/* Type-spécifique */}
         {type === "nfc" && (
           <div className="space-y-3 rounded-xl border-[3px] border-ink/20 p-3">
+            {/* LE lien à mettre sur la puce NFC (et encodé dans le QR) */}
+            <div className="rounded-xl border-[3px] border-gold bg-gold/15 p-3">
+              <Label>🔗 Lien à écrire sur la puce NFC</Label>
+              <p className="font-mono text-sm break-all text-ink/80 mb-2">{tagUrl(nfcTagId)}</p>
+              <Button
+                size="sm"
+                variant="gold"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(tagUrl(nfcTagId));
+                  setLinkCopied(true);
+                  setTimeout(() => setLinkCopied(false), 1800);
+                }}
+              >
+                {linkCopied ? "✅ Copié !" : "📋 COPIER LE LIEN"}
+              </Button>
+              <p className="text-xs font-bold text-ink/55 mt-2">
+                Colle-le comme enregistrement « URL » sur la puce (app NFC Tools, ou écriture
+                directe depuis l&apos;onglet Balises sur Chrome Android). Le joueur qui scanne
+                valide l&apos;étape et passe à la suivante.
+              </p>
+            </div>
             <div>
-              <Label>Identifiant de balise (écrit sur la puce + QR)</Label>
+              <Label>Identifiant de balise</Label>
               <div className="flex gap-2">
                 <Input value={nfcTagId} onChange={(e) => setNfcTagId(e.target.value)} className="font-mono" />
-                <Button variant="parchment" onClick={() => setNfcTagId(newTagId())} title="Régénérer">
+                <Button variant="parchment" onClick={() => setNfcTagId(newTagId())} title="Régénérer (la puce déjà écrite ne sera plus valide !)">
                   🎲
                 </Button>
               </div>

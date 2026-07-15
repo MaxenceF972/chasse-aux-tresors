@@ -26,6 +26,7 @@ export default function BalisesPage() {
   const [game, setGame] = useState<Game | null>(null);
   const [balises, setBalises] = useState<Balise[] | null>(null);
   const [nfcStatus, setNfcStatus] = useState<Record<string, string>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isLocalhost, setIsLocalhost] = useState(false);
   const nfcSupported = typeof window !== "undefined" && "NDEFReader" in window;
 
@@ -149,6 +150,19 @@ export default function BalisesPage() {
               <div className="min-w-0">
                 <h2 className="font-display text-xl leading-tight">{balise.step.title}</h2>
                 <p className="font-mono text-sm text-ink/60 break-all mt-1">{tagUrl(balise.tagId)}</p>
+                <div className="mt-1.5 print:hidden">
+                  <Button
+                    size="sm"
+                    variant="gold"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(tagUrl(balise.tagId));
+                      setCopiedId(balise.step.id);
+                      setTimeout(() => setCopiedId(null), 1800);
+                    }}
+                  >
+                    {copiedId === balise.step.id ? "✅ Copié !" : "📋 Copier le lien"}
+                  </Button>
+                </div>
                 <p className="font-bold mt-2">
                   Code de secours :{" "}
                   <span className="font-mono text-2xl tracking-[0.2em] bg-parchment px-2 py-0.5 rounded-lg border-2 border-ink">
