@@ -41,20 +41,14 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <main className="min-h-dvh flex flex-col items-center justify-center gap-10 px-6 py-12 relative overflow-hidden">
-      {/* Décor */}
-      <div className="absolute top-8 left-6 text-4xl opacity-20 animate-wiggle select-none" aria-hidden>🧭</div>
-      <div className="absolute bottom-24 right-8 text-4xl opacity-20 animate-floaty select-none" aria-hidden>🗝️</div>
-      <div className="absolute top-24 right-10 text-3xl opacity-15 animate-floaty [animation-delay:1s] select-none" aria-hidden>🦜</div>
-      <div className="absolute bottom-40 left-8 text-3xl opacity-15 animate-wiggle [animation-delay:0.6s] select-none" aria-hidden>💰</div>
-
+    <main className="min-h-dvh flex flex-col items-center justify-center gap-8 px-6 py-12 relative overflow-hidden">
       <motion.div
         initial={{ scale: 0.6, opacity: 0, rotate: -6 }}
         animate={{ scale: 1, opacity: 1, rotate: 0 }}
         transition={{ type: "spring", stiffness: 200, damping: 16 }}
         className="animate-floaty"
       >
-        <Logo className="w-64 max-w-[70vw]" />
+        <Logo className="w-96 max-w-[88vw]" />
       </motion.div>
 
       <motion.p
@@ -63,7 +57,7 @@ export default function LandingPage() {
         transition={{ delay: 0.2 }}
         className="text-center text-parchment/80 font-bold text-lg max-w-xs"
       >
-        La chasse au trésor en temps réel, sur ton téléphone. 🏴‍☠️
+        La chasse au trésor en temps réel, sur ton téléphone.
       </motion.p>
 
       <motion.div
