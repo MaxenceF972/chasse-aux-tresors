@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PublicStep, ValidateKind } from "@/lib/types";
 import type { SubmitOutcome } from "./usePlayState";
+import { extractTagId } from "@/lib/game/codes";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import Button from "@/components/ui/Button";
@@ -123,13 +124,14 @@ function NfcValidation({
       const ndef = new NDEFReader();
       ndef.onreading = (event) => {
         for (const record of event.message.records) {
-          if (record.recordType === "text" && record.data) {
-            const text = new TextDecoder(record.encoding || "utf-8").decode(record.data).trim();
-            if (text) {
+          // Les balises TOYAH contiennent une URL ; on accepte aussi le texte brut.
+          if ((record.recordType === "url" || record.recordType === "text") && record.data) {
+            const raw = new TextDecoder(record.encoding || "utf-8").decode(record.data).trim();
+            if (raw) {
               ctrl.abort();
               setScanning(false);
               haptics.scan();
-              void onRun("nfc", { tag: text });
+              void onRun("nfc", { tag: extractTagId(raw) });
               return;
             }
           }
@@ -189,7 +191,7 @@ function NfcValidation({
         onClose={() => setQrOpen(false)}
         onScan={(value) => {
           setQrOpen(false);
-          void onRun("qr", { tag: value });
+          void onRun("qr", { tag: extractTagId(value) });
         }}
       />
 

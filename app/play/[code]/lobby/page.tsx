@@ -12,7 +12,7 @@ import { sfx } from "@/lib/game/sounds";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Dialog from "@/components/ui/Dialog";
-import { Input, Label } from "@/components/ui/Input";
+import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
 
@@ -27,6 +27,7 @@ export default function LobbyPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [nickname, setNickname] = useState("");
+  const [membersText, setMembersText] = useState("");
   const [teamCode, setTeamCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const startedRef = useRef(false);
@@ -68,6 +69,7 @@ export default function LobbyPage() {
         p_code: code,
         p_team_name: teamName,
         p_nickname: nickname,
+        p_members: membersText.split("\n").map((m) => m.trim()).filter(Boolean),
       });
       setPlayerSession({ code, team_id: res.team_id, team_code: res.team_code, nickname });
       setTeamCode(res.team_code);
@@ -148,11 +150,12 @@ export default function LobbyPage() {
               Toi : <span className="text-ink">{me.nickname}</span>
             </p>
             <div className="flex flex-wrap justify-center gap-1.5 mb-4">
-              {myTeam.players.map((p) => (
+              {Array.from(new Set([...myTeam.players, ...(myTeam.roster ?? [])])).map((p) => (
                 <span
                   key={p}
                   className="px-2.5 py-1 rounded-lg bg-white border-2 border-ink font-bold text-sm"
                 >
+                  {myTeam.players.includes(p) ? "📱 " : ""}
                   {p}
                 </span>
               ))}
@@ -181,6 +184,7 @@ export default function LobbyPage() {
           <div className="space-y-3">
             {(lobby.teams ?? []).map((team) => {
               const full = maxPlayers != null && team.players.length >= maxPlayers;
+              const allNames = Array.from(new Set([...team.players, ...(team.roster ?? [])]));
               return (
                 <button
                   key={team.id}
@@ -202,9 +206,9 @@ export default function LobbyPage() {
                       {maxPlayers != null ? `/${maxPlayers}` : ""} 👤
                     </span>
                   </div>
-                  {team.players.length > 0 && (
+                  {allNames.length > 0 && (
                     <p className="font-bold text-ink/50 text-sm mt-1 truncate">
-                      {team.players.join(", ")}
+                      {allNames.join(", ")}
                     </p>
                   )}
                   {full && <p className="font-bold text-crimson text-sm">Équipe complète</p>}
@@ -241,7 +245,7 @@ export default function LobbyPage() {
             />
           </div>
           <div>
-            <Label>Ton pseudo</Label>
+            <Label>Ton pseudo (capitaine)</Label>
             <Input
               required
               value={nickname}
@@ -249,6 +253,18 @@ export default function LobbyPage() {
               placeholder="Capitaine Max"
               maxLength={20}
             />
+          </div>
+          <div>
+            <Label>Ton équipage (un prénom par ligne)</Label>
+            <TextArea
+              rows={3}
+              value={membersText}
+              onChange={(e) => setMembersText(e.target.value)}
+              placeholder={"Léa\nHugo\nJade"}
+            />
+            <p className="text-xs font-bold text-ink/50 mt-1">
+              Liste tes coéquipiers — pratique quand l&apos;équipe joue sur un seul téléphone.
+            </p>
           </div>
           <Button type="submit" full size="lg" disabled={busy}>
             {busy ? "…" : "🏴‍☠️ HISSER LE DRAPEAU"}

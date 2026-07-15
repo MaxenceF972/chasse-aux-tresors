@@ -7,9 +7,25 @@ export function randomCode(len = 6): string {
   return Array.from(bytes, (b) => ALPHABET[b % ALPHABET.length]).join("");
 }
 
-/** Identifiant écrit sur les puces NFC et encodé dans les QR codes. */
+/** Identifiant unique d'une balise. */
 export function newTagId(): string {
   return `TYH-${randomCode(8)}`;
+}
+
+/**
+ * URL écrite sur la puce NFC et encodée dans le QR : poser le téléphone sur la
+ * balise (ou scanner le QR avec l'appareil photo) ouvre directement la
+ * validation — iPhone comme Android, sans app ni navigateur particulier.
+ */
+export function tagUrl(tagId: string, origin?: string): string {
+  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "");
+  return `${base}/t/${tagId}`;
+}
+
+/** Extrait l'identifiant de balise d'une URL /t/… ou renvoie la valeur brute. */
+export function extractTagId(raw: string): string {
+  const match = raw.trim().match(/\/t\/([^/?#\s]+)/);
+  return match ? match[1] : raw.trim();
 }
 
 export const TEAM_COLORS = [

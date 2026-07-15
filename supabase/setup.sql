@@ -68,11 +68,15 @@ create table if not exists public.teams (
   name            text not null,
   team_code       text not null,
   color           text not null default '#C0392B',
+  roster          text[] not null default '{}',   -- membres listés par le capitaine
   penalty_seconds int not null default 0,
   finished_at     timestamptz,
   created_at      timestamptz not null default now(),
   unique (game_id, team_code)
 );
+
+-- Migration pour les bases déjà créées
+alter table public.teams add column if not exists roster text[] not null default '{}';
 
 create table if not exists public.players (
   id         uuid primary key default gen_random_uuid(),
@@ -560,6 +564,7 @@ begin
   from (
     select jsonb_build_object(
       'id', tm.id, 'name', tm.name, 'color', tm.color, 'created_at', tm.created_at,
+      'roster', to_jsonb(tm.roster),
       'players', coalesce((select jsonb_agg(p.nickname order by p.created_at)
                            from public.players p where p.team_id = tm.id), '[]'::jsonb)
     ) as t
@@ -577,8 +582,11 @@ begin
   );
 end $$;
 
--- Crée une équipe et y inscrit le caller.
-create or replace function public.create_team(p_code text, p_team_name text, p_nickname text)
+-- Crée une équipe et y inscrit le caller (capitaine), avec la liste d'équipage.
+drop function if exists public.create_team(text, text, text);
+create or replace function public.create_team(
+  p_code text, p_team_name text, p_nickname text, p_members text[] default '{}'
+)
 returns jsonb
 language plpgsql volatile security definer
 set search_path = public
@@ -604,9 +612,11 @@ begin
 
   for i in 1..25 loop
     begin
-      insert into public.teams (game_id, name, team_code, color)
+      insert into public.teams (game_id, name, team_code, color, roster)
       values (v_game.id, trim(p_team_name), public.gen_code(6),
-              v_colors[(v_count % array_length(v_colors, 1)) + 1])
+              v_colors[(v_count % array_length(v_colors, 1)) + 1],
+              coalesce((select array_agg(trim(m)) from unnest(coalesce(p_members, '{}')) m
+                        where length(trim(m)) > 0), '{}'))
       returning * into v_team;
       exit;
     exception when unique_violation then
@@ -848,7 +858,8 @@ begin
       where public.normalize_answer(a) <> '' and public.normalize_answer(a) = public.normalize_answer(v_submitted)
     );
   elsif v_step.type = 'nfc' then
-    v_submitted := trim(coalesce(p_payload->>'tag', ''));
+    -- Accepte l'identifiant brut, l'URL complète de la balise, ou le code manuel
+    v_submitted := regexp_replace(trim(coalesce(p_payload->>'tag', '')), '^https?://[^/]+/t/', '');
     v_ok := (v_secret.nfc_tag_id is not null and v_submitted = v_secret.nfc_tag_id)
          or (v_secret.manual_code is not null and upper(v_submitted) = upper(v_secret.manual_code));
   elsif v_step.type = 'minigame' then
@@ -901,6 +912,44 @@ begin
                              'result', v_result),
           p_idem_key);
   return v_result;
+end $$;
+
+-- Scan d'une balise via son URL (puce NFC ou QR ouvert avec l'appareil photo) :
+-- résout l'étape en cours de l'équipe du caller puis délègue à validate_step.
+-- Renvoie toujours game_code pour que la page /t/[tag] sache où rediriger.
+create or replace function public.validate_tag(p_idem_key uuid, p_tag text)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_player public.players%rowtype;
+  v_team   public.teams%rowtype;
+  v_game   public.games%rowtype;
+  v_route  public.team_routes%rowtype;
+  v_step   public.steps%rowtype;
+begin
+  select * into v_player from public.players where auth_uid = auth.uid();
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT');
+  end if;
+  select * into v_team from public.teams where id = v_player.team_id;
+  select * into v_game from public.games where id = v_team.game_id;
+
+  select * into v_route from public.team_routes
+  where team_id = v_team.id and status = 'current' limit 1;
+  if not found then
+    return jsonb_build_object('ok', false, 'error', 'PARCOURS_TERMINE', 'game_code', v_game.code);
+  end if;
+
+  select * into v_step from public.steps where id = v_route.step_id;
+  if v_step.type <> 'nfc' then
+    return jsonb_build_object('ok', false, 'error', 'ETAPE_PAS_BALISE', 'game_code', v_game.code);
+  end if;
+
+  return public.validate_step(p_idem_key, v_step.id, 'nfc',
+                              jsonb_build_object('tag', p_tag))
+         || jsonb_build_object('game_code', v_game.code);
 end $$;
 
 -- Débloque un indice : gratuit si le délai est écoulé, sinon pénalité de temps.
@@ -988,9 +1037,9 @@ begin
   foreach f in array array[
     'org_create_game(text,jsonb)', 'org_duplicate_game(uuid)', 'start_game(uuid)',
     'org_set_status(uuid,text)', 'org_force_validate(uuid,uuid)', 'org_send_hint(uuid,text)',
-    'get_lobby(text)', 'create_team(text,text,text)', 'join_team(text,uuid,text)',
+    'get_lobby(text)', 'create_team(text,text,text,text[])', 'join_team(text,uuid,text)',
     'get_play_state()', 'get_next_media()',
-    'validate_step(uuid,uuid,text,jsonb)', 'unlock_hint(uuid,int)'
+    'validate_step(uuid,uuid,text,jsonb)', 'validate_tag(uuid,text)', 'unlock_hint(uuid,int)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);
     execute format('grant execute on function public.%s to authenticated', f);

@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import QRCode from "qrcode";
 import { sb } from "@/lib/supabase/client";
+import { tagUrl } from "@/lib/game/codes";
 import type { Game, Step, StepSecrets } from "@/lib/types";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import Button from "@/components/ui/Button";
@@ -25,7 +26,12 @@ export default function BalisesPage() {
   const [game, setGame] = useState<Game | null>(null);
   const [balises, setBalises] = useState<Balise[] | null>(null);
   const [nfcStatus, setNfcStatus] = useState<Record<string, string>>({});
+  const [isLocalhost, setIsLocalhost] = useState(false);
   const nfcSupported = typeof window !== "undefined" && "NDEFReader" in window;
+
+  useEffect(() => {
+    setIsLocalhost(window.location.hostname === "localhost");
+  }, []);
 
   const load = useCallback(async () => {
     const [gameRes, stepsRes] = await Promise.all([
@@ -51,7 +57,9 @@ export default function BalisesPage() {
         step,
         tagId: sec.nfc_tag_id,
         manualCode: sec.manual_code ?? "",
-        qrDataUrl: await QRCode.toDataURL(sec.nfc_tag_id, {
+        // Le QR encode l'URL complète : scannable avec l'appareil photo natif,
+        // il ouvre directement la page de validation (comme la puce NFC).
+        qrDataUrl: await QRCode.toDataURL(tagUrl(sec.nfc_tag_id), {
           width: 400,
           margin: 1,
           color: { dark: "#111111", light: "#ffffff" },
@@ -69,7 +77,9 @@ export default function BalisesPage() {
     setNfcStatus((s) => ({ ...s, [balise.step.id]: "⏳ Approche la puce NFC du téléphone…" }));
     try {
       const ndef = new NDEFReader();
-      await ndef.write({ records: [{ recordType: "text", data: balise.tagId, lang: "fr" }] });
+      // Enregistrement URL : poser n'importe quel téléphone (iPhone inclus)
+      // sur la puce ouvre directement la page de validation.
+      await ndef.write({ records: [{ recordType: "url", data: tagUrl(balise.tagId) }] });
       setNfcStatus((s) => ({ ...s, [balise.step.id]: "✅ Puce écrite avec succès !" }));
     } catch (err) {
       setNfcStatus((s) => ({
@@ -94,9 +104,17 @@ export default function BalisesPage() {
           </Button>
         </div>
         <p className="font-bold text-ink/60 mt-2">
-          Pour chaque balise : écris la puce NFC (Chrome Android), ou imprime cette page et colle
-          le QR + code de secours sur place.
+          Chaque puce NFC et chaque QR contient une <strong>URL</strong> : les joueurs posent
+          simplement leur téléphone dessus (ou scannent le QR avec l&apos;appareil photo) et la
+          validation s&apos;ouvre toute seule — iPhone comme Android. Écris les puces ci-dessous
+          (Chrome Android requis pour l&apos;écriture uniquement) ou imprime la page.
         </p>
+        {isLocalhost && (
+          <p className="font-bold text-crimson mt-2 text-sm">
+            ⚠️ Tu es sur localhost : les URLs encodées pointeraient vers ton PC. Écris les puces
+            et imprime les QR depuis le site déployé (toyah-games.vercel.app).
+          </p>
+        )}
         {!nfcSupported && (
           <p className="font-bold text-crimson mt-2 text-sm">
             ⚠️ Web NFC indisponible sur ce navigateur — utilise Chrome sur Android pour écrire les
@@ -130,7 +148,7 @@ export default function BalisesPage() {
               />
               <div className="min-w-0">
                 <h2 className="font-display text-xl leading-tight">{balise.step.title}</h2>
-                <p className="font-mono text-sm text-ink/60 break-all mt-1">{balise.tagId}</p>
+                <p className="font-mono text-sm text-ink/60 break-all mt-1">{tagUrl(balise.tagId)}</p>
                 <p className="font-bold mt-2">
                   Code de secours :{" "}
                   <span className="font-mono text-2xl tracking-[0.2em] bg-parchment px-2 py-0.5 rounded-lg border-2 border-ink">

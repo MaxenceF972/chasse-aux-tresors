@@ -255,7 +255,12 @@ export default function LiveDashboardPage() {
                   />
                   {team.name}
                   <span className="text-ink/50 text-sm">
-                    {(playersByTeam.get(team.id) ?? []).map((p) => p.nickname).join(", ") || "vide"}
+                    {Array.from(
+                      new Set([
+                        ...(playersByTeam.get(team.id) ?? []).map((p) => p.nickname),
+                        ...(team.roster ?? []),
+                      ])
+                    ).join(", ") || "vide"}
                   </span>
                 </li>
               ))}

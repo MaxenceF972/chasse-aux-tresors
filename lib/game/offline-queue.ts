@@ -12,6 +12,8 @@ export interface QueuedValidation {
   kind: ValidateKind;
   payload: Record<string, unknown>;
   queued_at: number;
+  /** validate_tag = scan d'URL de balise (l'étape est résolue côté serveur) */
+  fn?: "validate_step" | "validate_tag";
 }
 
 const DB_NAME = "toyah-games";
@@ -63,12 +65,19 @@ export async function flushQueue(): Promise<number> {
   let processed = 0;
   for (const v of queued) {
     try {
-      await rpc<ValidateResult>("validate_step", {
-        p_idem_key: v.idem_key,
-        p_step_id: v.step_id,
-        p_kind: v.kind,
-        p_payload: v.payload,
-      });
+      if (v.fn === "validate_tag") {
+        await rpc<ValidateResult>("validate_tag", {
+          p_idem_key: v.idem_key,
+          p_tag: String(v.payload.tag ?? ""),
+        });
+      } else {
+        await rpc<ValidateResult>("validate_step", {
+          p_idem_key: v.idem_key,
+          p_step_id: v.step_id,
+          p_kind: v.kind,
+          p_payload: v.payload,
+        });
+      }
       await removeQueued(v.idem_key);
       processed++;
     } catch (err) {

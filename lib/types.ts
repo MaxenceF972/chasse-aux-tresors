@@ -72,6 +72,8 @@ export interface Team {
   name: string;
   team_code: string;
   color: string;
+  /** Membres listés par le capitaine à la création */
+  roster: string[];
   penalty_seconds: number;
   finished_at: string | null;
   created_at: string;
@@ -112,6 +114,9 @@ export interface LobbyTeam {
   name: string;
   color: string;
   created_at: string;
+  /** Membres listés par le capitaine */
+  roster: string[];
+  /** Pseudos des joueurs connectés (devices) */
   players: string[];
 }
 
