@@ -9,6 +9,12 @@ import { memoryDef } from "./Memory";
 import { morseDef } from "./Morse";
 import { mastermindDef } from "./Mastermind";
 import { mazeDef } from "./Maze";
+import { lanternsDef } from "./Lanterns";
+import { hanoiDef } from "./Hanoi";
+import { flashcodeDef } from "./FlashCode";
+import { cascadeDef } from "./Cascade";
+import { chimpDef } from "./ChimpMemory";
+import { balanceDef } from "./Balance";
 
 /**
  * Banque de mini-jeux. Pour en ajouter un : créer le composant + son éditeur
@@ -24,6 +30,12 @@ export const MINIGAMES: Record<MinigameKind, MiniGameDef> = {
   morse: morseDef,
   mastermind: mastermindDef,
   maze: mazeDef,
+  lanterns: lanternsDef,
+  hanoi: hanoiDef,
+  flashcode: flashcodeDef,
+  cascade: cascadeDef,
+  chimp: chimpDef,
+  balance: balanceDef,
 };
 
 export const MINIGAME_LIST: MiniGameDef[] = Object.values(MINIGAMES);

@@ -14,7 +14,13 @@ export type MinigameKind =
   | "memory"
   | "morse"
   | "mastermind"
-  | "maze";
+  | "maze"
+  | "lanterns"
+  | "hanoi"
+  | "flashcode"
+  | "cascade"
+  | "chimp"
+  | "balance";
 
 export interface GameSettings {
   max_teams?: number | null;
