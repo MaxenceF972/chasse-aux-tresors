@@ -31,7 +31,11 @@ export default function OrgLoginPage() {
         if (error) throw error;
         router.replace("/org/dashboard");
       } else {
-        const { data: res, error } = await sb().auth.signUp({ email, password });
+        const { data: res, error } = await sb().auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: `${window.location.origin}/org/login` },
+        });
         if (error) throw error;
         if (res.session) {
           router.replace("/org/dashboard");
