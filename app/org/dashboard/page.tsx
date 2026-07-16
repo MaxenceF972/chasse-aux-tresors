@@ -52,7 +52,15 @@ export default function OrgDashboardPage() {
       const game = await rpc<Game>("org_create_game", { p_name: newName });
       router.push(`/org/games/${game.id}/edit`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Création impossible");
+      const raw = err instanceof Error ? err.message : "Création impossible";
+      // Session d'un compte supprimé côté Supabase → on purge et on repart au login
+      if (/created_by_fkey|foreign key/i.test(raw)) {
+        await sb().auth.signOut();
+        alert("Ta session n'est plus valide (compte supprimé ou recréé) — reconnecte-toi.");
+        router.replace("/org/login");
+        return;
+      }
+      setError(raw);
       setBusy(false);
     }
   }
