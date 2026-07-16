@@ -163,14 +163,14 @@ function CryptoGame({ config, seed, onComplete }: MiniGameProps) {
                 <button
                   key={i}
                   onClick={() => setSelected(isSelected ? null : ch)}
-                  className={`flex flex-col items-center w-[1.15rem] rounded-sm ${
+                  className={`flex flex-col items-center w-6 py-0.5 rounded-md ${
                     isSelected ? "bg-gold/60 ring-2 ring-gold" : ""
                   }`}
                 >
-                  <span className="font-mono text-[10px] leading-none text-crimson">{ch}</span>
+                  <span className="font-mono text-[11px] leading-none text-crimson">{ch}</span>
                   <span
-                    className={`font-mono font-bold text-base leading-tight ${
-                      won ? "text-leaf" : guess ? "text-ink" : "text-ink/25"
+                    className={`font-mono font-bold text-lg leading-tight ${
+                      won ? "text-leaf" : guess ? "text-ink" : "text-ink/30"
                     }`}
                   >
                     {won ? plainOf[ch] : guess ?? "·"}
@@ -217,7 +217,7 @@ function CryptoGame({ config, seed, onComplete }: MiniGameProps) {
                 <button
                   key={plainLetter}
                   onClick={() => assign(plainLetter)}
-                  className={`h-10 rounded-lg border-2 border-ink font-mono font-bold ${
+                  className={`h-11 rounded-lg border-2 border-ink font-mono font-bold text-lg ${
                     usedPlains.has(plainLetter) ? "bg-ink/15 text-ink/35" : "bg-white text-ink"
                   }`}
                 >
@@ -226,7 +226,7 @@ function CryptoGame({ config, seed, onComplete }: MiniGameProps) {
               ))}
               <button
                 onClick={clearSelected}
-                className="h-10 rounded-lg border-2 border-ink bg-crimson text-parchment font-bold col-span-2"
+                className="h-11 rounded-lg border-2 border-ink bg-crimson text-parchment font-bold col-span-2"
               >
                 ⌫ effacer
               </button>

@@ -328,7 +328,8 @@ export default function StepEditor({
                     <input
                       type="number"
                       min={0}
-                      className="w-16 h-9 rounded-lg border-2 border-ink px-2 bg-white"
+                      inputMode="numeric"
+                      className="w-20 h-11 rounded-lg border-2 border-ink px-2 bg-white text-base"
                       value={hint.penalty_sec != null ? Math.round(hint.penalty_sec / 60) : ""}
                       placeholder="2"
                       onChange={(e) =>
@@ -344,7 +345,8 @@ export default function StepEditor({
                     <input
                       type="number"
                       min={0}
-                      className="w-16 h-9 rounded-lg border-2 border-ink px-2 bg-white"
+                      inputMode="numeric"
+                      className="w-20 h-11 rounded-lg border-2 border-ink px-2 bg-white text-base"
                       value={hint.unlock_after_sec != null ? Math.round(hint.unlock_after_sec / 60) : ""}
                       placeholder="—"
                       onChange={(e) =>

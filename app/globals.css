@@ -66,6 +66,43 @@ body {
   color: var(--color-parchment);
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
+  overflow-x: clip;
+  /* Encoches latérales en paysage (PWA plein écran) */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* Supprime le délai/zoom du double-tap pendant les jeux à tapotement rapide */
+button,
+a,
+input,
+textarea {
+  touch-action: manipulation;
+}
+
+/* Navigation clavier / switch : focus toujours visible */
+:focus-visible {
+  outline: 3px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+/* Utilitaires zones sûres (encoche, barre home) */
+.pt-safe {
+  padding-top: max(0.5rem, env(safe-area-inset-top));
+}
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Texture "vieille carte" : bruit + vignettage brûlé */

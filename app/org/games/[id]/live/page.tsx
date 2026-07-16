@@ -237,14 +237,14 @@ export default function LiveDashboardPage() {
   return (
     <main className="min-h-dvh px-5 py-6 max-w-3xl mx-auto pb-24">
       <header className="mb-6">
-        <nav className="flex gap-4">
-          <Link href="/org/dashboard" className="font-bold text-parchment/60 underline">
+        <nav className="flex gap-4 flex-wrap">
+          <Link href="/org/dashboard" className="font-bold text-parchment/70 underline py-2 inline-block">
             ← Mes parties
           </Link>
-          <Link href={`/org/games/${gameId}/edit`} className="font-bold text-parchment/60 underline">
+          <Link href={`/org/games/${gameId}/edit`} className="font-bold text-parchment/70 underline py-2 inline-block">
             ✏️ Éditeur
           </Link>
-          <Link href={`/org/games/${gameId}/balises`} className="font-bold text-parchment/60 underline">
+          <Link href={`/org/games/${gameId}/balises`} className="font-bold text-parchment/70 underline py-2 inline-block">
             🏷️ Balises
           </Link>
         </nav>
@@ -329,14 +329,14 @@ export default function LiveDashboardPage() {
                     ).join(", ") || "vide"}
                   </span>
                   <button
-                    className="w-8 h-8 rounded-lg border-2 border-ink bg-white shrink-0"
+                    className="w-10 h-10 rounded-lg border-2 border-ink bg-white shrink-0 active:bg-parchment-dark"
                     onClick={() => renameTeam(team)}
                     aria-label="Renommer l'équipe"
                   >
                     ✏️
                   </button>
                   <button
-                    className="w-8 h-8 rounded-lg border-2 border-ink bg-crimson text-parchment shrink-0"
+                    className="w-10 h-10 rounded-lg border-2 border-ink bg-crimson text-parchment shrink-0 active:bg-crimson-dark"
                     onClick={() => deleteTeam(team)}
                     aria-label="Supprimer l'équipe"
                   >

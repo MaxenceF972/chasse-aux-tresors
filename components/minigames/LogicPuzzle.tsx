@@ -285,7 +285,7 @@ function LogicGame({ config, seed, onComplete }: MiniGameProps) {
                       key={v}
                       onClick={() => tapMark(ci, s, v)}
                       aria-label={`${suspect.name} / ${cat.shorts[v]}`}
-                      className={`h-9 rounded-md border-2 border-ink font-display text-base ${
+                      className={`h-10 rounded-md border-2 border-ink font-display text-base ${
                         mark === 2
                           ? "bg-leaf text-parchment"
                           : mark === 1

@@ -254,7 +254,7 @@ export default function LobbyPage() {
             ➕ CRÉER UNE ÉQUIPE
           </Button>
           <button
-            className="w-full text-center font-bold text-parchment/60 underline"
+            className="w-full text-center font-bold text-parchment/70 underline py-2.5"
             onClick={() => {
               setNickname("");
               setRejoinCode("");

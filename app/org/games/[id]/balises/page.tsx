@@ -139,15 +139,15 @@ export default function BalisesPage() {
           {balises.map((balise) => (
             <div
               key={balise.step.id}
-              className="rounded-2xl border-[3px] border-ink p-4 flex gap-4 items-center break-inside-avoid"
+              className="rounded-2xl border-[3px] border-ink p-4 flex flex-col sm:flex-row gap-4 items-center break-inside-avoid"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={balise.qrDataUrl}
                 alt={`QR ${balise.tagId}`}
-                className="w-36 h-36 shrink-0 border-2 border-ink rounded-lg"
+                className="w-44 h-44 sm:w-36 sm:h-36 shrink-0 border-2 border-ink rounded-lg"
               />
-              <div className="min-w-0">
+              <div className="min-w-0 w-full">
                 <h2 className="font-display text-xl leading-tight">{balise.step.title}</h2>
                 <p className="font-mono text-sm text-ink/60 break-all mt-1">{tagUrl(balise.tagId)}</p>
                 <div className="mt-1.5 print:hidden">

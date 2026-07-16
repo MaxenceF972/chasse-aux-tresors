@@ -85,7 +85,7 @@ export default function PreviewPage() {
 
   return (
     <main className="min-h-dvh parchment-texture text-ink pb-16">
-      <header className="sticky top-0 z-30 bg-ink text-parchment px-4 py-2.5">
+      <header className="sticky top-0 z-30 bg-ink text-parchment px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
         <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
           <Link href={`/org/games/${gameId}/edit`} className="font-bold underline text-parchment/70">
             ← Éditeur

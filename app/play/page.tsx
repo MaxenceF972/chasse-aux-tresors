@@ -57,6 +57,8 @@ export default function JoinPage() {
               maxLength={6}
               className="font-mono tracking-[0.4em] text-center text-3xl h-16"
               autoComplete="off"
+              autoCapitalize="characters"
+              enterKeyHint="go"
             />
           </div>
           {error && <p className="text-crimson font-bold text-sm">{error}</p>}
@@ -66,7 +68,7 @@ export default function JoinPage() {
         </form>
       </Card>
 
-      <Link href="/" className="font-bold text-parchment/50 underline">
+      <Link href="/" className="font-bold text-parchment/70 underline py-2 inline-block">
         ← Retour à l&apos;accueil
       </Link>
     </main>

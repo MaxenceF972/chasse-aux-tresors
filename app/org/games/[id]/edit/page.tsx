@@ -208,11 +208,11 @@ export default function GameEditPage() {
         {steps.map((step, i) => (
           <Card key={step.id} className="p-3">
             <div className="flex items-center gap-3">
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1.5">
                 <button
                   disabled={!editable || i === 0}
                   onClick={() => move(i, -1)}
-                  className="w-8 h-8 rounded-lg border-2 border-ink bg-white font-bold disabled:opacity-30"
+                  className="w-10 h-10 rounded-lg border-2 border-ink bg-white font-bold text-lg disabled:opacity-30 active:bg-parchment-dark"
                   aria-label="Monter"
                 >
                   ↑
@@ -220,7 +220,7 @@ export default function GameEditPage() {
                 <button
                   disabled={!editable || i === steps.length - 1}
                   onClick={() => move(i, 1)}
-                  className="w-8 h-8 rounded-lg border-2 border-ink bg-white font-bold disabled:opacity-30"
+                  className="w-10 h-10 rounded-lg border-2 border-ink bg-white font-bold text-lg disabled:opacity-30 active:bg-parchment-dark"
                   aria-label="Descendre"
                 >
                   ↓

@@ -62,7 +62,7 @@ export default function HintPanel({ hints, onUnlock }: HintPanelProps) {
                 </p>
                 <div className="flex gap-2">
                   <button
-                    className="flex-1 h-10 rounded-xl border-[3px] border-ink bg-gold font-display"
+                    className="flex-1 h-11 rounded-xl border-[3px] border-ink bg-gold font-display"
                     disabled={busy !== null}
                     onClick={async () => {
                       setBusy(hint.index);
@@ -75,7 +75,7 @@ export default function HintPanel({ hints, onUnlock }: HintPanelProps) {
                     {busy === hint.index ? "…" : "OUI !"}
                   </button>
                   <button
-                    className="flex-1 h-10 rounded-xl border-[3px] border-ink bg-white font-display"
+                    className="flex-1 h-11 rounded-xl border-[3px] border-ink bg-white font-display"
                     onClick={() => setConfirming(null)}
                   >
                     Non

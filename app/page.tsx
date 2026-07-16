@@ -41,7 +41,8 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <main className="min-h-dvh flex flex-col items-center justify-center gap-8 px-6 py-12 relative overflow-hidden">
+    <main className="min-h-dvh flex flex-col items-center px-6 py-8 pt-safe">
+      <div className="my-auto flex flex-col items-center gap-8 w-full">
       <motion.div
         initial={{ scale: 0.6, opacity: 0, rotate: -6 }}
         animate={{ scale: 1, opacity: 1, rotate: 0 }}
@@ -85,7 +86,8 @@ export default function LandingPage() {
         </Link>
       </motion.div>
 
-      <p className="text-parchment/40 text-sm font-bold absolute bottom-5">
+      </div>
+      <p className="text-parchment/60 text-sm font-bold mt-8 pb-safe">
         TOYAH GAMES © {new Date().getFullYear()}
       </p>
     </main>

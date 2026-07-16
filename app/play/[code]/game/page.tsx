@@ -100,7 +100,7 @@ export default function GameScreen() {
   return (
     <main className="min-h-dvh parchment-texture text-ink pb-10">
       {/* Barre du haut */}
-      <header className="sticky top-0 z-30 bg-ink text-parchment border-b-[3px] border-ink shadow-md">
+      <header className="sticky top-0 z-30 bg-ink text-parchment border-b-[3px] border-ink shadow-md pt-[env(safe-area-inset-top)]">
         <div className="max-w-lg mx-auto px-4 py-2.5 flex items-center gap-3">
           <span
             className="w-4 h-4 rounded-full border-2 border-parchment shrink-0"
@@ -120,7 +120,7 @@ export default function GameScreen() {
           <button
             onClick={() => setMenuOpen(true)}
             aria-label="Menu"
-            className="w-9 h-9 rounded-lg border-2 border-parchment/40 text-parchment font-bold active:bg-parchment/10"
+            className="w-11 h-11 -mr-1 shrink-0 rounded-lg border-2 border-parchment/40 text-parchment font-bold text-lg active:bg-parchment/10"
           >
             ☰
           </button>
@@ -313,7 +313,7 @@ export default function GameScreen() {
             exit={{ y: 120, opacity: 0 }}
             transition={{ type: "spring", stiffness: 300, damping: 24 }}
             onClick={clearOrgMessage}
-            className="fixed bottom-4 inset-x-4 z-50 max-w-lg mx-auto rounded-2xl border-[3px] border-ink bg-gold p-4 text-left shadow-[5px_5px_0_0_#111111]"
+            className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-4 z-50 max-w-lg mx-auto rounded-2xl border-[3px] border-ink bg-gold p-4 text-left shadow-[5px_5px_0_0_#111111]"
           >
             <p className="font-display text-sm mb-0.5">📨 MESSAGE DE L&apos;ORGANISATEUR</p>
             <p className="font-bold text-ink/85">{orgMessage.message}</p>

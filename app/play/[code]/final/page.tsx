@@ -165,7 +165,7 @@ export default function FinalPage() {
 
       {/* Podium */}
       {podium.length > 0 && (
-        <div className="flex items-end justify-center gap-3 mb-8">
+        <div className="flex items-end justify-center gap-2 sm:gap-3 mb-8">
           {podiumOrder.map((rankIndex, col) => {
             const entry = podium[rankIndex];
             if (!entry) return <div key={col} className="w-24" />;
@@ -175,7 +175,7 @@ export default function FinalPage() {
                 initial={{ y: 120, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
                 transition={{ delay: 0.4 + col * 0.2, type: "spring", stiffness: 160, damping: 16 }}
-                className="flex flex-col items-center w-28"
+                className="flex flex-col items-center w-24 sm:w-28 min-w-0"
               >
                 <span className="text-4xl mb-1">{medals[col]}</span>
                 <span

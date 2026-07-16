@@ -109,6 +109,7 @@ function TextAnswer({
         disabled={disabled}
         autoComplete="off"
         autoCorrect="off"
+        enterKeyHint="go"
       />
       <Button type="submit" full size="xl" disabled={disabled || !answer.trim()}>
         ⚡ VALIDER
@@ -226,6 +227,9 @@ function NfcValidation({
             placeholder="EX : K7M2PX"
             className="font-mono tracking-[0.3em] text-center text-2xl"
             maxLength={12}
+            autoCapitalize="characters"
+            autoComplete="off"
+            enterKeyHint="go"
           />
           <Button type="submit" full size="lg" disabled={!manualCode.trim()}>
             ⚡ VALIDER

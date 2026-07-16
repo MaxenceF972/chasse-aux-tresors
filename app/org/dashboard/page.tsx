@@ -151,7 +151,7 @@ export default function OrgDashboardPage() {
         </button>
       </header>
 
-      <div className="flex items-center justify-between mb-5 gap-2">
+      <div className="flex items-center justify-between mb-5 gap-2 flex-wrap">
         <h1 className="font-display text-3xl text-parchment">Mes parties</h1>
         <div className="flex gap-2">
           <Button variant="parchment" onClick={() => setTemplatesOpen(true)}>📦 Modèles</Button>

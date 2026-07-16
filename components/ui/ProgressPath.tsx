@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 
 interface ProgressPathProps {
@@ -13,6 +14,15 @@ interface ProgressPathProps {
  * sur la carte, qui mène au "X" rouge du trésor.
  */
 export default function ProgressPath({ total, done, color = "#F5A623" }: ProgressPathProps) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Sur les longs parcours (défilement horizontal), suit l'étape courante
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || el.scrollWidth <= el.clientWidth) return;
+    const ratio = total > 1 ? Math.min(1, done / (total - 1)) : 0;
+    el.scrollTo({ left: ratio * (el.scrollWidth - el.clientWidth), behavior: "smooth" });
+  }, [done, total]);
   const n = Math.max(2, total);
   const W = 100 * (n - 1);
   const H = 88;
@@ -26,7 +36,7 @@ export default function ProgressPath({ total, done, color = "#F5A623" }: Progres
   const segments = pts.slice(0, -1).map((p, i) => ({ a: p, b: pts[i + 1] }));
 
   return (
-    <div className="w-full overflow-x-auto no-scrollbar" dir="ltr">
+    <div ref={scrollRef} className="w-full overflow-x-auto no-scrollbar" dir="ltr">
       <svg
         viewBox={`0 0 ${W} ${H}`}
         className="h-16 min-w-full"
