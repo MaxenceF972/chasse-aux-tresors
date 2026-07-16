@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { PublicStep, ValidateKind } from "@/lib/types";
+import type { PlayState, PublicStep, ValidateKind } from "@/lib/types";
 import type { SubmitOutcome } from "./usePlayState";
 import { extractTagId } from "@/lib/game/codes";
+import { uploadSubmissionPhoto } from "@/lib/game/media";
+import { rpc } from "@/lib/supabase/client";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import Button from "@/components/ui/Button";
@@ -15,12 +17,23 @@ import MinigameModal from "./MinigameModal";
 interface ValidationZoneProps {
   step: PublicStep;
   teamId: string;
+  gameId: string;
+  submission: NonNullable<PlayState["current"]>["submission"];
   disabled: boolean;
   onSubmit: (kind: ValidateKind, payload: Record<string, unknown>) => Promise<SubmitOutcome>;
+  onRefetch: () => Promise<void>;
 }
 
-/** Zone de validation adaptée au type d'étape : NFC/QR/code, réponse texte, mini-jeu. */
-export default function ValidationZone({ step, teamId, disabled, onSubmit }: ValidationZoneProps) {
+/** Zone de validation adaptée au type d'étape : NFC/QR/code, texte, mini-jeu, photo. */
+export default function ValidationZone({
+  step,
+  teamId,
+  gameId,
+  submission,
+  disabled,
+  onSubmit,
+  onRefetch,
+}: ValidationZoneProps) {
   const [wrong, setWrong] = useState(false);
   const [busy, setBusy] = useState(false);
   const [info, setInfo] = useState<string | null>(null);
@@ -53,6 +66,15 @@ export default function ValidationZone({ step, teamId, disabled, onSubmit }: Val
       {step.type === "nfc" && <NfcValidation disabled={disabled || busy} onRun={run} />}
       {step.type === "minigame" && (
         <MinigameValidation step={step} teamId={teamId} disabled={disabled || busy} onRun={run} />
+      )}
+      {step.type === "photo" && (
+        <PhotoValidation
+          step={step}
+          gameId={gameId}
+          submission={submission}
+          disabled={disabled || busy}
+          onRefetch={onRefetch}
+        />
       )}
       {info && <p className="mt-3 font-bold text-sm text-ink/70 text-center">{info}</p>}
     </div>
@@ -210,6 +232,112 @@ function NfcValidation({
           </Button>
         </form>
       </Dialog>
+    </div>
+  );
+}
+
+// --- Épreuve photo -------------------------------------------------------------
+
+function PhotoValidation({
+  step,
+  gameId,
+  submission,
+  disabled,
+  onRefetch,
+}: {
+  step: PublicStep;
+  gameId: string;
+  submission: NonNullable<PlayState["current"]>["submission"];
+  disabled: boolean;
+  onRefetch: () => Promise<void>;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleFile(files: FileList | null) {
+    const file = files?.[0];
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const url = await uploadSubmissionPhoto(gameId, file);
+      const res = await rpc<{ ok: boolean; error?: string }>("submit_photo", {
+        p_step_id: step.id,
+        p_url: url,
+      });
+      if (!res.ok) throw new Error(res.error ?? "Envoi refusé");
+      sfx.pop();
+      haptics.scan();
+      await onRefetch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Envoi impossible");
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = "";
+    }
+  }
+
+  const pending = submission?.status === "pending";
+  const rejected = submission?.status === "rejected";
+
+  return (
+    <div className="space-y-3">
+      {pending ? (
+        <div className="rounded-xl border-[3px] border-leaf bg-leaf/10 p-3 text-center">
+          {submission?.url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={submission.url}
+              alt="Photo envoyée"
+              className="w-full max-h-56 object-cover rounded-lg border-2 border-ink mb-2"
+            />
+          )}
+          <p className="font-display text-lg text-leaf animate-pulse">
+            ⏳ PHOTO ENVOYÉE !
+          </p>
+          <p className="font-bold text-ink/60 text-sm">
+            L&apos;organisateur la vérifie… vous pouvez souffler un instant.
+          </p>
+        </div>
+      ) : (
+        <>
+          {rejected && (
+            <div className="rounded-xl border-[3px] border-crimson bg-crimson/10 p-3 text-center">
+              <p className="font-display text-crimson">❌ PHOTO REFUSÉE !</p>
+              <p className="font-bold text-ink/60 text-sm">
+                L&apos;organisateur veut mieux que ça — reprenez-en une !
+              </p>
+            </div>
+          )}
+          <Button
+            full
+            size="xl"
+            disabled={disabled || busy}
+            onClick={() => inputRef.current?.click()}
+          >
+            {busy ? "⏳ ENVOI…" : "📸 PRENDRE LA PHOTO"}
+          </Button>
+        </>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => handleFile(e.target.files)}
+      />
+      {pending && (
+        <button
+          className="w-full text-center font-bold text-ink/60 underline"
+          disabled={busy}
+          onClick={() => inputRef.current?.click()}
+        >
+          Remplacer par une autre photo
+        </button>
+      )}
+      {error && <p className="text-crimson font-bold text-sm text-center">{error}</p>}
     </div>
   );
 }

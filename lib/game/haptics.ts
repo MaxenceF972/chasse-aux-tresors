@@ -1,6 +1,8 @@
+import { isMuted } from "./prefs";
+
 /** Vibrations (Vibration API) — silencieusement ignorées si non supportées. */
 function vibrate(pattern: number | number[]) {
-  if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+  if (typeof navigator !== "undefined" && "vibrate" in navigator && !isMuted()) {
     try {
       navigator.vibrate(pattern);
     } catch {

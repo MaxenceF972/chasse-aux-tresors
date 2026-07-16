@@ -32,23 +32,40 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Session invalide — reconnecte-toi" }, { status: 401 });
     }
 
-    const body = (await req.json()) as { game_id?: string; ext?: string };
+    const body = (await req.json()) as { game_id?: string; ext?: string; purpose?: string };
     const gameId = body.game_id ?? "";
     const ext = (body.ext ?? "").toLowerCase();
+    const purpose = body.purpose === "submission" ? "submission" : "media";
     if (!gameId || !ALLOWED_EXT.has(ext)) {
       return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
     }
 
-    const { data: game } = await admin
-      .from("games")
-      .select("id, created_by")
-      .eq("id", gameId)
-      .single();
-    if (!game || game.created_by !== userData.user.id) {
-      return NextResponse.json(
-        { error: "Seul l'organisateur de la partie peut envoyer des médias" },
-        { status: 403 }
-      );
+    if (purpose === "submission") {
+      // Épreuve photo : le joueur doit appartenir à la partie (images uniquement)
+      if (!["webp", "jpg", "jpeg", "png"].includes(ext)) {
+        return NextResponse.json({ error: "Image uniquement" }, { status: 400 });
+      }
+      const { data: player } = await admin
+        .from("players")
+        .select("id")
+        .eq("auth_uid", userData.user.id)
+        .eq("game_id", gameId)
+        .maybeSingle();
+      if (!player) {
+        return NextResponse.json({ error: "Tu ne participes pas à cette partie" }, { status: 403 });
+      }
+    } else {
+      const { data: game } = await admin
+        .from("games")
+        .select("id, created_by")
+        .eq("id", gameId)
+        .single();
+      if (!game || game.created_by !== userData.user.id) {
+        return NextResponse.json(
+          { error: "Seul l'organisateur de la partie peut envoyer des médias" },
+          { status: 403 }
+        );
+      }
     }
 
     // Auto-réparation : crée le bucket s'il n'existe pas encore
@@ -58,7 +75,10 @@ export async function POST(req: NextRequest) {
       allowedMimeTypes: ["image/*", "video/*"],
     });
 
-    const path = `${gameId}/${crypto.randomUUID()}.${ext}`;
+    const path =
+      purpose === "submission"
+        ? `${gameId}/sub-${crypto.randomUUID()}.${ext}`
+        : `${gameId}/${crypto.randomUUID()}.${ext}`;
     const { data, error } = await admin.storage.from("media").createSignedUploadUrl(path);
     if (error || !data) {
       return NextResponse.json(

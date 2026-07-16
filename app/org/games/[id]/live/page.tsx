@@ -4,16 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { sb, rpc } from "@/lib/supabase/client";
-import type { Game, GameEvent, Player, Step, Team, TeamRoute } from "@/lib/types";
+import type { Game, GameEvent, Player, RankingData, Step, Submission, Team, TeamRoute } from "@/lib/types";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import { formatClock, formatDuration } from "@/lib/game/format";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
-import Chrono from "@/components/ui/Chrono";
+import Chrono, { gameElapsedMs } from "@/components/ui/Chrono";
 import Dialog from "@/components/ui/Dialog";
 import { Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
+import TeamMap from "@/components/org/TeamMap";
 
 const START_ERRORS: Record<string, string> = {
   AUCUNE_EQUIPE: "Aucune équipe n'a rejoint le lobby.",
@@ -36,6 +37,8 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
     case "hint_unlocked": return `💡 « ${team} » a débloqué un indice (+${Math.round(Number(e.payload.penalty_sec ?? 0) / 60)} min)`;
     case "hint_sent": return `📨 Indice envoyé à « ${team} » : ${String(e.payload.message ?? "")}`;
     case "manual_validate": return `🛠️ Étape validée manuellement pour « ${team} »`;
+    case "photo_submitted": return `📸 « ${team} » a envoyé une photo pour « ${String(e.payload.step_title ?? "?")} »`;
+    case "photo_rejected": return `🙅 Photo de « ${team} » refusée`;
     case "team_finished": return `🏆 « ${team} » a terminé le parcours !`;
     default: return `${e.type}`;
   }
@@ -52,32 +55,48 @@ export default function LiveDashboardPage() {
   const [steps, setSteps] = useState<Step[]>([]);
   const [routes, setRoutes] = useState<TeamRoute[]>([]);
   const [events, setEvents] = useState<GameEvent[]>([]);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [rank, setRank] = useState<RankingData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [hintTarget, setHintTarget] = useState<Team | null>(null);
   const [hintMessage, setHintMessage] = useState("");
 
   const load = useCallback(async () => {
-    const [g, t, p, s, r, e] = await Promise.all([
+    const [g, t, p, s, r, e, sub] = await Promise.all([
       sb().from("games").select("*").eq("id", gameId).single(),
       sb().from("teams").select("*").eq("game_id", gameId).order("created_at"),
       sb().from("players").select("*").eq("game_id", gameId),
       sb().from("steps").select("*").eq("game_id", gameId),
       sb().from("team_routes").select("*").eq("game_id", gameId),
       sb().from("events").select("*").eq("game_id", gameId).order("id", { ascending: false }).limit(120),
+      sb().from("submissions").select("*").eq("game_id", gameId).eq("status", "pending").order("created_at"),
     ]);
-    if (g.data) setGame(g.data as Game);
+    if (g.data) {
+      setGame(g.data as Game);
+      rpc<RankingData>("get_ranking", { p_code: (g.data as Game).code })
+        .then((data) => setRank(data.error ? null : data))
+        .catch(() => {});
+    }
     setTeams((t.data as Team[]) ?? []);
     setPlayers((p.data as Player[]) ?? []);
     setSteps((s.data as Step[]) ?? []);
     setRoutes((r.data as TeamRoute[]) ?? []);
     setEvents((e.data as GameEvent[]) ?? []);
+    setSubmissions((sub.data as Submission[]) ?? []);
   }, [gameId]);
 
   useEffect(() => {
     if (user) void load();
   }, [user, load]);
   useGameInvalidate(user ? gameId : null, load);
+
+  // Filet de sécurité si le Realtime décroche (et rafraîchit la carte GPS)
+  useEffect(() => {
+    if (!user) return;
+    const t = setInterval(() => void load(), 15000);
+    return () => clearInterval(t);
+  }, [user, load]);
 
   const stepMap = useMemo(() => new Map(steps.map((s) => [s.id, s])), [steps]);
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
@@ -116,6 +135,11 @@ export default function LiveDashboardPage() {
         lastValidatedAt: validated[0]?.validated_at ?? null,
       };
     });
+    // L'ordre officiel vient de get_ranking (respecte le mode temps/points)
+    if (rank?.teams?.length) {
+      const order = new Map(rank.teams.map((t, i) => [t.id, i]));
+      return rows.sort((a, b) => (order.get(a.team.id) ?? 99) - (order.get(b.team.id) ?? 99));
+    }
     return rows.sort((a, b) => {
       if (a.done !== b.done) return b.done - a.done;
       const fa = a.team.finished_at ? new Date(a.team.finished_at).getTime() : Infinity;
@@ -123,7 +147,12 @@ export default function LiveDashboardPage() {
       if (fa !== fb) return fa - fb;
       return a.team.name.localeCompare(b.team.name);
     });
-  }, [teams, routes, stepMap, game?.started_at]);
+  }, [teams, routes, stepMap, game?.started_at, rank]);
+
+  const rankMap = useMemo(
+    () => new Map((rank?.teams ?? []).map((t) => [t.id, t])),
+    [rank]
+  );
 
   async function doStart() {
     setBusy(true);
@@ -160,9 +189,44 @@ export default function LiveDashboardPage() {
 
   async function sendHint() {
     if (!hintTarget || !hintMessage.trim()) return;
-    await rpc("org_send_hint", { p_team_id: hintTarget.id, p_message: hintMessage.trim() });
+    const message = hintMessage.trim();
+    await rpc("org_send_hint", { p_team_id: hintTarget.id, p_message: message });
+    // Notification push en bonus (vibre même app fermée) — best-effort
+    try {
+      const { data } = await sb().auth.getSession();
+      if (data.session) {
+        void fetch("/api/push", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${data.session.access_token}`,
+          },
+          body: JSON.stringify({ team_id: hintTarget.id, message }),
+        });
+      }
+    } catch {
+      /* push optionnel */
+    }
     setHintTarget(null);
     setHintMessage("");
+    void load();
+  }
+
+  async function renameTeam(team: Team) {
+    const name = prompt(`Nouveau nom pour « ${team.name} » :`, team.name);
+    if (!name?.trim()) return;
+    await rpc("org_rename_team", { p_team_id: team.id, p_name: name.trim() });
+    void load();
+  }
+
+  async function deleteTeam(team: Team) {
+    if (!confirm(`Supprimer l'équipe « ${team.name} » et ses joueurs ?`)) return;
+    await rpc("org_delete_team", { p_team_id: team.id });
+    void load();
+  }
+
+  async function reviewPhoto(submission: Submission, approve: boolean) {
+    await rpc("org_review_photo", { p_submission_id: submission.id, p_approve: approve });
     void load();
   }
 
@@ -192,11 +256,13 @@ export default function LiveDashboardPage() {
           {game.started_at && (
             <div className="text-right">
               <Chrono
-                startedAt={game.started_at}
-                finishedAt={game.finished_at}
+                elapsedMs={gameElapsedMs(game)}
+                ticking={game.status === "running"}
                 className="font-display text-3xl text-gold"
               />
-              <p className="text-parchment/50 font-bold text-xs uppercase">Chrono de partie</p>
+              <p className="text-parchment/50 font-bold text-xs uppercase">
+                {game.status === "paused" ? "⏸️ Chrono figé" : "Chrono de partie"}
+              </p>
             </div>
           )}
         </div>
@@ -253,8 +319,8 @@ export default function LiveDashboardPage() {
                     className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
                     style={{ backgroundColor: team.color }}
                   />
-                  {team.name}
-                  <span className="text-ink/50 text-sm">
+                  <span className="min-w-0 truncate">{team.name}</span>
+                  <span className="text-ink/50 text-sm flex-1 min-w-0 truncate">
                     {Array.from(
                       new Set([
                         ...(playersByTeam.get(team.id) ?? []).map((p) => p.nickname),
@@ -262,6 +328,20 @@ export default function LiveDashboardPage() {
                       ])
                     ).join(", ") || "vide"}
                   </span>
+                  <button
+                    className="w-8 h-8 rounded-lg border-2 border-ink bg-white shrink-0"
+                    onClick={() => renameTeam(team)}
+                    aria-label="Renommer l'équipe"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    className="w-8 h-8 rounded-lg border-2 border-ink bg-crimson text-parchment shrink-0"
+                    onClick={() => deleteTeam(team)}
+                    aria-label="Supprimer l'équipe"
+                  >
+                    🗑️
+                  </button>
                 </li>
               ))}
             </ul>
@@ -269,10 +349,68 @@ export default function LiveDashboardPage() {
         </Card>
       )}
 
+      {/* Photos à valider */}
+      {submissions.length > 0 && (
+        <>
+          <h2 className="font-display text-2xl text-gold mb-3 animate-pulse">
+            📸 Photos à valider ({submissions.length})
+          </h2>
+          <div className="space-y-4 mb-8">
+            {submissions.map((submission) => {
+              const team = teamMap.get(submission.team_id);
+              const step = stepMap.get(submission.step_id);
+              return (
+                <Card key={submission.id} className="p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span
+                      className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
+                      style={{ backgroundColor: team?.color }}
+                    />
+                    <span className="font-display truncate">{team?.name ?? "?"}</span>
+                    <span className="font-bold text-ink/50 text-sm truncate">
+                      — {step?.title ?? "?"}
+                    </span>
+                  </div>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={submission.url}
+                    alt={`Photo de ${team?.name ?? "?"}`}
+                    className="w-full max-h-80 object-contain rounded-xl border-[3px] border-ink bg-ink mb-3"
+                  />
+                  <div className="flex gap-2">
+                    <Button className="flex-1" variant="leaf" onClick={() => reviewPhoto(submission, true)}>
+                      ✅ VALIDER
+                    </Button>
+                    <Button className="flex-1" variant="crimson" onClick={() => reviewPhoto(submission, false)}>
+                      ❌ REFUSER
+                    </Button>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Carte de suivi GPS */}
+      {game.status !== "lobby" && (
+        <>
+          <h2 className="font-display text-2xl text-parchment mb-3">📍 Sur le terrain</h2>
+          <div className="mb-8">
+            <TeamMap players={players} teams={teams} />
+          </div>
+        </>
+      )}
+
       {/* Classement live */}
       {game.status !== "lobby" && (
         <>
-          <h2 className="font-display text-2xl text-parchment mb-3">Classement live</h2>
+          <h2 className="font-display text-2xl text-parchment mb-3">
+            Classement live
+            {game.settings.scoring === "points" && (
+              <span className="text-gold text-base ml-2">(au barème points)</span>
+            )}
+          </h2>
           <div className="space-y-3 mb-8">
             {ranking.map((live, i) => (
               <Card key={live.team.id} className="p-4">
@@ -307,12 +445,13 @@ export default function LiveDashboardPage() {
                       <>
                         🏆 Terminé en{" "}
                         {formatDuration(
-                          new Date(live.team.finished_at).getTime() -
-                            new Date(game.started_at!).getTime() +
-                            live.team.penalty_seconds * 1000
+                          rankMap.get(live.team.id)?.time_ms ??
+                            (live.team.final_time_ms ?? 0) + live.team.penalty_seconds * 1000
                         )}
                         {live.team.penalty_seconds > 0 &&
                           ` (dont ${Math.round(live.team.penalty_seconds / 60)} min de pénalité)`}
+                        {game.settings.scoring === "points" &&
+                          ` · ${Math.round(rankMap.get(live.team.id)?.points ?? 0)} pts`}
                       </>
                     ) : live.current ? (
                       <>

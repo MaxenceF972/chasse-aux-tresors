@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { sb, rpc } from "@/lib/supabase/client";
 import type { Game } from "@/lib/types";
+import { GAME_TEMPLATES, type GameTemplate } from "@/lib/game/templates";
+import { newTagId, randomCode } from "@/lib/game/codes";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
@@ -25,6 +27,7 @@ export default function OrgDashboardPage() {
   const router = useRouter();
   const [games, setGames] = useState<Game[] | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -56,8 +59,66 @@ export default function OrgDashboardPage() {
 
   async function deleteGame(game: Game) {
     if (!confirm(`Supprimer définitivement « ${game.name} » (${game.code}) ?`)) return;
+    // Nettoie d'abord les médias Storage (sinon fichiers orphelins)
+    try {
+      const { data } = await sb().auth.getSession();
+      if (data.session) {
+        await fetch("/api/cleanup-media", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${data.session.access_token}`,
+          },
+          body: JSON.stringify({ game_id: game.id }),
+        });
+      }
+    } catch {
+      /* best-effort */
+    }
     await sb().from("games").delete().eq("id", game.id);
     void load();
+  }
+
+  async function createFromTemplate(template: GameTemplate) {
+    setBusy(true);
+    setError(null);
+    try {
+      const game = await rpc<Game>("org_create_game", { p_name: template.name });
+      for (let i = 0; i < template.steps.length; i++) {
+        const ts = template.steps[i];
+        const { data, error: stepErr } = await sb()
+          .from("steps")
+          .insert({
+            game_id: game.id,
+            type: ts.type,
+            title: ts.title,
+            content: {
+              body: ts.body,
+              minigame: ts.minigame,
+            },
+            media_urls: [],
+            is_common_checkpoint: ts.is_common ?? false,
+            is_final: ts.is_final ?? false,
+            order_hint: i * 10,
+          })
+          .select("id")
+          .single();
+        if (stepErr) throw new Error(stepErr.message);
+        const { error: secErr } = await sb().from("step_secrets").upsert({
+          step_id: (data as { id: string }).id,
+          answers: ts.answers ?? [],
+          nfc_tag_id: ts.type === "nfc" ? newTagId() : null,
+          manual_code: ts.type === "nfc" ? randomCode(6) : null,
+          hints: ts.hints ?? [],
+        });
+        if (secErr) throw new Error(secErr.message);
+      }
+      router.push(`/org/games/${game.id}/edit`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Création impossible");
+      setBusy(false);
+      setTemplatesOpen(false);
+    }
   }
 
   async function duplicateGame(game: Game) {
@@ -90,9 +151,12 @@ export default function OrgDashboardPage() {
         </button>
       </header>
 
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-5 gap-2">
         <h1 className="font-display text-3xl text-parchment">Mes parties</h1>
-        <Button onClick={() => setCreateOpen(true)}>➕ Nouvelle</Button>
+        <div className="flex gap-2">
+          <Button variant="parchment" onClick={() => setTemplatesOpen(true)}>📦 Modèles</Button>
+          <Button onClick={() => setCreateOpen(true)}>➕ Nouvelle</Button>
+        </div>
       </div>
 
       {games === null ? (
@@ -153,6 +217,30 @@ export default function OrgDashboardPage() {
           })}
         </div>
       )}
+
+      <Dialog open={templatesOpen} onClose={() => setTemplatesOpen(false)} title="📦 Modèles de parcours">
+        <div className="space-y-3">
+          <p className="font-bold text-ink/60 text-sm">
+            Un parcours complet en un clic — tu pourras tout personnaliser dans l&apos;éditeur
+            (les balises reçoivent des identifiants neufs).
+          </p>
+          {GAME_TEMPLATES.map((template) => (
+            <button
+              key={template.id}
+              disabled={busy}
+              onClick={() => createFromTemplate(template)}
+              className="w-full text-left rounded-xl border-[3px] border-ink bg-white p-3 shadow-[3px_3px_0_0_#111111] active:translate-y-[2px] active:shadow-[1px_1px_0_0_#111111] disabled:opacity-50"
+            >
+              <span className="font-display text-lg">
+                {template.icon} {template.name}
+              </span>
+              <span className="block text-sm font-bold text-ink/60">{template.description}</span>
+              <span className="block text-xs font-bold text-leaf mt-0.5">{template.audience}</span>
+            </button>
+          ))}
+          {busy && <p className="font-bold text-ink/60 text-center">⏳ Création du parcours…</p>}
+        </div>
+      </Dialog>
 
       <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title="Nouvelle partie">
         <form onSubmit={createGame} className="space-y-4">

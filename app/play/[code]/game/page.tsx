@@ -5,10 +5,13 @@ import { useParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { usePlayState } from "@/components/play/usePlayState";
 import { useWakeLock } from "@/lib/hooks/useWakeLock";
+import { useGeoShare } from "@/lib/hooks/useGeoShare";
 import { isVideoUrl } from "@/lib/game/media";
 import { renderRich } from "@/lib/game/rich";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
+import { getGeoConsent, isMuted, setGeoConsent, setMuted, type GeoConsent } from "@/lib/game/prefs";
+import { enablePush, isPushEnabled, pushSupported } from "@/lib/push";
 import type { ValidateKind } from "@/lib/types";
 import { clearPlayerSession } from "@/lib/game/session";
 import ValidationZone from "@/components/play/ValidationZone";
@@ -34,12 +37,24 @@ export default function GameScreen() {
     clearOrgMessage,
     submit,
     unlockHint,
+    refetch,
   } = usePlayState();
 
   const [success, setSuccess] = useState<{ finished: boolean } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [muted, setMutedState] = useState(false);
+  const [geo, setGeo] = useState<GeoConsent>(null);
+  const [pushState, setPushState] = useState<"off" | "on" | "busy">("off");
+  const [pushError, setPushError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setMutedState(isMuted());
+    setGeo(getGeoConsent());
+    void isPushEnabled().then((on) => setPushState(on ? "on" : "off"));
+  }, []);
 
   useWakeLock(!!state && state.game.status === "running");
+  useGeoShare(geo === "granted" && state?.game.status === "running");
 
   // Redirections d'état
   useEffect(() => {
@@ -68,6 +83,8 @@ export default function GameScreen() {
   }
 
   const { game, team, progress, current, finished } = state;
+  const teamElapsedMs = team.final_time_ms ?? game.elapsed_ms;
+  const chronoTicking = game.status === "running" && !team.finished_at;
 
   async function handleSubmit(kind: ValidateKind, payload: Record<string, unknown>) {
     const outcome = await submit(kind, payload);
@@ -92,8 +109,8 @@ export default function GameScreen() {
           />
           <span className="font-display text-sm truncate flex-1">{team.name}</span>
           <Chrono
-            startedAt={game.started_at}
-            finishedAt={team.finished_at}
+            elapsedMs={teamElapsedMs}
+            ticking={chronoTicking}
             penaltySeconds={team.penalty_seconds}
             className="font-display text-xl text-gold"
           />
@@ -125,6 +142,36 @@ export default function GameScreen() {
           </p>
         )}
 
+        {/* Consentement au partage de position (suivi organisateur) */}
+        {geo === null && game.status === "running" && (
+          <div className="mt-3 rounded-xl border-[3px] border-ink bg-white/60 p-3">
+            <p className="font-bold text-sm text-ink/80 mb-2">
+              📍 Partager la position de l&apos;équipe avec l&apos;organisateur ? (sécurité et
+              suivi sur sa carte — rien n&apos;est visible par les autres équipes)
+            </p>
+            <div className="flex gap-2">
+              <button
+                className="flex-1 h-10 rounded-xl border-[3px] border-ink bg-gold font-display text-sm"
+                onClick={() => {
+                  setGeoConsent("granted");
+                  setGeo("granted");
+                }}
+              >
+                OUI, ACTIVER
+              </button>
+              <button
+                className="flex-1 h-10 rounded-xl border-[3px] border-ink bg-white font-display text-sm"
+                onClick={() => {
+                  setGeoConsent("denied");
+                  setGeo("denied");
+                }}
+              >
+                Non merci
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Chemin de progression vers le X */}
         <div className="mt-2">
           <ProgressPath total={progress.total} done={progress.done} color={team.color} />
@@ -145,8 +192,8 @@ export default function GameScreen() {
             <p className="font-bold text-ink/60">
               Votre temps :{" "}
               <Chrono
-                startedAt={game.started_at}
-                finishedAt={team.finished_at}
+                elapsedMs={teamElapsedMs}
+                ticking={false}
                 penaltySeconds={team.penalty_seconds}
                 className="text-ink"
               />
@@ -225,8 +272,11 @@ export default function GameScreen() {
               <ValidationZone
                 step={current.step}
                 teamId={team.id}
+                gameId={game.id}
+                submission={current.submission}
                 disabled={game.status !== "running"}
                 onSubmit={handleSubmit}
+                onRefetch={refetch}
               />
 
               {/* Indices */}
@@ -298,6 +348,55 @@ export default function GameScreen() {
           >
             📊 VOIR LE CLASSEMENT
           </Button>
+          <Button
+            full
+            variant={muted ? "leaf" : "parchment"}
+            onClick={() => {
+              const next = !muted;
+              setMuted(next);
+              setMutedState(next);
+              if (!next) sfx.pop();
+            }}
+          >
+            {muted ? "🔊 RÉACTIVER LE SON" : "🔇 COUPER SON & VIBRATIONS"}
+          </Button>
+          {pushSupported() && (
+            <div>
+              <Button
+                full
+                variant="parchment"
+                disabled={pushState !== "off"}
+                onClick={async () => {
+                  setPushState("busy");
+                  setPushError(null);
+                  const res = await enablePush();
+                  if (res.ok) {
+                    setPushState("on");
+                  } else {
+                    setPushState("off");
+                    setPushError(res.error ?? null);
+                  }
+                }}
+              >
+                {pushState === "on"
+                  ? "🔔 ALERTES ACTIVÉES ✓"
+                  : pushState === "busy"
+                    ? "…"
+                    : "🔔 ACTIVER LES ALERTES ORGA"}
+              </Button>
+              {pushError && <p className="text-crimson font-bold text-xs mt-1">{pushError}</p>}
+            </div>
+          )}
+          <button
+            className="w-full text-center font-bold text-ink/60 underline text-sm"
+            onClick={() => {
+              const next = geo === "granted" ? "denied" : "granted";
+              setGeoConsent(next);
+              setGeo(next);
+            }}
+          >
+            📍 Partage de position : {geo === "granted" ? "activé (toucher pour couper)" : "coupé (toucher pour activer)"}
+          </button>
           <Button
             full
             variant="crimson"

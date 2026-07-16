@@ -12,7 +12,8 @@ import Card from "@/components/ui/Card";
 import { Input, Label } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 
-const TYPE_ICON: Record<StepType, string> = { nfc: "🏷️", text: "💬", minigame: "🎮" };
+const TYPE_ICON: Record<StepType, string> = { nfc: "🏷️", text: "💬", minigame: "🎮", photo: "📸" };
+const TYPE_LABEL: Record<StepType, string> = { nfc: "Balise", text: "Énigme", minigame: "Mini-jeu", photo: "Photo" };
 
 export default function GameEditPage() {
   const { user, loading } = useOrgAuth();
@@ -160,6 +161,30 @@ export default function GameEditPage() {
             />
           </div>
         </div>
+        <div className="mt-3">
+          <Label>Classement</Label>
+          <div className="flex gap-2">
+            {(
+              [
+                { v: "time", label: "⏱️ Au temps", help: "le plus rapide gagne" },
+                { v: "points", label: "🎯 Aux points", help: "étapes + scores des mini-jeux" },
+              ] as const
+            ).map((o) => (
+              <button
+                key={o.v}
+                type="button"
+                disabled={!editable}
+                onClick={() => saveSettings({ scoring: o.v })}
+                className={`flex-1 p-2 rounded-xl border-[3px] border-ink text-left disabled:opacity-60 ${
+                  (game.settings.scoring ?? "time") === o.v ? "bg-gold" : "bg-white"
+                }`}
+              >
+                <span className="font-display text-sm">{o.label}</span>
+                <span className="block text-xs font-bold text-ink/60">{o.help}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       </Card>
 
       {/* Parcours */}
@@ -250,13 +275,10 @@ export default function GameEditPage() {
       </div>
 
       {editable && (
-        <div className="grid grid-cols-3 gap-2 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-8">
           {(Object.keys(TYPE_ICON) as StepType[]).map((t) => (
             <Button key={t} variant="gold" onClick={() => setEditing({ step: null, type: t })}>
-              ➕ {TYPE_ICON[t]}
-              <span className="hidden sm:inline">
-                {t === "nfc" ? "Balise" : t === "text" ? "Énigme" : "Mini-jeu"}
-              </span>
+              ➕ {TYPE_ICON[t]} {TYPE_LABEL[t]}
             </Button>
           ))}
         </div>
@@ -264,6 +286,9 @@ export default function GameEditPage() {
 
       {/* Liens bas de page */}
       <div className="flex flex-wrap gap-3">
+        <Link href={`/org/games/${gameId}/preview`} className="contents">
+          <Button variant="gold">🧪 Tester mon parcours</Button>
+        </Link>
         <Link href={`/org/games/${gameId}/balises`} className="contents">
           <Button variant="parchment">🏷️ Balises NFC / QR</Button>
         </Link>

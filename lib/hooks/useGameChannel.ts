@@ -26,6 +26,7 @@ export function useGameInvalidate(gameId: string | null | undefined, onChange: (
       .on("postgres_changes", { event: "*", schema: "public", table: "players", filter: `game_id=eq.${gameId}` }, debounced)
       .on("postgres_changes", { event: "*", schema: "public", table: "team_routes", filter: `game_id=eq.${gameId}` }, debounced)
       .on("postgres_changes", { event: "*", schema: "public", table: "events", filter: `game_id=eq.${gameId}` }, debounced)
+      .on("postgres_changes", { event: "*", schema: "public", table: "submissions", filter: `game_id=eq.${gameId}` }, debounced)
       .subscribe();
 
     return () => {

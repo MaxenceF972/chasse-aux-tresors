@@ -28,6 +28,8 @@ export default function LobbyPage() {
   const [teamName, setTeamName] = useState("");
   const [nickname, setNickname] = useState("");
   const [membersText, setMembersText] = useState("");
+  const [rejoinOpen, setRejoinOpen] = useState(false);
+  const [rejoinCode, setRejoinCode] = useState("");
   const [teamCode, setTeamCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const startedRef = useRef(false);
@@ -99,6 +101,30 @@ export default function LobbyPage() {
       void load();
     } catch (err) {
       alert(frenchError(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rejoinByTeamCode(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const res = await rpc<{ team_id: string; team_code: string }>("join_by_team_code", {
+        p_code: code,
+        p_team_code: rejoinCode,
+        p_nickname: nickname,
+      });
+      setPlayerSession({ code, team_id: res.team_id, team_code: res.team_code, nickname });
+      setRejoinOpen(false);
+      sfx.pop();
+      router.replace(`/play/${code}/game`);
+    } catch (err) {
+      alert(
+        err instanceof Error && err.message.includes("CODE_EQUIPE_INVALIDE")
+          ? "Code équipe introuvable dans cette partie."
+          : frenchError(err)
+      );
     } finally {
       setBusy(false);
     }
@@ -227,6 +253,16 @@ export default function LobbyPage() {
           >
             ➕ CRÉER UNE ÉQUIPE
           </Button>
+          <button
+            className="w-full text-center font-bold text-parchment/60 underline"
+            onClick={() => {
+              setNickname("");
+              setRejoinCode("");
+              setRejoinOpen(true);
+            }}
+          >
+            🔑 J&apos;ai déjà un code équipe (changement de téléphone…)
+          </button>
         </>
       )}
 
@@ -268,6 +304,37 @@ export default function LobbyPage() {
           </div>
           <Button type="submit" full size="lg" disabled={busy}>
             {busy ? "…" : "🏴‍☠️ HISSER LE DRAPEAU"}
+          </Button>
+        </form>
+      </Dialog>
+
+      {/* Dialog reconnexion par code équipe */}
+      <Dialog open={rejoinOpen} onClose={() => setRejoinOpen(false)} title="🔑 Retrouver mon équipe">
+        <form onSubmit={rejoinByTeamCode} className="space-y-4">
+          <div>
+            <Label>Code équipe (donné à la création)</Label>
+            <Input
+              autoFocus
+              required
+              value={rejoinCode}
+              onChange={(e) => setRejoinCode(e.target.value.toUpperCase())}
+              placeholder="EX : K7M2PX"
+              className="font-mono tracking-[0.3em] text-center text-2xl"
+              maxLength={8}
+            />
+          </div>
+          <div>
+            <Label>Ton pseudo</Label>
+            <Input
+              required
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
+              placeholder="Capitaine Max"
+              maxLength={20}
+            />
+          </div>
+          <Button type="submit" full size="lg" disabled={busy}>
+            {busy ? "…" : "⚓ REMBARQUER"}
           </Button>
         </form>
       </Dialog>

@@ -40,6 +40,11 @@ const TYPE_META: Record<StepType, { icon: string; label: string; help: string }>
     label: "Mini-jeu",
     help: "Un casse-tête de la banque de mini-jeux, joué directement dans l'app.",
   },
+  photo: {
+    icon: "📸",
+    label: "Épreuve photo",
+    help: "L'équipe envoie une photo depuis le terrain (ex : « toute l'équipe devant la statue ! ») — tu la valides en un clic depuis le dashboard live.",
+  },
 };
 
 export default function StepEditor({
@@ -228,6 +233,14 @@ export default function StepEditor({
               d&apos;imprimer les QR codes.
             </p>
           </div>
+        )}
+
+        {type === "photo" && (
+          <p className="rounded-xl border-[3px] border-ink/20 p-3 font-bold text-sm text-ink/70">
+            📸 Décris dans l&apos;énoncé la photo attendue (« Toute l&apos;équipe qui saute devant
+            la fontaine ! »). Les photos arrivent dans le dashboard live avec deux boutons :
+            Valider / Refuser.
+          </p>
         )}
 
         {type === "minigame" && (

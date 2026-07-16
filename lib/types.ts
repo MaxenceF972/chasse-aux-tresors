@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 export type GameStatus = "lobby" | "running" | "paused" | "finished";
-export type StepType = "nfc" | "text" | "minigame";
+export type StepType = "nfc" | "text" | "minigame" | "photo";
 export type RouteStatus = "locked" | "current" | "done";
 export type MinigameKind =
   | "caesar"
@@ -26,6 +26,8 @@ export interface GameSettings {
   max_teams?: number | null;
   max_players_per_team?: number | null;
   hint_default_penalty_sec?: number;
+  /** 'time' (défaut) = classement au chrono ; 'points' = étapes + scores mini-jeux */
+  scoring?: "time" | "points";
 }
 
 export interface Game {
@@ -38,6 +40,8 @@ export interface Game {
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
+  paused_total_ms: number;
+  paused_at: string | null;
 }
 
 export interface StepContent {
@@ -82,6 +86,8 @@ export interface Team {
   roster: string[];
   penalty_seconds: number;
   finished_at: string | null;
+  /** Temps effectif figé à l'arrivée (pauses déduites, hors pénalités) */
+  final_time_ms: number | null;
   created_at: string;
 }
 
@@ -92,6 +98,20 @@ export interface Player {
   nickname: string;
   auth_uid: string;
   created_at: string;
+  last_lat: number | null;
+  last_lng: number | null;
+  pos_updated_at: string | null;
+}
+
+export interface Submission {
+  id: string;
+  game_id: string;
+  team_id: string;
+  step_id: string;
+  url: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  decided_at: string | null;
 }
 
 export interface TeamRoute {
@@ -168,6 +188,8 @@ export interface PlayState {
     started_at: string | null;
     finished_at: string | null;
     settings: GameSettings;
+    /** Temps de partie effectif au moment du fetch (pauses déduites) */
+    elapsed_ms: number;
   };
   team: {
     id: string;
@@ -176,6 +198,7 @@ export interface PlayState {
     team_code: string;
     penalty_seconds: number;
     finished_at: string | null;
+    final_time_ms: number | null;
   };
   progress: { done: number; total: number };
   current: {
@@ -183,8 +206,39 @@ export interface PlayState {
     position: number;
     started_at: string;
     hints: HintMeta[];
+    submission: { status: Submission["status"]; url: string } | null;
   } | null;
   finished: boolean;
+}
+
+export interface RankedTeam {
+  id: string;
+  name: string;
+  color: string;
+  roster: string[];
+  penalty_seconds: number;
+  finished_at: string | null;
+  done: number;
+  total: number;
+  /** Temps final pénalités incluses (null si pas fini) */
+  time_ms: number | null;
+  points: number;
+  fastest_step_ms: number | null;
+}
+
+export interface RankingData {
+  error?: string;
+  game: {
+    id: string;
+    code: string;
+    name: string;
+    status: GameStatus;
+    started_at: string | null;
+    finished_at: string | null;
+    scoring: "time" | "points";
+    elapsed_ms: number;
+  };
+  teams: RankedTeam[];
 }
 
 export interface ValidateResult {

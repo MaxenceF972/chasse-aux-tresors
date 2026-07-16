@@ -67,3 +67,30 @@ export async function uploadMedia(gameId: string, file: File): Promise<string> {
 export function isVideoUrl(url: string): boolean {
   return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
 }
+
+/** Upload de la photo d'une épreuve photo (joueur, compressée WebP). */
+export async function uploadSubmissionPhoto(gameId: string, file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) throw new Error("Photo uniquement !");
+  const blob = await compressImage(file, 1400, 0.8);
+
+  const { data: sess } = await sb().auth.getSession();
+  const accessToken = sess.session?.access_token;
+  if (!accessToken) throw new Error("Session expirée");
+
+  const res = await fetch("/api/upload-url", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+    body: JSON.stringify({ game_id: gameId, ext: "webp", purpose: "submission" }),
+  });
+  const json = (await res.json()) as { path?: string; token?: string; error?: string };
+  if (!res.ok || !json.path || !json.token) {
+    throw new Error(json.error ?? "Upload refusé");
+  }
+
+  const { error } = await sb()
+    .storage.from("media")
+    .uploadToSignedUrl(json.path, json.token, blob, { contentType: "image/webp" });
+  if (error) throw new Error(error.message);
+
+  return sb().storage.from("media").getPublicUrl(json.path).data.publicUrl;
+}

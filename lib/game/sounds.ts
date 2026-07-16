@@ -4,10 +4,12 @@
  * tous les appels partent d'un handler de clic/scan, c'est le cas ici.
  */
 
+import { isMuted } from "./prefs";
+
 let ctx: AudioContext | null = null;
 
 function audio(): AudioContext | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === "undefined" || isMuted()) return null;
   try {
     if (!ctx) ctx = new AudioContext();
     if (ctx.state === "suspended") void ctx.resume();

@@ -18,6 +18,41 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+// Notifications push (messages de l'organisateur)
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    /* payload non-JSON */
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || "TOYAH GAMES", {
+      body: data.body || "",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      vibrate: [80, 40, 80],
+      data: { url: data.url || "/" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if ("focus" in client) {
+          client.navigate(url);
+          return client.focus();
+        }
+      }
+      return clients.openWindow(url);
+    })
+  );
+});
+
 // Précache des médias de l'étape suivante (message envoyé par l'app)
 self.addEventListener("message", (event) => {
   const data = event.data;
