@@ -20,7 +20,11 @@ export type MinigameKind =
   | "flashcode"
   | "cascade"
   | "chimp"
-  | "balance";
+  | "balance"
+  | "logic"
+  | "nonogram"
+  | "sokoban"
+  | "crypto";
 
 export interface GameSettings {
   max_teams?: number | null;

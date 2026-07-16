@@ -15,6 +15,10 @@ import { flashcodeDef } from "./FlashCode";
 import { cascadeDef } from "./Cascade";
 import { chimpDef } from "./ChimpMemory";
 import { balanceDef } from "./Balance";
+import { logicDef } from "./LogicPuzzle";
+import { nonogramDef } from "./Nonogram";
+import { sokobanDef } from "./Sokoban";
+import { cryptoDef } from "./Crypto";
 
 /**
  * Banque de mini-jeux. Pour en ajouter un : créer le composant + son éditeur
@@ -36,6 +40,10 @@ export const MINIGAMES: Record<MinigameKind, MiniGameDef> = {
   cascade: cascadeDef,
   chimp: chimpDef,
   balance: balanceDef,
+  logic: logicDef,
+  nonogram: nonogramDef,
+  sokoban: sokobanDef,
+  crypto: cryptoDef,
 };
 
 export const MINIGAME_LIST: MiniGameDef[] = Object.values(MINIGAMES);
