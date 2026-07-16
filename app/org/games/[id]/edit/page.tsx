@@ -15,6 +15,108 @@ import Spinner from "@/components/ui/Spinner";
 const TYPE_ICON: Record<StepType, string> = { nfc: "🏷️", text: "💬", minigame: "🎮", photo: "📸" };
 const TYPE_LABEL: Record<StepType, string> = { nfc: "Balise", text: "Énigme", minigame: "Mini-jeu", photo: "Photo" };
 
+/** Checklist « avant le jour J » — items auto-cochés + cochables à la main. */
+function Checklist({
+  gameId,
+  stepCount,
+  hasNfc,
+  launched,
+}: {
+  gameId: string;
+  stepCount: number;
+  hasNfc: boolean;
+  launched: boolean;
+}) {
+  const [tested, setTested] = useState(false);
+  const [tagged, setTagged] = useState(false);
+
+  useEffect(() => {
+    try {
+      setTested(localStorage.getItem(`toyah:tested:${gameId}`) === "1");
+      setTagged(localStorage.getItem(`toyah:tagged:${gameId}`) === "1");
+    } catch {
+      /* noop */
+    }
+  }, [gameId]);
+
+  function toggle(key: "tested" | "tagged") {
+    const current = key === "tested" ? tested : tagged;
+    const next = !current;
+    try {
+      localStorage.setItem(`toyah:${key}:${gameId}`, next ? "1" : "0");
+    } catch {
+      /* noop */
+    }
+    if (key === "tested") setTested(next);
+    else setTagged(next);
+  }
+
+  const items: { label: string; done: boolean; onTap?: () => void; hint: string }[] = [
+    {
+      label: "Parcours créé",
+      done: stepCount > 0,
+      hint: stepCount > 0 ? `${stepCount} étape${stepCount > 1 ? "s" : ""}` : "ajoute des étapes ci-dessous",
+    },
+    {
+      label: "Parcours testé",
+      done: tested,
+      onTap: () => toggle("tested"),
+      hint: tested ? "validé en mode test" : "lance « 🧪 Tester mon parcours »",
+    },
+    ...(hasNfc
+      ? [
+          {
+            label: "Balises écrites / imprimées",
+            done: tagged,
+            onTap: () => toggle("tagged"),
+            hint: tagged ? "puces et QR prêts" : "onglet « 🏷️ Balises »",
+          },
+        ]
+      : []),
+    {
+      label: "Partie lancée",
+      done: launched,
+      hint: launched ? "c'est parti !" : "depuis le dashboard live, le jour J",
+    },
+  ];
+
+  const doneCount = items.filter((i) => i.done).length;
+
+  return (
+    <Card className="p-4 mb-6">
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="font-display text-lg">🗺️ Avant le jour J</h2>
+        <span className="font-bold text-ink/60 text-sm tabular-nums">
+          {doneCount}/{items.length}
+        </span>
+      </div>
+      <ul className="space-y-1.5">
+        {items.map((item) => (
+          <li key={item.label}>
+            <button
+              className="w-full flex items-center gap-2.5 text-left rounded-lg px-1 py-1 disabled:pointer-events-none"
+              onClick={item.onTap}
+              disabled={!item.onTap}
+            >
+              <span
+                className={`w-7 h-7 shrink-0 rounded-md border-2 border-ink flex items-center justify-center font-display text-sm ${
+                  item.done ? "bg-leaf text-parchment" : "bg-white text-transparent"
+                }`}
+              >
+                ✓
+              </span>
+              <span className={`font-bold ${item.done ? "text-ink/50 line-through" : "text-ink"}`}>
+                {item.label}
+              </span>
+              <span className="ml-auto text-xs font-bold text-ink/50 text-right">{item.hint}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
+}
+
 export default function GameEditPage() {
   const { user, loading } = useOrgAuth();
   const params = useParams<{ id: string }>();
@@ -126,6 +228,15 @@ export default function GameEditPage() {
             </Link>
           </p>
         </Card>
+      )}
+
+      {game.status === "lobby" && (
+        <Checklist
+          gameId={gameId}
+          stepCount={steps.length}
+          hasNfc={steps.some((s) => s.type === "nfc")}
+          launched={game.status !== "lobby"}
+        />
       )}
 
       {/* Réglages */}
@@ -291,6 +402,9 @@ export default function GameEditPage() {
         </Link>
         <Link href={`/org/games/${gameId}/balises`} className="contents">
           <Button variant="parchment">🏷️ Balises NFC / QR</Button>
+        </Link>
+        <Link href={`/org/games/${gameId}/antiseche`} className="contents">
+          <Button variant="parchment">📜 Antisèche</Button>
         </Link>
         <Link href={`/org/games/${gameId}/live`} className="contents">
           <Button variant="leaf">📡 Dashboard live {game.status === "lobby" ? "& lancement" : ""}</Button>

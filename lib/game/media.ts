@@ -20,6 +20,78 @@ export async function compressImage(file: File, maxDim = 1600, quality = 0.82): 
 }
 
 /**
+ * Ré-encodage vidéo best-effort (MediaRecorder à ~1,8 Mbps) : divise
+ * généralement le poids par 3 à 10. Lecture en temps réel → réservé aux
+ * clips ≤ 4 min ; en cas d'échec ou de navigateur non compatible,
+ * l'original est envoyé tel quel.
+ */
+async function compressVideo(file: File): Promise<{ blob: Blob; ext: string; type: string } | null> {
+  try {
+    if (typeof MediaRecorder === "undefined") return null;
+    if (file.size < 12 * 1024 * 1024) return null; // déjà raisonnable
+
+    const mime = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+      "video/mp4",
+    ].find((m) => MediaRecorder.isTypeSupported(m));
+    if (!mime) return null;
+
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.src = url;
+    video.muted = true;
+    video.playsInline = true;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject(new Error("metadata"));
+        setTimeout(() => reject(new Error("timeout")), 10000);
+      });
+      if (!isFinite(video.duration) || video.duration > 240) return null;
+
+      const capturable = video as HTMLVideoElement & { captureStream?: () => MediaStream };
+      const stream = capturable.captureStream?.();
+      if (!stream) return null;
+
+      const recorder = new MediaRecorder(stream, {
+        mimeType: mime,
+        videoBitsPerSecond: 1_800_000,
+        audioBitsPerSecond: 96_000,
+      });
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size) chunks.push(e.data);
+      };
+      const stopped = new Promise<void>((resolve) => {
+        recorder.onstop = () => resolve();
+      });
+
+      recorder.start(1000);
+      await video.play();
+      await new Promise<void>((resolve, reject) => {
+        video.onended = () => resolve();
+        video.onerror = () => reject(new Error("lecture"));
+        setTimeout(() => reject(new Error("timeout")), (video.duration + 30) * 1000);
+      });
+      recorder.stop();
+      await stopped;
+
+      const out = new Blob(chunks, { type: mime.split(";")[0] });
+      if (out.size === 0 || out.size >= file.size) return null;
+      const ext = mime.startsWith("video/mp4") ? "mp4" : "webm";
+      return { blob: out, ext, type: mime.split(";")[0] };
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Upload d'un média d'énigme vers Supabase Storage (bucket public `media`).
  * L'autorisation passe par /api/upload-url (URL signée, vérification que le
  * caller est bien l'organisateur) puis les octets partent directement du
@@ -35,8 +107,16 @@ export async function uploadMedia(gameId: string, file: File): Promise<string> {
     ext = "webp";
     contentType = "image/webp";
   } else if (file.type.startsWith("video/")) {
-    if (file.size > MAX_VIDEO_BYTES) {
-      throw new Error("Vidéo trop lourde (maximum 50 Mo)");
+    const compressed = await compressVideo(file);
+    if (compressed) {
+      blob = compressed.blob;
+      ext = compressed.ext;
+      contentType = compressed.type;
+    }
+    if (blob.size > MAX_VIDEO_BYTES) {
+      throw new Error(
+        "Vidéo trop lourde (max 50 Mo) — coupe-la ou compresse-la depuis la galerie du téléphone"
+      );
     }
   } else {
     throw new Error("Format non supporté (image ou vidéo uniquement)");

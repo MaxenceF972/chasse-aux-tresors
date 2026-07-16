@@ -59,6 +59,17 @@ export default function PreviewPage() {
     if (user) void load();
   }, [user, load]);
 
+  // Parcours terminé en mode test → coche la checklist « Parcours testé »
+  useEffect(() => {
+    if (steps.length > 0 && index >= steps.length) {
+      try {
+        localStorage.setItem(`toyah:tested:${gameId}`, "1");
+      } catch {
+        /* noop */
+      }
+    }
+  }, [index, steps.length, gameId]);
+
   if (loading || !user || !game) return <Spinner label="Préparation du test…" />;
 
   const step = steps[index];

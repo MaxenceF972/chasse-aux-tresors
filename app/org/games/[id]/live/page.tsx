@@ -61,6 +61,7 @@ export default function LiveDashboardPage() {
   const [busy, setBusy] = useState(false);
   const [hintTarget, setHintTarget] = useState<Team | null>(null);
   const [hintMessage, setHintMessage] = useState("");
+  const [manageTeam, setManageTeam] = useState<Team | null>(null);
 
   const load = useCallback(async () => {
     const [g, t, p, s, r, e, sub] = await Promise.all([
@@ -230,6 +231,13 @@ export default function LiveDashboardPage() {
     void load();
   }
 
+  async function kickPlayer(player: Player) {
+    if (!confirm(`Retirer ${player.nickname} de la partie ? (il pourra re-rejoindre avec le code)`))
+      return;
+    await sb().from("players").delete().eq("id", player.id);
+    void load();
+  }
+
   if (loading || !user || !game) return <Spinner label="Chargement…" />;
 
   const poolCount = steps.filter((s) => !s.is_common_checkpoint && !s.is_final).length;
@@ -330,6 +338,13 @@ export default function LiveDashboardPage() {
                   </span>
                   <button
                     className="w-10 h-10 rounded-lg border-2 border-ink bg-white shrink-0 active:bg-parchment-dark"
+                    onClick={() => setManageTeam(team)}
+                    aria-label="Gérer les joueurs"
+                  >
+                    👥
+                  </button>
+                  <button
+                    className="w-10 h-10 rounded-lg border-2 border-ink bg-white shrink-0 active:bg-parchment-dark"
                     onClick={() => renameTeam(team)}
                     aria-label="Renommer l'équipe"
                   >
@@ -396,9 +411,42 @@ export default function LiveDashboardPage() {
       {game.status !== "lobby" && (
         <>
           <h2 className="font-display text-2xl text-parchment mb-3">📍 Sur le terrain</h2>
-          <div className="mb-8">
+          <div className="mb-3">
             <TeamMap players={players} teams={teams} />
           </div>
+          {players.some((p) => p.last_lat != null) && (
+            <ul className="mb-8 space-y-1">
+              {players
+                .filter((p) => p.last_lat != null && p.last_lng != null)
+                .sort((a, b) => (a.pos_updated_at ?? "") < (b.pos_updated_at ?? "") ? 1 : -1)
+                .map((p) => {
+                  const ageMin = p.pos_updated_at
+                    ? Math.round((Date.now() - new Date(p.pos_updated_at).getTime()) / 60000)
+                    : null;
+                  return (
+                    <li key={p.id} className="flex items-center gap-2 font-bold text-sm text-parchment/80">
+                      <span
+                        className="w-3 h-3 rounded-full border border-parchment/40 shrink-0"
+                        style={{ backgroundColor: teamMap.get(p.team_id)?.color }}
+                      />
+                      <span className="truncate">{p.nickname}</span>
+                      <span className="text-parchment/45">
+                        {ageMin != null ? (ageMin < 1 ? "à l'instant" : `il y a ${ageMin} min`) : ""}
+                      </span>
+                      <a
+                        className="ml-auto underline text-parchment/60 py-1"
+                        href={`https://maps.google.com/?q=${p.last_lat},${p.last_lng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        🗺️ Maps
+                      </a>
+                    </li>
+                  );
+                })}
+            </ul>
+          )}
+          {!players.some((p) => p.last_lat != null) && <div className="mb-8" />}
         </>
       )}
 
@@ -466,6 +514,9 @@ export default function LiveDashboardPage() {
                   </p>
                   {!live.team.finished_at && game.status !== "finished" && (
                     <div className="flex gap-1.5">
+                      <Button size="sm" variant="parchment" onClick={() => setManageTeam(live.team)}>
+                        👥
+                      </Button>
                       <Button size="sm" variant="parchment" onClick={() => setHintTarget(live.team)}>
                         💡 Indice
                       </Button>
@@ -499,6 +550,48 @@ export default function LiveDashboardPage() {
           </ul>
         )}
       </Card>
+
+      {/* Dialog gestion des joueurs d'une équipe */}
+      <Dialog
+        open={!!manageTeam}
+        onClose={() => setManageTeam(null)}
+        title={`👥 « ${manageTeam?.name ?? ""} »`}
+      >
+        {manageTeam && (
+          <div className="space-y-3">
+            <p className="font-bold text-ink/60 text-sm">
+              Code équipe : <span className="font-mono text-ink tracking-[0.15em]">{manageTeam.team_code}</span>{" "}
+              (à donner pour re-rejoindre)
+            </p>
+            {(playersByTeam.get(manageTeam.id) ?? []).length === 0 ? (
+              <p className="font-bold text-ink/60">Aucun téléphone connecté à cette équipe.</p>
+            ) : (
+              <ul className="space-y-2">
+                {(playersByTeam.get(manageTeam.id) ?? []).map((player) => (
+                  <li
+                    key={player.id}
+                    className="flex items-center gap-2 rounded-xl border-2 border-ink/20 px-3 py-2"
+                  >
+                    <span className="font-bold flex-1 truncate">📱 {player.nickname}</span>
+                    <button
+                      className="w-10 h-10 rounded-lg border-2 border-ink bg-crimson text-parchment shrink-0"
+                      onClick={() => kickPlayer(player)}
+                      aria-label={`Retirer ${player.nickname}`}
+                    >
+                      ✕
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {(manageTeam.roster ?? []).length > 0 && (
+              <p className="font-bold text-ink/60 text-sm">
+                Équipage annoncé : {(manageTeam.roster ?? []).join(", ")}
+              </p>
+            )}
+          </div>
+        )}
+      </Dialog>
 
       {/* Dialog envoi d'indice */}
       <Dialog

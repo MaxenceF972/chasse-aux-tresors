@@ -12,7 +12,7 @@ interface MazeConfig {
   fog: boolean;
 }
 
-interface Cell {
+export interface Cell {
   n: boolean;
   e: boolean;
   s: boolean;
@@ -22,7 +22,7 @@ interface Cell {
 type Dir = keyof Cell;
 
 /** Génération par backtracking récursif — labyrinthe parfait, toujours solvable. */
-function genMaze(n: number, rand: () => number): Cell[][] {
+export function genMaze(n: number, rand: () => number): Cell[][] {
   const cells: Cell[][] = Array.from({ length: n }, () =>
     Array.from({ length: n }, () => ({ n: true, e: true, s: true, w: true }))
   );

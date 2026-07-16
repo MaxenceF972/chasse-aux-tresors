@@ -17,11 +17,15 @@ export interface OrgMessage {
   message: string;
 }
 
+const STATE_CACHE_KEY = "toyah:playstate";
+
 /**
  * État central de l'écran joueur : bootstrap + realtime + validations
  * (avec file offline idempotente) + préchargement du média suivant.
+ * Le dernier état connu est persisté : recharger la page sans réseau
+ * réaffiche l'énigme en cours au lieu d'un écran vide.
  */
-export function usePlayState() {
+export function usePlayState(expectedCode?: string) {
   const [state, setState] = useState<PlayState | null>(null);
   const [loading, setLoading] = useState(true);
   const [notJoined, setNotJoined] = useState(false);
@@ -39,13 +43,35 @@ export function usePlayState() {
         stateRef.current = data;
         setState(data);
         setOffline(false);
+        try {
+          localStorage.setItem(STATE_CACHE_KEY, JSON.stringify(data));
+        } catch {
+          /* stockage plein — non bloquant */
+        }
       }
     } catch (err) {
-      if (isNetworkError(err)) setOffline(true);
+      if (isNetworkError(err)) {
+        setOffline(true);
+        // Hors-ligne au chargement → on restaure le dernier état connu
+        if (!stateRef.current) {
+          try {
+            const cached = localStorage.getItem(STATE_CACHE_KEY);
+            if (cached) {
+              const data = JSON.parse(cached) as PlayState;
+              if (!expectedCode || data.game?.code === expectedCode) {
+                stateRef.current = data;
+                setState(data);
+              }
+            }
+          } catch {
+            /* cache illisible */
+          }
+        }
+      }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [expectedCode]);
 
   const refreshPending = useCallback(async () => {
     try {

@@ -38,7 +38,7 @@ export default function GameScreen() {
     submit,
     unlockHint,
     refetch,
-  } = usePlayState();
+  } = usePlayState(code);
 
   const [success, setSuccess] = useState<{ finished: boolean } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);

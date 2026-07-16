@@ -63,7 +63,7 @@ export default function MediaUpload({ gameId, urls, onChange }: MediaUploadProps
           className="w-24 h-24 rounded-lg border-[3px] border-dashed border-ink/40 text-ink/50 hover:border-ink hover:text-ink transition-colors disabled:opacity-50 flex flex-col items-center justify-center font-bold text-sm"
         >
           <span className="text-2xl">{busy ? "⏳" : "📷"}</span>
-          {busy ? "Envoi…" : "Ajouter"}
+          {busy ? "Traitement…" : "Ajouter"}
         </button>
       </div>
       <input

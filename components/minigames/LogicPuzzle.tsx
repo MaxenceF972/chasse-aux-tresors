@@ -65,7 +65,7 @@ const PERMS: number[][] = (() => {
 })();
 
 /** Compte les affectations compatibles avec les indices (arrêt à `limit`). */
-function countSolutions(clues: Clue[], limit: number): number {
+export function countSolutions(clues: Clue[], limit: number): number {
   let count = 0;
   for (const p0 of PERMS) {
     for (const p1 of PERMS) {
@@ -88,7 +88,7 @@ interface Puzzle {
   thiefClue: string;
 }
 
-function generatePuzzle(seed: string, hard: boolean): Puzzle {
+export function generatePuzzle(seed: string, hard: boolean): Puzzle {
   const rand = rngFromSeed(`logic:${seed}`);
   const truth: Assign = [
     seededShuffle([0, 1, 2, 3], rand),

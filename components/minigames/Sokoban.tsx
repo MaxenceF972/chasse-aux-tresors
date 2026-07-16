@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/Input";
  * cible · + joueur sur cible. Niveaux 2-6 issus de Microban (David W. Skinner,
  * distribution libre), triés par difficulté.
  */
-const LEVELS: { tier: 1 | 2 | 3; map: string[] }[] = [
+export const LEVELS: { tier: 1 | 2 | 3; map: string[] }[] = [
   { tier: 1, map: ["#####", "#@$.#", "#####"] },
   {
     tier: 1,
@@ -44,7 +44,7 @@ interface LevelState {
 
 const key = (r: number, c: number) => `${r},${c}`;
 
-function parseLevel(map: string[]) {
+export function parseLevel(map: string[]) {
   const walls = new Set<string>();
   const targets = new Set<string>();
   const boxes = new Set<string>();

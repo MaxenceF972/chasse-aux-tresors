@@ -15,6 +15,7 @@ import Dialog from "@/components/ui/Dialog";
 import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
+import HowToPlay from "@/components/play/HowToPlay";
 
 export default function LobbyPage() {
   const params = useParams<{ code: string }>();
@@ -203,6 +204,7 @@ export default function LobbyPage() {
           <p className="text-center font-bold text-parchment/50 text-sm">
             Garde cette page ouverte : la chasse démarre automatiquement ! 🏴‍☠️
           </p>
+          <HowToPlay />
         </>
       ) : (
         <>
@@ -263,6 +265,7 @@ export default function LobbyPage() {
           >
             🔑 J&apos;ai déjà un code équipe (changement de téléphone…)
           </button>
+          <HowToPlay />
         </>
       )}
 

@@ -32,7 +32,7 @@ interface Attempt {
   white: number; // bonne couleur, mal placée
 }
 
-function feedback(secret: number[], guess: number[]): { black: number; white: number } {
+export function feedback(secret: number[], guess: number[]): { black: number; white: number } {
   let black = 0;
   const secretRest: number[] = [];
   const guessRest: number[] = [];

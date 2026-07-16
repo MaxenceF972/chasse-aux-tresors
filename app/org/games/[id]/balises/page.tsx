@@ -74,7 +74,16 @@ export default function BalisesPage() {
     if (user) void load();
   }, [user, load]);
 
+  function markTagged() {
+    try {
+      localStorage.setItem(`toyah:tagged:${gameId}`, "1");
+    } catch {
+      /* noop */
+    }
+  }
+
   async function writeNfc(balise: Balise) {
+    markTagged();
     setNfcStatus((s) => ({ ...s, [balise.step.id]: "⏳ Approche la puce NFC du téléphone…" }));
     try {
       const ndef = new NDEFReader();
@@ -100,7 +109,13 @@ export default function BalisesPage() {
         </Link>
         <div className="flex items-center justify-between mt-2 gap-3">
           <h1 className="font-display text-3xl">🏷️ Balises</h1>
-          <Button onClick={() => window.print()} variant="gold">
+          <Button
+            onClick={() => {
+              markTagged();
+              window.print();
+            }}
+            variant="gold"
+          >
             🖨️ Imprimer
           </Button>
         </div>
@@ -156,6 +171,7 @@ export default function BalisesPage() {
                     variant="gold"
                     onClick={async () => {
                       await navigator.clipboard.writeText(tagUrl(balise.tagId));
+                      markTagged();
                       setCopiedId(balise.step.id);
                       setTimeout(() => setCopiedId(null), 1800);
                     }}

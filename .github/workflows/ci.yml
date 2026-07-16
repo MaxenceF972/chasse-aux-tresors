@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Tests unitaires (algos critiques)
+        run: npm test
+
+      - name: Build Next.js
+        run: npm run build
+        env:
+          # Valeurs factices : le build n'appelle jamais Supabase,
+          # les vraies clés vivent dans Vercel.
+          NEXT_PUBLIC_SUPABASE_URL: https://ci-dummy.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-dummy-key
+          NEXT_PUBLIC_VAPID_PUBLIC_KEY: ci-dummy-vapid
