@@ -12,12 +12,15 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
+import { showToast } from "@/components/ui/Toaster";
+import { useConfirm } from "@/components/ui/Confirm";
 
 const TYPE_ICON: Record<StepType, string> = { nfc: "🏷️", text: "💬", minigame: "🎮", photo: "📸" };
 const TYPE_LABEL: Record<StepType, string> = { nfc: "Balise", text: "Énigme", minigame: "Mini-jeu", photo: "Photo" };
 
 export default function GameEditPage() {
   const { user, loading } = useOrgAuth();
+  const { confirm: confirmDlg, confirmDialog } = useConfirm();
   const params = useParams<{ id: string }>();
   const gameId = params.id;
 
@@ -78,8 +81,19 @@ export default function GameEditPage() {
   }
 
   async function deleteStep(step: Step) {
-    if (!confirm(`Supprimer l'étape « ${step.title} » ?`)) return;
-    await sb().from("steps").delete().eq("id", step.id);
+    const ok = await confirmDlg({
+      title: "Supprimer l'étape ?",
+      message: `« ${step.title} » sera retirée du parcours.`,
+      confirmLabel: "Supprimer",
+      danger: true,
+    });
+    if (!ok) return;
+    const { error } = await sb().from("steps").delete().eq("id", step.id);
+    if (error) {
+      showToast(`Suppression impossible : ${error.message}`, "error");
+      return;
+    }
+    showToast("Étape supprimée", "success");
     void load();
   }
 
@@ -397,6 +411,8 @@ export default function GameEditPage() {
           onClose={() => setEditing(null)}
         />
       )}
+
+      {confirmDialog}
     </main>
   );
 }

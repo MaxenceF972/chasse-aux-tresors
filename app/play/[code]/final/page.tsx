@@ -9,6 +9,7 @@ import type { RankedTeam, RankingData, Submission } from "@/lib/types";
 import { clearPlayerSession, getPlayerSession } from "@/lib/game/session";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import { formatDuration } from "@/lib/game/format";
+import { showToast } from "@/components/ui/Toaster";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Spinner from "@/components/ui/Spinner";
@@ -154,7 +155,7 @@ export default function FinalPage() {
       if (navigator.share) await navigator.share({ text });
       else {
         await navigator.clipboard.writeText(text);
-        alert("Classement copié !");
+        showToast("Classement copié !", "success");
       }
     } catch {
       /* partage annulé */

@@ -26,6 +26,7 @@ import Chrono from "@/components/ui/Chrono";
 import Spinner from "@/components/ui/Spinner";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
+import { useConfirm } from "@/components/ui/Confirm";
 
 export default function GameScreen() {
   const params = useParams<{ code: string }>();
@@ -51,6 +52,7 @@ export default function GameScreen() {
   const [contactBusy, setContactBusy] = useState(false);
   const [redeemStep, setRedeemStep] = useState<PlayState["skipped_minigames"][number] | null>(null);
   const [timerNow, setTimerNow] = useState(() => Date.now());
+  const { confirm: confirmDlg, confirmDialog } = useConfirm();
   const [muted, setMutedState] = useState(false);
   const [geo, setGeo] = useState<GeoConsent>(null);
   const [pushState, setPushState] = useState<"off" | "on" | "busy">("off");
@@ -606,8 +608,14 @@ export default function GameScreen() {
           <Button
             full
             variant="crimson"
-            onClick={() => {
-              if (confirm("Quitter la partie sur ce téléphone ? (ton équipe continue sans toi)")) {
+            onClick={async () => {
+              const ok = await confirmDlg({
+                title: "🚪 Quitter la partie ?",
+                message: "Ton équipe continue sans toi (tu pourras revenir avec le code équipe).",
+                confirmLabel: "Quitter",
+                danger: true,
+              });
+              if (ok) {
                 clearPlayerSession();
                 router.push("/");
               }
@@ -617,6 +625,8 @@ export default function GameScreen() {
           </Button>
         </div>
       </Dialog>
+
+      {confirmDialog}
 
       {/* Animation de succès */}
       <SuccessOverlay

@@ -12,7 +12,7 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Chrono, { gameElapsedMs } from "@/components/ui/Chrono";
 import Dialog from "@/components/ui/Dialog";
-import { Label, TextArea } from "@/components/ui/Input";
+import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import TeamMap from "@/components/org/TeamMap";
 import { showToast } from "@/components/ui/Toaster";
@@ -287,11 +287,11 @@ export default function LiveDashboardPage() {
     void load();
   }
 
-  async function renameTeam(team: Team) {
-    const name = prompt(`Nouveau nom pour « ${team.name} » :`, team.name);
-    if (!name?.trim()) return;
+  async function renameTeam(team: Team, name: string) {
+    if (!name.trim() || name.trim() === team.name) return;
     try {
       await rpc("org_rename_team", { p_team_id: team.id, p_name: name.trim() });
+      showToast("Équipe renommée ✅", "success");
       await load();
     } catch (err) {
       showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
@@ -455,16 +455,9 @@ export default function LiveDashboardPage() {
                   <button
                     className="w-10 h-10 rounded-lg border-2 border-ink bg-white shrink-0 active:bg-parchment-dark"
                     onClick={() => setManageTeam(team)}
-                    aria-label="Gérer les joueurs"
+                    aria-label="Gérer l'équipe"
                   >
                     👥
-                  </button>
-                  <button
-                    className="w-10 h-10 rounded-lg border-2 border-ink bg-white shrink-0 active:bg-parchment-dark"
-                    onClick={() => renameTeam(team)}
-                    aria-label="Renommer l'équipe"
-                  >
-                    ✏️
                   </button>
                   <button
                     className="w-10 h-10 rounded-lg border-2 border-ink bg-crimson text-parchment shrink-0 active:bg-crimson-dark"
@@ -675,6 +668,18 @@ export default function LiveDashboardPage() {
       >
         {manageTeam && (
           <div className="space-y-3">
+            <div>
+              <Label>Nom de l&apos;équipe</Label>
+              <div className="flex gap-2">
+                <Input
+                  key={manageTeam.id}
+                  defaultValue={manageTeam.name}
+                  maxLength={30}
+                  onBlur={(e) => renameTeam(manageTeam, e.target.value)}
+                />
+              </div>
+              <p className="text-xs font-bold text-ink/50 mt-1">Modifie et touche ailleurs pour enregistrer.</p>
+            </div>
             <p className="font-bold text-ink/60 text-sm">
               Code équipe : <span className="font-mono text-ink tracking-[0.15em]">{manageTeam.team_code}</span>{" "}
               (à donner pour re-rejoindre)
