@@ -57,8 +57,13 @@ create table if not exists public.steps (
   is_common_checkpoint boolean not null default false,
   is_final             boolean not null default false,
   order_hint           int not null default 0,
+  points               int not null default 100,   -- points gagnés (mode points)
+  time_limit_sec       int,                        -- limite de temps optionnelle
   created_at           timestamptz not null default now()
 );
+
+alter table public.steps add column if not exists points int not null default 100;
+alter table public.steps add column if not exists time_limit_sec int;
 
 -- Secrets d'étape : réponses, identifiants de balise, indices.
 -- JAMAIS lisibles par les joueurs (vérifiés uniquement en RPC).
@@ -113,9 +118,14 @@ create table if not exists public.team_routes (
   position     int not null,
   status       public.route_status not null default 'locked',
   validated_at timestamptz,
+  skipped      boolean not null default false,  -- mini-jeu passé (pénalité tant que non rattrapé)
+  timed_out    boolean not null default false,  -- passée après expiration du timer (0 point, sans pénalité)
   unique (team_id, position),
   unique (team_id, step_id)
 );
+
+alter table public.team_routes add column if not exists skipped boolean not null default false;
+alter table public.team_routes add column if not exists timed_out boolean not null default false;
 
 create table if not exists public.events (
   id         bigint generated always as identity primary key,
@@ -135,9 +145,12 @@ create table if not exists public.submissions (
   step_id    uuid not null references public.steps(id) on delete cascade,
   url        text not null,
   status     text not null default 'pending' check (status in ('pending','approved','rejected')),
+  is_winner  boolean not null default false,   -- 🏆 meilleure photo de la partie
   created_at timestamptz not null default now(),
   decided_at timestamptz
 );
+
+alter table public.submissions add column if not exists is_winner boolean not null default false;
 
 -- Abonnements aux notifications push (aucun accès direct : RPC + service role)
 create table if not exists public.push_subscriptions (
@@ -660,6 +673,28 @@ begin
   );
 end $$;
 
+-- Deux joueurs avec le même pseudo dans une équipe → suffixe automatique
+-- (« Max », « Max 2 »…) : aucun état cassé quelle que soit la saisie.
+create or replace function public.unique_nickname(p_team_id uuid, p_nick text)
+returns text
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_nick text := trim(coalesce(p_nick, ''));
+  v_base text := trim(coalesce(p_nick, ''));
+  i int := 1;
+begin
+  while exists (
+    select 1 from public.players
+    where team_id = p_team_id and nickname = v_nick and auth_uid <> auth.uid()
+  ) loop
+    i := i + 1;
+    v_nick := v_base || ' ' || i;
+  end loop;
+  return v_nick;
+end $$;
+
 -- Crée une équipe et y inscrit le caller (capitaine), avec la liste d'équipage.
 drop function if exists public.create_team(text, text, text);
 create or replace function public.create_team(
@@ -703,7 +738,7 @@ begin
   end loop;
 
   insert into public.players (game_id, team_id, nickname, auth_uid)
-  values (v_game.id, v_team.id, trim(p_nickname), auth.uid())
+  values (v_game.id, v_team.id, public.unique_nickname(v_team.id, p_nickname), auth.uid())
   on conflict (auth_uid) do update
     set game_id = excluded.game_id, team_id = excluded.team_id, nickname = excluded.nickname;
 
@@ -741,7 +776,7 @@ begin
   end if;
 
   insert into public.players (game_id, team_id, nickname, auth_uid)
-  values (v_game.id, v_team.id, trim(p_nickname), auth.uid())
+  values (v_game.id, v_team.id, public.unique_nickname(v_team.id, p_nickname), auth.uid())
   on conflict (auth_uid) do update
     set game_id = excluded.game_id, team_id = excluded.team_id, nickname = excluded.nickname;
 
@@ -826,7 +861,8 @@ begin
       'step', jsonb_build_object(
         'id', v_step.id, 'type', v_step.type, 'title', v_step.title,
         'content', v_step.content, 'media_urls', to_jsonb(v_step.media_urls),
-        'is_final', v_step.is_final, 'is_common', v_step.is_common_checkpoint
+        'is_final', v_step.is_final, 'is_common', v_step.is_common_checkpoint,
+        'points', v_step.points, 'time_limit_sec', v_step.time_limit_sec
       ),
       'position', v_route.position,
       'started_at', v_started,
@@ -852,6 +888,13 @@ begin
                                'final_time_ms', v_team.final_time_ms),
     'progress', jsonb_build_object('done', v_done, 'total', v_total),
     'current', v_current,
+    'skipped_minigames', coalesce((
+      select jsonb_agg(jsonb_build_object('id', s.id, 'title', s.title, 'content', s.content)
+                       order by tr.position)
+      from public.team_routes tr
+      join public.steps s on s.id = tr.step_id
+      where tr.team_id = v_team.id and tr.skipped
+    ), '[]'::jsonb),
     'finished', (v_total > 0 and v_done = v_total)
   );
 end $$;
@@ -1031,7 +1074,23 @@ declare
   v_game   public.games%rowtype;
   v_route  public.team_routes%rowtype;
   v_step   public.steps%rowtype;
+  v_tag    text;
+  v_test_title text;
+  v_test_code  text;
 begin
+  -- Mode test organisateur : scanner sa propre balise la vérifie sans rien valider
+  v_tag := regexp_replace(trim(coalesce(p_tag, '')), '^https?://[^/]+/t/', '');
+  select s.title, g.code into v_test_title, v_test_code
+  from public.step_secrets sec
+  join public.steps s on s.id = sec.step_id
+  join public.games g on g.id = s.game_id
+  where g.created_by = auth.uid() and sec.nfc_tag_id = v_tag
+  limit 1;
+  if found then
+    return jsonb_build_object('ok', true, 'test_mode', true,
+                              'step_title', v_test_title, 'game_code', v_test_code);
+  end if;
+
   select * into v_player from public.players where auth_uid = auth.uid();
   if not found then
     return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT');
@@ -1075,7 +1134,7 @@ begin
   if not found then raise exception 'CODE_EQUIPE_INVALIDE'; end if;
 
   insert into public.players (game_id, team_id, nickname, auth_uid)
-  values (v_game.id, v_team.id, trim(p_nickname), auth.uid())
+  values (v_game.id, v_team.id, public.unique_nickname(v_team.id, p_nickname), auth.uid())
   on conflict (auth_uid) do update
     set game_id = excluded.game_id, team_id = excluded.team_id, nickname = excluded.nickname;
 
@@ -1139,6 +1198,7 @@ declare
   v_game   public.games%rowtype;
   v_route  public.team_routes%rowtype;
   v_step   public.steps%rowtype;
+  v_next   public.team_routes%rowtype;
 begin
   select * into v_player from public.players where auth_uid = auth.uid();
   if not found then return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT'); end if;
@@ -1149,7 +1209,8 @@ begin
   end if;
 
   select * into v_route from public.team_routes
-  where team_id = v_team.id and step_id = p_step_id and status = 'current';
+  where team_id = v_team.id and step_id = p_step_id and status = 'current'
+  for update;
   if not found then return jsonb_build_object('ok', false, 'error', 'ETAPE_INVALIDE'); end if;
 
   select * into v_step from public.steps where id = p_step_id;
@@ -1158,10 +1219,6 @@ begin
     return jsonb_build_object('ok', false, 'error', 'URL_INVALIDE');
   end if;
 
-  -- Une nouvelle photo remplace la précédente en attente
-  update public.submissions set status = 'rejected', decided_at = now()
-  where team_id = v_team.id and step_id = p_step_id and status = 'pending';
-
   insert into public.submissions (game_id, team_id, step_id, url)
   values (v_game.id, v_team.id, p_step_id, p_url);
 
@@ -1169,59 +1226,89 @@ begin
   values (v_game.id, v_team.id, 'photo_submitted',
           jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title, 'url', p_url));
 
-  return jsonb_build_object('ok', true);
+  -- Photo prise → l'équipe avance immédiatement ; l'organisateur jugera
+  -- la photo en fin de partie (refusée = 0 point sur l'étape).
+  update public.team_routes set status = 'done', validated_at = now()
+  where id = v_route.id;
+
+  select * into v_next from public.team_routes
+  where team_id = v_team.id and status = 'locked' order by position limit 1;
+  if found then
+    update public.team_routes set status = 'current' where id = v_next.id;
+    insert into public.events (game_id, team_id, type, payload)
+    values (v_game.id, v_team.id, 'step_validated',
+            jsonb_build_object('step_id', p_step_id, 'kind', 'photo',
+                               'step_title', v_step.title, 'position', v_route.position));
+    return jsonb_build_object('ok', true, 'correct', true, 'finished', false);
+  else
+    update public.teams
+    set finished_at = now(), final_time_ms = public.game_elapsed_ms(v_game)
+    where id = v_team.id and finished_at is null;
+    insert into public.events (game_id, team_id, type)
+    values (v_game.id, v_team.id, 'team_finished');
+    insert into public.events (game_id, team_id, type, payload)
+    values (v_game.id, v_team.id, 'step_validated',
+            jsonb_build_object('step_id', p_step_id, 'kind', 'photo',
+                               'step_title', v_step.title, 'position', v_route.position));
+    return jsonb_build_object('ok', true, 'correct', true, 'finished', true);
+  end if;
 end $$;
 
--- L'organisateur valide ou refuse une photo. Valider complète l'étape de l'équipe.
+-- L'organisateur juge une photo (pendant OU en fin de partie). L'équipe a déjà
+-- avancé : valider = les points de l'étape sont conservés ; refuser = 0 point
+-- sur l'étape (mode points) ou pénalité de temps (mode chrono).
 create or replace function public.org_review_photo(p_submission_id uuid, p_approve boolean)
 returns jsonb
 language plpgsql volatile security definer
 set search_path = public
 as $$
 declare
-  v_sub   public.submissions%rowtype;
-  v_game  public.games%rowtype;
-  v_route public.team_routes%rowtype;
-  v_next  public.team_routes%rowtype;
+  v_sub  public.submissions%rowtype;
+  v_game public.games%rowtype;
 begin
   select * into v_sub from public.submissions where id = p_submission_id for update;
   if not found or not public.is_game_owner(v_sub.game_id) then raise exception 'INTERDIT'; end if;
-  if v_sub.status <> 'pending' then
-    return jsonb_build_object('ok', false, 'error', 'DEJA_TRAITEE');
-  end if;
   select * into v_game from public.games where id = v_sub.game_id;
 
-  if not p_approve then
+  if p_approve then
+    update public.submissions set status = 'approved', decided_at = now() where id = p_submission_id;
+    insert into public.events (game_id, team_id, type, payload)
+    values (v_sub.game_id, v_sub.team_id, 'photo_approved', jsonb_build_object('step_id', v_sub.step_id));
+  else
+    -- ne pénalise le chrono qu'au premier refus de cette photo
+    if v_sub.status <> 'rejected' and coalesce(v_game.settings->>'scoring', 'time') = 'time' then
+      update public.teams
+      set penalty_seconds = penalty_seconds + coalesce((v_game.settings->>'photo_penalty_sec')::int, 180)
+      where id = v_sub.team_id;
+    end if;
     update public.submissions set status = 'rejected', decided_at = now() where id = p_submission_id;
     insert into public.events (game_id, team_id, type, payload)
     values (v_sub.game_id, v_sub.team_id, 'photo_rejected', jsonb_build_object('step_id', v_sub.step_id));
-    return jsonb_build_object('ok', true);
-  end if;
-
-  update public.submissions set status = 'approved', decided_at = now() where id = p_submission_id;
-
-  select * into v_route from public.team_routes
-  where team_id = v_sub.team_id and step_id = v_sub.step_id for update;
-  if found and v_route.status = 'current' then
-    update public.team_routes set status = 'done', validated_at = now() where id = v_route.id;
-    select * into v_next from public.team_routes
-    where team_id = v_sub.team_id and status = 'locked' order by position limit 1;
-    if found then
-      update public.team_routes set status = 'current' where id = v_next.id;
-    else
-      update public.teams
-      set finished_at = now(), final_time_ms = public.game_elapsed_ms(v_game)
-      where id = v_sub.team_id and finished_at is null;
-      insert into public.events (game_id, team_id, type) values (v_sub.game_id, v_sub.team_id, 'team_finished');
-    end if;
-    insert into public.events (game_id, team_id, type, payload)
-    values (v_sub.game_id, v_sub.team_id, 'step_validated',
-            jsonb_build_object('step_id', v_sub.step_id, 'kind', 'photo',
-                               'step_title', (select title from public.steps where id = v_sub.step_id),
-                               'position', v_route.position));
   end if;
 
   return jsonb_build_object('ok', true);
+end $$;
+
+-- Désigne LA meilleure photo de la partie (exclusif ; re-cliquer désélectionne).
+create or replace function public.org_set_photo_winner(p_submission_id uuid)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_sub public.submissions%rowtype;
+begin
+  select * into v_sub from public.submissions where id = p_submission_id;
+  if not found or not public.is_game_owner(v_sub.game_id) then raise exception 'INTERDIT'; end if;
+  if v_sub.is_winner then
+    update public.submissions set is_winner = false where id = p_submission_id;
+    return jsonb_build_object('ok', true, 'winner', false);
+  end if;
+  update public.submissions set is_winner = false where game_id = v_sub.game_id;
+  update public.submissions set is_winner = true where id = p_submission_id;
+  insert into public.events (game_id, team_id, type, payload)
+  values (v_sub.game_id, v_sub.team_id, 'photo_winner', jsonb_build_object('submission_id', p_submission_id));
+  return jsonb_build_object('ok', true, 'winner', true);
 end $$;
 
 -- Enregistre l'abonnement push du device (lié à son équipe pour le ciblage).
@@ -1273,9 +1360,27 @@ begin
       'time_ms', case when t.finished_at is not null
                       then coalesce(t.final_time_ms, 0) + t.penalty_seconds * 1000
                       else null end,
-      'points', (select coalesce(sum(mr.score), 0) from public.minigame_results mr where mr.team_id = t.id)
-                + (select count(*) from public.team_routes tr where tr.team_id = t.id and tr.status = 'done') * 100
-                - floor(t.penalty_seconds / 60.0) * 10,
+      -- Points : la somme des points d'étape gagnés (photo refusée = 0,
+      -- mini-jeu passé = 0, timeout = 0) moins les pénalités de skip et d'indices.
+      'points',
+        coalesce((
+          select sum(
+            case
+              when tr.timed_out or tr.skipped then 0
+              when s.type = 'photo' and (
+                select sub.status from public.submissions sub
+                where sub.team_id = t.id and sub.step_id = s.id
+                order by sub.created_at desc limit 1
+              ) = 'rejected' then 0
+              else s.points
+            end)
+          from public.team_routes tr
+          join public.steps s on s.id = tr.step_id
+          where tr.team_id = t.id and tr.status = 'done'
+        ), 0)
+        - (select count(*) from public.team_routes tr where tr.team_id = t.id and tr.skipped)
+          * coalesce((v_game.settings->>'skip_penalty_points')::int, 50)
+        - floor(t.penalty_seconds / 60.0) * 10,
       'fastest_step_ms', (
         select min((extract(epoch from (x.validated_at - x.prev_ts)) * 1000)::bigint)
         from (
@@ -1375,6 +1480,271 @@ begin
   return jsonb_build_object('ok', true, 'text', v_hint->>'text', 'penalty_sec', v_penalty);
 end $$;
 
+-- Passe un mini-jeu (avec pénalité) : l'équipe avance, l'étape est marquée
+-- « skipped » (0 point + pénalité tant qu'elle n'est pas rattrapée).
+create or replace function public.skip_minigame(p_step_id uuid)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_player public.players%rowtype;
+  v_team   public.teams%rowtype;
+  v_game   public.games%rowtype;
+  v_route  public.team_routes%rowtype;
+  v_step   public.steps%rowtype;
+  v_next   public.team_routes%rowtype;
+  v_finished boolean := false;
+begin
+  select * into v_player from public.players where auth_uid = auth.uid();
+  if not found then return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT'); end if;
+  select * into v_team from public.teams where id = v_player.team_id;
+  select * into v_game from public.games where id = v_team.game_id;
+  if v_game.status <> 'running' then
+    return jsonb_build_object('ok', false, 'error', 'PARTIE_NON_ACTIVE');
+  end if;
+
+  select * into v_route from public.team_routes
+  where team_id = v_team.id and step_id = p_step_id and status = 'current' for update;
+  if not found then return jsonb_build_object('ok', false, 'error', 'ETAPE_INVALIDE'); end if;
+
+  select * into v_step from public.steps where id = p_step_id;
+  if v_step.type <> 'minigame' then
+    return jsonb_build_object('ok', false, 'error', 'ETAPE_PAS_MINIJEU');
+  end if;
+
+  update public.team_routes set status = 'done', validated_at = now(), skipped = true
+  where id = v_route.id;
+
+  -- Mode chrono : la pénalité est du temps. Mode points : soustraite au classement.
+  if coalesce(v_game.settings->>'scoring', 'time') = 'time' then
+    update public.teams
+    set penalty_seconds = penalty_seconds + coalesce((v_game.settings->>'skip_penalty_sec')::int, 180)
+    where id = v_team.id;
+  end if;
+
+  select * into v_next from public.team_routes
+  where team_id = v_team.id and status = 'locked' order by position limit 1;
+  if found then
+    update public.team_routes set status = 'current' where id = v_next.id;
+  else
+    v_finished := true;
+    update public.teams
+    set finished_at = now(), final_time_ms = public.game_elapsed_ms(v_game)
+    where id = v_team.id and finished_at is null;
+    insert into public.events (game_id, team_id, type)
+    values (v_game.id, v_team.id, 'team_finished');
+  end if;
+
+  insert into public.events (game_id, team_id, type, payload)
+  values (v_game.id, v_team.id, 'minigame_skipped',
+          jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title));
+
+  return jsonb_build_object('ok', true, 'finished', v_finished);
+end $$;
+
+-- Rattrape un mini-jeu passé : succès = la pénalité saute et les points reviennent.
+create or replace function public.redeem_minigame(p_idem_key uuid, p_step_id uuid, p_payload jsonb default '{}'::jsonb)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_existing public.events%rowtype;
+  v_player public.players%rowtype;
+  v_team   public.teams%rowtype;
+  v_game   public.games%rowtype;
+  v_route  public.team_routes%rowtype;
+  v_secret public.step_secrets%rowtype;
+  v_ok     boolean := false;
+  v_result jsonb;
+begin
+  select * into v_existing from public.events where idem_key = p_idem_key;
+  if found then
+    return coalesce(v_existing.payload->'result', jsonb_build_object('ok', false));
+  end if;
+
+  select * into v_player from public.players where auth_uid = auth.uid();
+  if not found then return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT'); end if;
+  select * into v_team from public.teams where id = v_player.team_id;
+  select * into v_game from public.games where id = v_team.game_id;
+  if v_game.status <> 'running' then
+    return jsonb_build_object('ok', false, 'error', 'PARTIE_NON_ACTIVE');
+  end if;
+
+  select * into v_route from public.team_routes
+  where team_id = v_team.id and step_id = p_step_id and skipped for update;
+  if not found then return jsonb_build_object('ok', false, 'error', 'PAS_EN_RATTRAPAGE'); end if;
+
+  select * into v_secret from public.step_secrets where step_id = p_step_id;
+  if coalesce(array_length(v_secret.answers, 1), 0) > 0 then
+    v_ok := exists (
+      select 1 from unnest(v_secret.answers) a
+      where public.normalize_answer(a) <> ''
+        and public.normalize_answer(a) = public.normalize_answer(p_payload->>'answer')
+    );
+  else
+    v_ok := true;
+  end if;
+
+  if not v_ok then
+    v_result := jsonb_build_object('ok', true, 'correct', false);
+    insert into public.events (game_id, team_id, type, payload, idem_key)
+    values (v_game.id, v_team.id, 'wrong_answer',
+            jsonb_build_object('step_id', p_step_id, 'kind', 'redeem', 'result', v_result), p_idem_key);
+    return v_result;
+  end if;
+
+  update public.team_routes set skipped = false where id = v_route.id;
+  if coalesce(v_game.settings->>'scoring', 'time') = 'time' then
+    update public.teams
+    set penalty_seconds = greatest(0, penalty_seconds - coalesce((v_game.settings->>'skip_penalty_sec')::int, 180))
+    where id = v_team.id;
+  end if;
+  insert into public.minigame_results (game_id, team_id, step_id, score, duration_ms)
+  values (v_game.id, v_team.id, p_step_id,
+          nullif(p_payload->>'score', '')::numeric, nullif(p_payload->>'duration_ms', '')::int)
+  on conflict (team_id, step_id) do nothing;
+
+  v_result := jsonb_build_object('ok', true, 'correct', true);
+  insert into public.events (game_id, team_id, type, payload, idem_key)
+  values (v_game.id, v_team.id, 'minigame_redeemed',
+          jsonb_build_object('step_id', p_step_id,
+                             'step_title', (select title from public.steps where id = p_step_id),
+                             'result', v_result), p_idem_key);
+  return v_result;
+end $$;
+
+-- Timer d'étape expiré : passage sans pénalité (0 point sur l'étape).
+create or replace function public.skip_step_timeout(p_step_id uuid)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_player public.players%rowtype;
+  v_team   public.teams%rowtype;
+  v_game   public.games%rowtype;
+  v_route  public.team_routes%rowtype;
+  v_step   public.steps%rowtype;
+  v_next   public.team_routes%rowtype;
+  v_started timestamptz;
+  v_finished boolean := false;
+begin
+  select * into v_player from public.players where auth_uid = auth.uid();
+  if not found then return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT'); end if;
+  select * into v_team from public.teams where id = v_player.team_id;
+  select * into v_game from public.games where id = v_team.game_id;
+  if v_game.status <> 'running' then
+    return jsonb_build_object('ok', false, 'error', 'PARTIE_NON_ACTIVE');
+  end if;
+
+  select * into v_route from public.team_routes
+  where team_id = v_team.id and step_id = p_step_id and status = 'current' for update;
+  if not found then return jsonb_build_object('ok', false, 'error', 'ETAPE_INVALIDE'); end if;
+
+  select * into v_step from public.steps where id = p_step_id;
+  if v_step.time_limit_sec is null then
+    return jsonb_build_object('ok', false, 'error', 'PAS_DE_TIMER');
+  end if;
+
+  v_started := coalesce(
+    (select max(validated_at) from public.team_routes
+     where team_id = v_team.id and position < v_route.position),
+    v_game.started_at, now());
+  if extract(epoch from (now() - v_started)) < v_step.time_limit_sec then
+    return jsonb_build_object('ok', false, 'error', 'TIMER_PAS_ECOULE');
+  end if;
+
+  update public.team_routes set status = 'done', validated_at = now(), timed_out = true
+  where id = v_route.id;
+
+  select * into v_next from public.team_routes
+  where team_id = v_team.id and status = 'locked' order by position limit 1;
+  if found then
+    update public.team_routes set status = 'current' where id = v_next.id;
+  else
+    v_finished := true;
+    update public.teams
+    set finished_at = now(), final_time_ms = public.game_elapsed_ms(v_game)
+    where id = v_team.id and finished_at is null;
+    insert into public.events (game_id, team_id, type)
+    values (v_game.id, v_team.id, 'team_finished');
+  end if;
+
+  insert into public.events (game_id, team_id, type, payload)
+  values (v_game.id, v_team.id, 'step_timeout',
+          jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title));
+
+  return jsonb_build_object('ok', true, 'finished', v_finished);
+end $$;
+
+-- Message d'une équipe au maître du jeu (affiché en priorité dans le journal).
+create or replace function public.send_team_message(p_message text)
+returns void
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_player public.players%rowtype;
+begin
+  select * into v_player from public.players where auth_uid = auth.uid();
+  if not found then raise exception 'NON_INSCRIT'; end if;
+  if p_message is null or length(trim(p_message)) = 0 then raise exception 'MESSAGE_VIDE'; end if;
+  insert into public.events (game_id, team_id, type, payload)
+  values (v_player.game_id, v_player.team_id, 'team_message',
+          jsonb_build_object('message', left(trim(p_message), 300), 'nickname', v_player.nickname));
+end $$;
+
+-- Balise cassée / lieu inaccessible : l'étape est validée pour TOUTES les équipes.
+create or replace function public.org_neutralize_step(p_game_id uuid, p_step_id uuid)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_game  public.games%rowtype;
+  v_route public.team_routes%rowtype;
+  v_next  public.team_routes%rowtype;
+  v_count int := 0;
+begin
+  select * into v_game from public.games where id = p_game_id for update;
+  if not found or v_game.created_by <> auth.uid() then raise exception 'INTERDIT'; end if;
+  if v_game.status not in ('running','paused') then raise exception 'PARTIE_NON_ACTIVE'; end if;
+
+  for v_route in
+    select * from public.team_routes
+    where game_id = p_game_id and step_id = p_step_id and status <> 'done'
+    for update
+  loop
+    update public.team_routes set status = 'done', validated_at = now()
+    where id = v_route.id;
+    v_count := v_count + 1;
+
+    if v_route.status = 'current' then
+      select * into v_next from public.team_routes
+      where team_id = v_route.team_id and status = 'locked' order by position limit 1;
+      if found then
+        update public.team_routes set status = 'current' where id = v_next.id;
+      else
+        update public.teams
+        set finished_at = now(), final_time_ms = public.game_elapsed_ms(v_game)
+        where id = v_route.team_id and finished_at is null;
+        insert into public.events (game_id, team_id, type)
+        values (p_game_id, v_route.team_id, 'team_finished');
+      end if;
+    end if;
+  end loop;
+
+  insert into public.events (game_id, type, payload)
+  values (p_game_id, 'step_neutralized',
+          jsonb_build_object('step_id', p_step_id,
+                             'step_title', (select title from public.steps where id = p_step_id),
+                             'teams_affected', v_count));
+
+  return jsonb_build_object('ok', true, 'teams_affected', v_count);
+end $$;
+
 -- ----------------------------------------------------------------------------
 -- Permissions d'exécution : session requise (anonyme ou non), rien pour anon pur.
 -- ----------------------------------------------------------------------------
@@ -1385,9 +1755,12 @@ begin
     'org_create_game(text,jsonb)', 'org_duplicate_game(uuid)', 'start_game(uuid)',
     'org_set_status(uuid,text)', 'org_force_validate(uuid,uuid)', 'org_send_hint(uuid,text)',
     'org_rename_team(uuid,text)', 'org_delete_team(uuid)', 'org_review_photo(uuid,boolean)',
+    'org_set_photo_winner(uuid)', 'org_neutralize_step(uuid,uuid)',
     'get_lobby(text)', 'create_team(text,text,text,text[])', 'join_team(text,uuid,text)',
     'join_by_team_code(text,text,text)', 'get_play_state()', 'get_next_media()', 'get_ranking(text)',
     'validate_step(uuid,uuid,text,jsonb)', 'validate_tag(uuid,text)', 'unlock_hint(uuid,int)',
+    'skip_minigame(uuid)', 'redeem_minigame(uuid,uuid,jsonb)', 'skip_step_timeout(uuid)',
+    'send_team_message(text)',
     'report_position(double precision,double precision)', 'submit_photo(uuid,text)',
     'save_push_subscription(jsonb)'
   ] loop

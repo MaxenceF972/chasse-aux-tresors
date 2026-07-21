@@ -21,6 +21,7 @@ type ScanState =
   | "notjoined"
   | "notnfc"
   | "offline"
+  | "test"
   | "error";
 
 interface TagResult {
@@ -30,6 +31,8 @@ interface TagResult {
   finished?: boolean;
   error?: string;
   game_code?: string;
+  test_mode?: boolean;
+  step_title?: string;
 }
 
 /**
@@ -44,6 +47,7 @@ export default function TagScanPage() {
   const [finished, setFinished] = useState(false);
   const [gameCode, setGameCode] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const [testTitle, setTestTitle] = useState("");
   const ranRef = useRef(false);
 
   useEffect(() => {
@@ -59,7 +63,12 @@ export default function TagScanPage() {
         });
         setGameCode(res.game_code ?? getPlayerSession()?.code ?? null);
 
-        if (res.correct && !res.already) {
+        if (res.test_mode) {
+          setTestTitle(res.step_title ?? "");
+          setState("test");
+          sfx.success();
+          haptics.success();
+        } else if (res.correct && !res.already) {
           setFinished(!!res.finished);
           setState("success");
           sfx.success();
@@ -132,7 +141,31 @@ export default function TagScanPage() {
     );
   }
 
-  const screens: Record<Exclude<ScanState, "loading" | "success">, {
+  // Mode test organisateur : la balise fonctionne, rien n'est validé
+  if (state === "test") {
+    return (
+      <main className="min-h-dvh bg-leaf text-parchment flex flex-col items-center justify-center gap-5 px-8 text-center">
+        <motion.div
+          initial={{ scale: 0, rotate: -15 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: "spring", stiffness: 260, damping: 14 }}
+          className="text-7xl select-none"
+        >
+          🧪
+        </motion.div>
+        <h1 className="font-display text-3xl leading-tight">BALISE OK !</h1>
+        <p className="font-bold max-w-sm text-parchment/90">
+          Mode test : cette balise est bien reconnue et pointe vers l&apos;étape{" "}
+          <span className="text-gold">« {testTitle} »</span>. Aucune validation enregistrée.
+        </p>
+        <Link href={gameCode ? `/org/games` : "/org/dashboard"} className="contents">
+          <Button size="xl" variant="gold">✅ CONTINUER LES TESTS</Button>
+        </Link>
+      </main>
+    );
+  }
+
+  const screens: Record<Exclude<ScanState, "loading" | "success" | "test">, {
     icon: string;
     title: string;
     text: string;
@@ -174,7 +207,7 @@ export default function TagScanPage() {
     },
   };
 
-  const screen = screens[state];
+  const screen = screens[state as Exclude<ScanState, "loading" | "success" | "test">];
 
   return (
     <main

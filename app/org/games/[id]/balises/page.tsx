@@ -137,6 +137,11 @@ export default function BalisesPage() {
             puces. Les QR codes et codes manuels fonctionnent partout.
           </p>
         )}
+        <p className="font-bold text-leaf mt-2 text-sm">
+          🧪 Mode test : une fois tes puces écrites, scanne-les toi-même (connecté à TON compte
+          organisateur) → un écran vert « Balise OK ! » confirme qu&apos;elles marchent, sans rien
+          valider.
+        </p>
       </header>
 
       {game && (

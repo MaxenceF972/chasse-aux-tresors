@@ -12,8 +12,12 @@ import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import { getGeoConsent, isMuted, setGeoConsent, setMuted, type GeoConsent } from "@/lib/game/prefs";
 import { enablePush, isPushEnabled, pushSupported } from "@/lib/push";
-import type { ValidateKind } from "@/lib/types";
+import type { PlayState, ValidateKind } from "@/lib/types";
 import { clearPlayerSession } from "@/lib/game/session";
+import { rpc } from "@/lib/supabase/client";
+import { showToast } from "@/components/ui/Toaster";
+import { TextArea, Label } from "@/components/ui/Input";
+import MinigameModal from "@/components/play/MinigameModal";
 import ValidationZone from "@/components/play/ValidationZone";
 import HintPanel from "@/components/play/HintPanel";
 import SuccessOverlay from "@/components/play/SuccessOverlay";
@@ -42,6 +46,11 @@ export default function GameScreen() {
 
   const [success, setSuccess] = useState<{ finished: boolean } | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [contactMessage, setContactMessage] = useState("");
+  const [contactBusy, setContactBusy] = useState(false);
+  const [redeemStep, setRedeemStep] = useState<PlayState["skipped_minigames"][number] | null>(null);
+  const [timerNow, setTimerNow] = useState(() => Date.now());
   const [muted, setMutedState] = useState(false);
   const [geo, setGeo] = useState<GeoConsent>(null);
   const [pushState, setPushState] = useState<"off" | "on" | "busy">("off");
@@ -74,6 +83,14 @@ export default function GameScreen() {
     }
   }, [orgMessage]);
 
+  // Tic du timer d'étape (si l'étape en a un)
+  const hasTimer = !!state?.current?.step.time_limit_sec;
+  useEffect(() => {
+    if (!hasTimer) return;
+    const t = setInterval(() => setTimerNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [hasTimer]);
+
   if (loading || !state) {
     return (
       <main className="min-h-dvh parchment-texture text-ink flex items-center justify-center">
@@ -82,9 +99,48 @@ export default function GameScreen() {
     );
   }
 
-  const { game, team, progress, current, finished } = state;
+  const { game, team, progress, current, finished, skipped_minigames: skippedMinigames } = state;
   const teamElapsedMs = team.final_time_ms ?? game.elapsed_ms;
   const chronoTicking = game.status === "running" && !team.finished_at;
+  const isPoints = game.settings.scoring === "points";
+  const skipPenaltyLabel = isPoints
+    ? `−${game.settings.skip_penalty_points ?? 50} points`
+    : `+${Math.round((game.settings.skip_penalty_sec ?? 180) / 60)} min`;
+
+  // Timer d'étape : temps restant (null si pas de limite)
+  const timerLeftSec =
+    current?.step.time_limit_sec != null
+      ? Math.ceil(
+          current.step.time_limit_sec -
+            (timerNow - new Date(current.started_at).getTime()) / 1000
+        )
+      : null;
+
+  async function handleTimeoutSkip() {
+    if (!current) return;
+    const res = await rpc<{ ok: boolean; error?: string }>("skip_step_timeout", {
+      p_step_id: current.step.id,
+    }).catch(() => ({ ok: false }));
+    if (res.ok) {
+      showToast("Temps écoulé — étape passée (0 point)", "info");
+      await refetch();
+    }
+  }
+
+  async function sendContactMessage() {
+    if (!contactMessage.trim()) return;
+    setContactBusy(true);
+    try {
+      await rpc("send_team_message", { p_message: contactMessage.trim() });
+      showToast("Message envoyé au maître du jeu 📣", "success");
+      setContactMessage("");
+      setContactOpen(false);
+    } catch {
+      showToast("Envoi impossible — vérifie ta connexion", "error");
+    } finally {
+      setContactBusy(false);
+    }
+  }
 
   async function handleSubmit(kind: ValidateKind, payload: Record<string, unknown>) {
     const outcome = await submit(kind, payload);
@@ -216,7 +272,7 @@ export default function GameScreen() {
               className="mt-3 space-y-5"
             >
               {/* En-tête d'étape */}
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-display text-sm bg-ink text-gold px-2.5 py-1 rounded-lg -rotate-2">
                   ÉTAPE {current.position + 1}
                 </span>
@@ -230,7 +286,34 @@ export default function GameScreen() {
                     📍 PALIER COMMUN
                   </span>
                 )}
+                {isPoints && (
+                  <span className="font-display text-sm bg-gold text-ink px-2.5 py-1 rounded-lg rotate-1">
+                    {current.step.points} PTS
+                  </span>
+                )}
+                {timerLeftSec != null && (
+                  <span
+                    className={`font-display text-sm px-2.5 py-1 rounded-lg tabular-nums ${
+                      timerLeftSec <= 0
+                        ? "bg-crimson text-parchment"
+                        : timerLeftSec <= 60
+                          ? "bg-crimson/80 text-parchment animate-pulse"
+                          : "bg-ink text-parchment"
+                    }`}
+                  >
+                    ⌛{" "}
+                    {timerLeftSec > 0
+                      ? `${Math.floor(timerLeftSec / 60)}:${String(timerLeftSec % 60).padStart(2, "0")}`
+                      : "TEMPS ÉCOULÉ"}
+                  </span>
+                )}
               </div>
+
+              {timerLeftSec != null && timerLeftSec <= 0 && (
+                <Button full variant="crimson" onClick={handleTimeoutSkip}>
+                  ⌛ PASSER L&apos;ÉTAPE (temps écoulé — 0 point, sans pénalité)
+                </Button>
+              )}
 
               <h1 className="font-display text-3xl leading-tight">{current.step.title}</h1>
 
@@ -275,16 +358,113 @@ export default function GameScreen() {
                 gameId={game.id}
                 submission={current.submission}
                 disabled={game.status !== "running"}
+                skipPenaltyLabel={skipPenaltyLabel}
                 onSubmit={handleSubmit}
                 onRefetch={refetch}
+                onAdvanced={(wasFinished) => {
+                  sfx.success();
+                  haptics.success();
+                  if (wasFinished) sfx.fanfare();
+                  setSuccess({ finished: wasFinished });
+                  void refetch();
+                }}
               />
 
               {/* Indices */}
               <HintPanel hints={current.hints} onUnlock={unlockHint} />
+
+              <button
+                className="w-full text-center font-bold text-ink/50 underline py-1"
+                onClick={() => setContactOpen(true)}
+              >
+                🆘 Un souci sur le terrain ? Contacter le maître du jeu
+              </button>
             </motion.div>
           </AnimatePresence>
         )}
+
+        {/* Mini-jeux passés, à rattraper pour annuler la pénalité */}
+        {!finished && skippedMinigames.length > 0 && (
+          <div className="mt-6 rounded-xl border-[3px] border-dashed border-crimson/50 p-3">
+            <p className="font-display text-sm text-crimson mb-2">
+              🎮 MINI-JEUX À RATTRAPER ({skipPenaltyLabel.replace("−", "").replace("+", "")} de
+              pénalité chacun — les réussir l&apos;annule !)
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {skippedMinigames.map((skippedStep) => (
+                <button
+                  key={skippedStep.id}
+                  onClick={() => setRedeemStep(skippedStep)}
+                  className="px-3 h-11 rounded-xl border-[3px] border-ink bg-white font-display text-sm shadow-[2px_2px_0_0_#111111] active:translate-y-[1px]"
+                >
+                  {skippedStep.content.minigame
+                    ? `🎮 ${skippedStep.title}`
+                    : skippedStep.title}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Rattrapage d'un mini-jeu passé */}
+      {redeemStep?.content.minigame && (
+        <MinigameModal
+          kind={redeemStep.content.minigame.kind}
+          config={redeemStep.content.minigame.config}
+          seed={`${team.id}:${redeemStep.id}`}
+          onClose={() => setRedeemStep(null)}
+          onComplete={async (result) => {
+            try {
+              const res = await rpc<{ ok: boolean; correct?: boolean }>("redeem_minigame", {
+                p_idem_key: crypto.randomUUID(),
+                p_step_id: redeemStep.id,
+                p_payload: {
+                  answer: result.answer,
+                  score: result.score,
+                  duration_ms: result.durationMs,
+                },
+              });
+              if (res.correct) {
+                sfx.success();
+                haptics.success();
+                showToast("💪 Mini-jeu rattrapé — pénalité annulée !", "success");
+                setRedeemStep(null);
+                await refetch();
+                return true;
+              }
+              return false;
+            } catch {
+              showToast("Connexion instable — réessaie", "error");
+              return false;
+            }
+          }}
+        />
+      )}
+
+      {/* Contacter le maître du jeu */}
+      <Dialog open={contactOpen} onClose={() => setContactOpen(false)} title="🆘 Maître du jeu">
+        <div className="space-y-4">
+          <p className="font-bold text-ink/60 text-sm">
+            Balise introuvable, souci sur le terrain, question ? Il reçoit ton message
+            immédiatement sur son dashboard.
+          </p>
+          <div>
+            <Label>Ton message</Label>
+            <TextArea
+              rows={3}
+              autoFocus
+              value={contactMessage}
+              onChange={(e) => setContactMessage(e.target.value)}
+              placeholder="La balise du lavoir est introuvable…"
+              maxLength={300}
+            />
+          </div>
+          <Button full size="lg" disabled={contactBusy || !contactMessage.trim()} onClick={sendContactMessage}>
+            {contactBusy ? "…" : "📣 ENVOYER"}
+          </Button>
+        </div>
+      </Dialog>
 
       {/* Overlay pause */}
       <AnimatePresence>
@@ -347,6 +527,16 @@ export default function GameScreen() {
             }}
           >
             📊 VOIR LE CLASSEMENT
+          </Button>
+          <Button
+            full
+            variant="gold"
+            onClick={() => {
+              setMenuOpen(false);
+              setContactOpen(true);
+            }}
+          >
+            🆘 CONTACTER LE MAÎTRE DU JEU
           </Button>
           <Button
             full

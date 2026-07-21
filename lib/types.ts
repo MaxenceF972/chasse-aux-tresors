@@ -24,14 +24,19 @@ export type MinigameKind =
   | "logic"
   | "nonogram"
   | "sokoban"
-  | "crypto";
+  | "crypto"
+  | "bonto";
 
 export interface GameSettings {
   max_teams?: number | null;
   max_players_per_team?: number | null;
   hint_default_penalty_sec?: number;
-  /** 'time' (défaut) = classement au chrono ; 'points' = étapes + scores mini-jeux */
+  /** 'time' (défaut) = classement au chrono ; 'points' = points d'étapes */
   scoring?: "time" | "points";
+  /** Pénalité d'un mini-jeu passé : points (mode points) / secondes (mode chrono) */
+  skip_penalty_points?: number;
+  skip_penalty_sec?: number;
+  photo_penalty_sec?: number;
 }
 
 export interface Game {
@@ -63,6 +68,10 @@ export interface Step {
   is_common_checkpoint: boolean;
   is_final: boolean;
   order_hint: number;
+  /** Points gagnés en validant l'étape (classement aux points) */
+  points: number;
+  /** Limite de temps optionnelle (secondes) — expiration = passage à 0 point */
+  time_limit_sec: number | null;
   created_at: string;
 }
 
@@ -114,6 +123,7 @@ export interface Submission {
   step_id: string;
   url: string;
   status: "pending" | "approved" | "rejected";
+  is_winner: boolean;
   created_at: string;
   decided_at: string | null;
 }
@@ -180,6 +190,8 @@ export interface PublicStep {
   media_urls: string[];
   is_final: boolean;
   is_common: boolean;
+  points: number;
+  time_limit_sec: number | null;
 }
 
 export interface PlayState {
@@ -212,6 +224,8 @@ export interface PlayState {
     hints: HintMeta[];
     submission: { status: Submission["status"]; url: string } | null;
   } | null;
+  /** Mini-jeux passés, rattrapables pour annuler la pénalité */
+  skipped_minigames: { id: string; title: string; content: StepContent }[];
   finished: boolean;
 }
 

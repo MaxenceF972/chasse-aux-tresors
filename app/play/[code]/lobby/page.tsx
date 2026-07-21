@@ -16,6 +16,8 @@ import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
 import HowToPlay from "@/components/play/HowToPlay";
+import { showToast } from "@/components/ui/Toaster";
+import QRCode from "qrcode";
 
 export default function LobbyPage() {
   const params = useParams<{ code: string }>();
@@ -31,6 +33,11 @@ export default function LobbyPage() {
   const [membersText, setMembersText] = useState("");
   const [rejoinOpen, setRejoinOpen] = useState(false);
   const [rejoinCode, setRejoinCode] = useState("");
+  const [charterAccepted, setCharterAccepted] = useState(false);
+  const [charterOpen, setCharterOpen] = useState(false);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteQr, setInviteQr] = useState<string | null>(null);
+  const [invitedTeamCode, setInvitedTeamCode] = useState<string | null>(null);
   const [teamCode, setTeamCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const startedRef = useRef(false);
@@ -62,10 +69,56 @@ export default function LobbyPage() {
     return () => clearInterval(poll);
   }, [load]);
 
+  // Lien d'invitation ?team=CODE → rejoindre l'équipe en un tap
+  useEffect(() => {
+    try {
+      const teamParam = new URLSearchParams(window.location.search).get("team");
+      if (teamParam) setInvitedTeamCode(teamParam.toUpperCase());
+    } catch {
+      /* noop */
+    }
+  }, []);
+
   useGameInvalidate(lobby?.game?.id, load);
+
+  async function shareInvite() {
+    const myTeamCode = getMyTeamCode();
+    if (!myTeamCode) return;
+    const url = `${window.location.origin}/play/${code}/lobby?team=${myTeamCode}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "Rejoins mon équipe — TOYAH GAMES",
+          text: "Rejoins mon équipe pour la chasse au trésor !",
+          url,
+        });
+      } else {
+        await navigator.clipboard.writeText(url);
+        showToast("Lien d'invitation copié !", "success");
+      }
+    } catch {
+      /* partage annulé */
+    }
+  }
+
+  function getMyTeamCode(): string | null {
+    return teamCode ?? null;
+  }
+
+  async function openInvite() {
+    const myTeamCode = getMyTeamCode();
+    if (!myTeamCode) return;
+    const url = `${window.location.origin}/play/${code}/lobby?team=${myTeamCode}`;
+    setInviteQr(await QRCode.toDataURL(url, { width: 400, margin: 1 }));
+    setInviteOpen(true);
+  }
 
   async function createTeam(e: React.FormEvent) {
     e.preventDefault();
+    if (!charterAccepted) {
+      showToast("Coche la charte de l'aventurier pour continuer !", "error");
+      return;
+    }
     setBusy(true);
     try {
       const res = await rpc<{ team_id: string; team_code: string }>("create_team", {
@@ -80,7 +133,7 @@ export default function LobbyPage() {
       sfx.pop();
       void load();
     } catch (err) {
-      alert(frenchError(err));
+      showToast(frenchError(err), "error");
     } finally {
       setBusy(false);
     }
@@ -101,30 +154,38 @@ export default function LobbyPage() {
       sfx.pop();
       void load();
     } catch (err) {
-      alert(frenchError(err));
+      showToast(frenchError(err), "error");
     } finally {
       setBusy(false);
     }
   }
 
-  async function rejoinByTeamCode(e: React.FormEvent) {
+  async function rejoinByTeamCode(e: React.FormEvent, forcedCode?: string) {
     e.preventDefault();
+    const teamCodeToUse = forcedCode ?? rejoinCode;
     setBusy(true);
     try {
       const res = await rpc<{ team_id: string; team_code: string }>("join_by_team_code", {
         p_code: code,
-        p_team_code: rejoinCode,
+        p_team_code: teamCodeToUse,
         p_nickname: nickname,
       });
       setPlayerSession({ code, team_id: res.team_id, team_code: res.team_code, nickname });
       setRejoinOpen(false);
+      setInvitedTeamCode(null);
       sfx.pop();
-      router.replace(`/play/${code}/game`);
+      // Partie en cours → écran de jeu ; sinon on reste au lobby
+      if (lobby?.game?.status && lobby.game.status !== "lobby") {
+        router.replace(`/play/${code}/game`);
+      } else {
+        await load();
+      }
     } catch (err) {
-      alert(
+      showToast(
         err instanceof Error && err.message.includes("CODE_EQUIPE_INVALIDE")
           ? "Code équipe introuvable dans cette partie."
-          : frenchError(err)
+          : frenchError(err),
+        "error"
       );
     } finally {
       setBusy(false);
@@ -188,10 +249,22 @@ export default function LobbyPage() {
               ))}
             </div>
             {teamCode && (
-              <p className="font-bold text-sm text-ink/60 mb-2">
-                Code d&apos;équipe à partager :{" "}
-                <span className="font-mono text-lg text-ink tracking-[0.2em]">{teamCode}</span>
-              </p>
+              <div className="mb-3">
+                <p className="font-bold text-sm text-ink/60 mb-2">
+                  Invite tes coéquipiers en un tap :
+                </p>
+                <div className="flex gap-2 justify-center">
+                  <Button size="sm" variant="gold" onClick={shareInvite}>
+                    🔗 Partager le lien
+                  </Button>
+                  <Button size="sm" variant="parchment" onClick={openInvite}>
+                    📱 QR code
+                  </Button>
+                </div>
+                <p className="font-bold text-xs text-ink/45 mt-2">
+                  ou code équipe : <span className="font-mono tracking-[0.2em]">{teamCode}</span>
+                </p>
+              </div>
             )}
             <motion.p
               animate={{ opacity: [0.5, 1, 0.5] }}
@@ -206,6 +279,34 @@ export default function LobbyPage() {
           </p>
           <HowToPlay />
         </>
+      ) : invitedTeamCode ? (
+        <Card className="p-5 text-center">
+          <div className="text-4xl mb-1">🎉</div>
+          <h2 className="font-display text-xl mb-1">Tu es invité·e !</h2>
+          <p className="font-bold text-ink/60 mb-4">
+            Rejoins l&apos;équipe et c&apos;est parti — juste ton prénom !
+          </p>
+          <form onSubmit={(e) => rejoinByTeamCode(e, invitedTeamCode)} className="space-y-3">
+            <Input
+              autoFocus
+              required
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
+              placeholder="Ton prénom"
+              maxLength={20}
+              className="text-center"
+            />
+            <Button type="submit" full size="lg" disabled={busy}>
+              {busy ? "…" : "⚓ REJOINDRE L'ÉQUIPE"}
+            </Button>
+          </form>
+          <button
+            className="mt-3 font-bold text-ink/50 underline text-sm"
+            onClick={() => setInvitedTeamCode(null)}
+          >
+            Ce n&apos;est pas la bonne équipe ? Choisir moi-même
+          </button>
+        </Card>
       ) : (
         <>
           <h2 className="font-display text-xl text-parchment -mb-2">Choisis ton équipage :</h2>
@@ -284,17 +385,20 @@ export default function LobbyPage() {
             />
           </div>
           <div>
-            <Label>Ton pseudo (capitaine)</Label>
+            <Label>TON prénom (tu es le capitaine)</Label>
             <Input
               required
               value={nickname}
               onChange={(e) => setNickname(e.target.value)}
-              placeholder="Capitaine Max"
+              placeholder="Ton prénom à toi"
               maxLength={20}
             />
+            <p className="text-xs font-bold text-ink/50 mt-1">
+              C&apos;est bien TON prénom ici, pas le nom de l&apos;équipe.
+            </p>
           </div>
           <div>
-            <Label>Ton équipage (un prénom par ligne)</Label>
+            <Label>Tes coéquipiers (facultatif, un prénom par ligne)</Label>
             <TextArea
               rows={3}
               value={membersText}
@@ -302,13 +406,95 @@ export default function LobbyPage() {
               placeholder={"Léa\nHugo\nJade"}
             />
             <p className="text-xs font-bold text-ink/50 mt-1">
-              Liste tes coéquipiers — pratique quand l&apos;équipe joue sur un seul téléphone.
+              Utile si vous jouez sur un seul téléphone. Sinon, invite-les avec le lien après.
             </p>
           </div>
-          <Button type="submit" full size="lg" disabled={busy}>
+
+          {/* Charte de l'aventurier — le capitaine s'engage pour son équipe */}
+          <label className="flex items-start gap-2.5 rounded-xl border-[3px] border-ink bg-white/60 p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              className="w-6 h-6 mt-0.5 shrink-0 accent-[#2E5E3A]"
+              checked={charterAccepted}
+              onChange={(e) => setCharterAccepted(e.target.checked)}
+            />
+            <span className="font-bold text-sm text-ink/85">
+              Au nom de mon équipe, j&apos;accepte la{" "}
+              <button
+                type="button"
+                className="text-leaf underline"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setCharterOpen(true);
+                }}
+              >
+                charte de l&apos;aventurier
+              </button>{" "}
+              (respect des balises, des autres équipes et de la sécurité).
+            </span>
+          </label>
+
+          <Button type="submit" full size="lg" disabled={busy || !charterAccepted}>
             {busy ? "…" : "🏴‍☠️ HISSER LE DRAPEAU"}
           </Button>
         </form>
+      </Dialog>
+
+      {/* Charte de l'aventurier */}
+      <Dialog open={charterOpen} onClose={() => setCharterOpen(false)} title="📜 Charte de l'aventurier">
+        <div className="space-y-3">
+          <p className="font-bold text-ink/70">
+            En tant que capitaine, je m&apos;engage — pour toute mon équipe — à :
+          </p>
+          <ul className="space-y-2.5">
+            {[
+              ["🏷️", "Respecter les balises", "Ne pas récupérer, déplacer, cacher ni abîmer les balises. Elles servent aux autres équipes."],
+              ["🤝", "Respecter les autres équipes", "Jouer fair-play : pas de sabotage, pas de suivi d'une autre équipe, pas de triche."],
+              ["🚗", "Priorité à la sécurité", "Zéro alcool au volant. Respecter le code de la route et les règles des lieux traversés."],
+              ["🌿", "Respecter les lieux", "Ne pas dégrader l'environnement ni les propriétés privées. On ne laisse aucune trace."],
+              ["📱", "Rester prudent en marchant", "Lever les yeux de l'écran, surveiller la circulation, garder le groupe ensemble."],
+            ].map(([icon, title, text]) => (
+              <li key={title} className="flex gap-2.5">
+                <span className="text-2xl shrink-0">{icon}</span>
+                <div>
+                  <p className="font-display text-sm leading-tight">{title}</p>
+                  <p className="font-bold text-ink/65 text-sm">{text}</p>
+                </div>
+              </li>
+            ))}
+          </ul>
+          <Button
+            full
+            variant="leaf"
+            onClick={() => {
+              setCharterAccepted(true);
+              setCharterOpen(false);
+            }}
+          >
+            ✅ J&apos;accepte au nom de mon équipe
+          </Button>
+        </div>
+      </Dialog>
+
+      {/* QR d'invitation */}
+      <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} title="📱 Inviter dans l'équipe">
+        <div className="space-y-3 text-center">
+          <p className="font-bold text-ink/70">
+            Tes coéquipiers scannent ce QR (appareil photo) → ils rejoignent directement ton
+            équipe !
+          </p>
+          {inviteQr && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={inviteQr}
+              alt="QR d'invitation"
+              className="w-56 h-56 mx-auto border-[3px] border-ink rounded-xl"
+            />
+          )}
+          <Button full variant="gold" onClick={shareInvite}>
+            🔗 Ou partager le lien
+          </Button>
+        </div>
       </Dialog>
 
       {/* Dialog reconnexion par code équipe */}

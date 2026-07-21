@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { sb, rpc } from "@/lib/supabase/client";
@@ -15,6 +15,8 @@ import Dialog from "@/components/ui/Dialog";
 import { Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import TeamMap from "@/components/org/TeamMap";
+import { showToast } from "@/components/ui/Toaster";
+import { useConfirm } from "@/components/ui/Confirm";
 
 const START_ERRORS: Record<string, string> = {
   AUCUNE_EQUIPE: "Aucune équipe n'a rejoint le lobby.",
@@ -39,6 +41,13 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
     case "manual_validate": return `🛠️ Étape validée manuellement pour « ${team} »`;
     case "photo_submitted": return `📸 « ${team} » a envoyé une photo pour « ${String(e.payload.step_title ?? "?")} »`;
     case "photo_rejected": return `🙅 Photo de « ${team} » refusée`;
+    case "photo_approved": return `👍 Photo de « ${team} » validée`;
+    case "photo_winner": return `🏅 Photo gagnante désignée pour « ${team} »`;
+    case "minigame_skipped": return `⏭️ « ${team} » a passé « ${String(e.payload.step_title ?? "?")} » (pénalité)`;
+    case "minigame_redeemed": return `💪 « ${team} » a rattrapé « ${String(e.payload.step_title ?? "?")} »`;
+    case "step_timeout": return `⌛ « ${team} » — temps écoulé sur « ${String(e.payload.step_title ?? "?")} »`;
+    case "step_neutralized": return `🛠️ Étape « ${String(e.payload.step_title ?? "?")} » neutralisée (${String(e.payload.teams_affected ?? 0)} équipes)`;
+    case "team_message": return `🆘 « ${team} » : ${String(e.payload.message ?? "")}`;
     case "team_finished": return `🏆 « ${team} » a terminé le parcours !`;
     default: return `${e.type}`;
   }
@@ -62,6 +71,8 @@ export default function LiveDashboardPage() {
   const [hintTarget, setHintTarget] = useState<Team | null>(null);
   const [hintMessage, setHintMessage] = useState("");
   const [manageTeam, setManageTeam] = useState<Team | null>(null);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
     const [g, t, p, s, r, e, sub] = await Promise.all([
@@ -99,8 +110,27 @@ export default function LiveDashboardPage() {
     return () => clearInterval(t);
   }, [user, load]);
 
+  // Alerte immédiate quand une équipe contacte le maître du jeu
+  const lastMsgIdRef = useRef<number>(0);
+  useEffect(() => {
+    const messages = events.filter((e) => e.type === "team_message");
+    if (!messages.length) return;
+    const newest = messages[0]; // events triés par id desc
+    if (lastMsgIdRef.current === 0) {
+      lastMsgIdRef.current = newest.id; // amorçage : pas d'alerte au premier chargement
+      return;
+    }
+    if (newest.id > lastMsgIdRef.current) {
+      lastMsgIdRef.current = newest.id;
+      const teamName = newest.team_id ? teamMapRef.current.get(newest.team_id)?.name : "?";
+      showToast(`🆘 ${teamName} : ${String(newest.payload.message ?? "")}`, "info");
+    }
+  }, [events]);
+
   const stepMap = useMemo(() => new Map(steps.map((s) => [s.id, s])), [steps]);
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
+  const teamMapRef = useRef(teamMap);
+  teamMapRef.current = teamMap;
   const playersByTeam = useMemo(() => {
     const map = new Map<string, Player[]>();
     for (const p of players) {
@@ -171,21 +201,65 @@ export default function LiveDashboardPage() {
   }
 
   async function setStatus(status: "paused" | "running" | "finished") {
-    if (status === "finished" && !confirm("Terminer la partie pour tout le monde ?")) return;
+    if (status === "finished") {
+      const ok = await confirm({
+        title: "🏁 Terminer la partie ?",
+        message: "La partie se termine immédiatement pour toutes les équipes. Le classement est figé.",
+        confirmLabel: "Terminer",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       await rpc("org_set_status", { p_game_id: gameId, p_status: status });
+      showToast(
+        status === "finished" ? "Partie terminée 🏁" : status === "paused" ? "Partie en pause ⏸️" : "Partie reprise ▶️",
+        "success"
+      );
+      await load();
+    } catch (err) {
+      showToast(`Échec : ${err instanceof Error ? err.message : "erreur inconnue"}`, "error");
     } finally {
       setBusy(false);
-      void load();
     }
   }
 
   async function forceValidate(live: TeamLive) {
     if (!live.current) return;
-    if (!confirm(`Valider « ${live.current.step.title} » pour « ${live.team.name} » ?`)) return;
-    await rpc("org_force_validate", { p_team_id: live.team.id, p_step_id: live.current.step.id });
-    void load();
+    const ok = await confirm({
+      title: "Valider l'étape ?",
+      message: `Marquer « ${live.current.step.title} » comme validée pour « ${live.team.name} » ?`,
+      confirmLabel: "Valider",
+    });
+    if (!ok) return;
+    try {
+      await rpc("org_force_validate", { p_team_id: live.team.id, p_step_id: live.current.step.id });
+      showToast("Étape validée ✅", "success");
+      await load();
+    } catch (err) {
+      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+    }
+  }
+
+  async function neutralizeStep(step: Step) {
+    const ok = await confirm({
+      title: "⚠️ Neutraliser cette étape ?",
+      message: `« ${step.title} » sera validée pour TOUTES les équipes qui ne l'ont pas encore faite (balise cassée, lieu inaccessible…). Irréversible.`,
+      confirmLabel: "Neutraliser",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await rpc<{ ok: boolean; teams_affected: number }>("org_neutralize_step", {
+        p_game_id: gameId,
+        p_step_id: step.id,
+      });
+      showToast(`Étape neutralisée pour ${res.teams_affected} équipe(s) ✅`, "success");
+      await load();
+    } catch (err) {
+      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+    }
   }
 
   async function sendHint() {
@@ -216,26 +290,55 @@ export default function LiveDashboardPage() {
   async function renameTeam(team: Team) {
     const name = prompt(`Nouveau nom pour « ${team.name} » :`, team.name);
     if (!name?.trim()) return;
-    await rpc("org_rename_team", { p_team_id: team.id, p_name: name.trim() });
-    void load();
+    try {
+      await rpc("org_rename_team", { p_team_id: team.id, p_name: name.trim() });
+      await load();
+    } catch (err) {
+      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+    }
   }
 
   async function deleteTeam(team: Team) {
-    if (!confirm(`Supprimer l'équipe « ${team.name} » et ses joueurs ?`)) return;
-    await rpc("org_delete_team", { p_team_id: team.id });
-    void load();
+    const ok = await confirm({
+      title: "Supprimer l'équipe ?",
+      message: `« ${team.name} » et ses joueurs seront retirés. (possible uniquement avant le lancement)`,
+      confirmLabel: "Supprimer",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await rpc("org_delete_team", { p_team_id: team.id });
+      showToast("Équipe supprimée", "success");
+      await load();
+    } catch (err) {
+      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+    }
   }
 
   async function reviewPhoto(submission: Submission, approve: boolean) {
-    await rpc("org_review_photo", { p_submission_id: submission.id, p_approve: approve });
-    void load();
+    try {
+      await rpc("org_review_photo", { p_submission_id: submission.id, p_approve: approve });
+      showToast(approve ? "Photo validée ✅" : "Photo refusée", approve ? "success" : "info");
+      await load();
+    } catch (err) {
+      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+    }
   }
 
   async function kickPlayer(player: Player) {
-    if (!confirm(`Retirer ${player.nickname} de la partie ? (il pourra re-rejoindre avec le code)`))
-      return;
-    await sb().from("players").delete().eq("id", player.id);
-    void load();
+    const ok = await confirm({
+      title: "Retirer ce joueur ?",
+      message: `${player.nickname} sera retiré (il pourra re-rejoindre avec le code équipe).`,
+      confirmLabel: "Retirer",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await sb().from("players").delete().eq("id", player.id);
+      await load();
+    } catch (err) {
+      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+    }
   }
 
   if (loading || !user || !game) return <Spinner label="Chargement…" />;
@@ -254,6 +357,9 @@ export default function LiveDashboardPage() {
           </Link>
           <Link href={`/org/games/${gameId}/balises`} className="font-bold text-parchment/70 underline py-2 inline-block">
             🏷️ Balises
+          </Link>
+          <Link href={`/org/games/${gameId}/photos`} className="font-bold text-parchment/70 underline py-2 inline-block">
+            🖼️ Photos
           </Link>
         </nav>
         <div className="flex flex-wrap items-center justify-between gap-3 mt-2">
@@ -294,9 +400,19 @@ export default function LiveDashboardPage() {
           </Button>
         )}
         {(game.status === "running" || game.status === "paused") && (
-          <Button variant="crimson" disabled={busy} onClick={() => setStatus("finished")}>
-            🏁 Terminer
-          </Button>
+          <>
+            <Button variant="parchment" disabled={busy} onClick={() => setToolsOpen(true)}>
+              🛠️ Outils
+            </Button>
+            <Button variant="crimson" disabled={busy} onClick={() => setStatus("finished")}>
+              🏁 Terminer
+            </Button>
+          </>
+        )}
+        {game.status === "finished" && (
+          <Link href={`/org/games/${gameId}/photos`} className="contents">
+            <Button variant="gold">🖼️ Galerie photos</Button>
+          </Link>
         )}
       </div>
 
@@ -593,6 +709,42 @@ export default function LiveDashboardPage() {
         )}
       </Dialog>
 
+      {/* Dialog Outils : neutraliser une étape */}
+      <Dialog open={toolsOpen} onClose={() => setToolsOpen(false)} title="🛠️ Outils de secours">
+        <div className="space-y-3">
+          <p className="font-bold text-ink/70 text-sm">
+            Balise cassée, lieu inaccessible ? Neutralise l&apos;étape : elle sera validée pour
+            toutes les équipes qui ne l&apos;ont pas encore faite.
+          </p>
+          <div className="space-y-2 max-h-[50dvh] overflow-y-auto">
+            {steps
+              .slice()
+              .sort((a, b) => a.order_hint - b.order_hint)
+              .map((step) => (
+                <div
+                  key={step.id}
+                  className="flex items-center gap-2 rounded-xl border-2 border-ink/20 px-3 py-2"
+                >
+                  <span className="font-bold text-sm flex-1 truncate">
+                    {step.type === "nfc" ? "🏷️" : step.type === "photo" ? "📸" : step.type === "minigame" ? "🎮" : "💬"}{" "}
+                    {step.title}
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="crimson"
+                    onClick={() => {
+                      setToolsOpen(false);
+                      void neutralizeStep(step);
+                    }}
+                  >
+                    Neutraliser
+                  </Button>
+                </div>
+              ))}
+          </div>
+        </div>
+      </Dialog>
+
       {/* Dialog envoi d'indice */}
       <Dialog
         open={!!hintTarget}
@@ -615,6 +767,8 @@ export default function LiveDashboardPage() {
           </Button>
         </div>
       </Dialog>
+
+      {confirmDialog}
     </main>
   );
 }

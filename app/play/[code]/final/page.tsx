@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ensureAnonSession, rpc } from "@/lib/supabase/client";
-import type { RankedTeam, RankingData } from "@/lib/types";
+import { ensureAnonSession, rpc, sb } from "@/lib/supabase/client";
+import type { RankedTeam, RankingData, Submission } from "@/lib/types";
 import { clearPlayerSession, getPlayerSession } from "@/lib/game/session";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import { formatDuration } from "@/lib/game/format";
@@ -19,6 +19,10 @@ interface Award {
   title: string;
   detail: string;
   team: RankedTeam;
+}
+
+function teamName(teams: RankedTeam[], teamId: string): string {
+  return teams.find((t) => t.id === teamId)?.name ?? "Une équipe";
 }
 
 function computeAwards(teams: RankedTeam[]): Award[] {
@@ -82,12 +86,24 @@ export default function FinalPage() {
   const params = useParams<{ code: string }>();
   const code = params.code?.toUpperCase() ?? "";
   const [data, setData] = useState<RankingData | null>(null);
+  const [winnerPhoto, setWinnerPhoto] = useState<Submission | null>(null);
   const myTeamId = getPlayerSession()?.team_id;
 
   const load = useCallback(async () => {
     try {
       const ranking = await rpc<RankingData>("get_ranking", { p_code: code });
-      if (!ranking.error) setData(ranking);
+      if (!ranking.error) {
+        setData(ranking);
+        if (ranking.game?.id) {
+          const { data: win } = await sb()
+            .from("submissions")
+            .select("*")
+            .eq("game_id", ranking.game.id)
+            .eq("is_winner", true)
+            .maybeSingle();
+          setWinnerPhoto((win as Submission) ?? null);
+        }
+      }
     } catch {
       /* retentera via realtime/poll */
     }
@@ -230,6 +246,26 @@ export default function FinalPage() {
           </Card>
         ))}
       </div>
+
+      {/* Photo gagnante */}
+      {finished && winnerPhoto && (
+        <div className="mt-10">
+          <h2 className="font-display text-2xl text-gold text-center mb-3 -rotate-1">
+            🏅 LA PHOTO DE LA PARTIE
+          </h2>
+          <Card className="p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={winnerPhoto.url}
+              alt="Meilleure photo"
+              className="w-full rounded-xl border-2 border-ink"
+            />
+            <p className="text-center font-display mt-2">
+              {teamName(data.teams, winnerPhoto.team_id)}
+            </p>
+          </Card>
+        </div>
+      )}
 
       {/* Récompenses */}
       {finished && awards.length > 0 && (

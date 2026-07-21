@@ -3,8 +3,8 @@
 import { useEffect } from "react";
 import { rpc } from "@/lib/supabase/client";
 
-const MIN_INTERVAL_MS = 40000;
-const MIN_MOVE_METERS = 40;
+const MIN_INTERVAL_MS = 12000; // au plus une fois toutes les 12 s
+const MIN_MOVE_METERS = 12; // …ou dès 12 m de déplacement
 
 function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
   const R = 6371000;
@@ -18,31 +18,37 @@ function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: 
 
 /**
  * Partage la position de l'équipe avec l'organisateur (consentement requis).
- * Throttlé : au plus toutes les 40 s, ou après 40 m de déplacement.
+ * Réactif : haute précision, lissage léger, et remontée dès 12 m / 12 s.
  */
 export function useGeoShare(enabled: boolean) {
   useEffect(() => {
     if (!enabled || typeof navigator === "undefined" || !navigator.geolocation) return;
 
     let last: { lat: number; lng: number; at: number } | null = null;
+    // Lissage exponentiel léger : atténue les sauts GPS sans traîner
+    let smooth: { lat: number; lng: number } | null = null;
 
-    const report = (lat: number, lng: number) => {
+    const report = (rawLat: number, rawLng: number, accuracy: number) => {
+      // Ignore les points très imprécis (> 100 m) sauf tout premier fix
+      if (accuracy > 100 && smooth) return;
+
+      const alpha = 0.5;
+      smooth = smooth
+        ? { lat: smooth.lat + alpha * (rawLat - smooth.lat), lng: smooth.lng + alpha * (rawLng - smooth.lng) }
+        : { lat: rawLat, lng: rawLng };
+
       const now = Date.now();
-      if (
-        last &&
-        now - last.at < MIN_INTERVAL_MS &&
-        distanceMeters(last, { lat, lng }) < MIN_MOVE_METERS
-      ) {
-        return;
-      }
-      last = { lat, lng, at: now };
-      rpc("report_position", { p_lat: lat, p_lng: lng }).catch(() => {});
+      const moved = last ? distanceMeters(last, smooth) : Infinity;
+      if (last && now - last.at < MIN_INTERVAL_MS && moved < MIN_MOVE_METERS) return;
+
+      last = { lat: smooth.lat, lng: smooth.lng, at: now };
+      rpc("report_position", { p_lat: smooth.lat, p_lng: smooth.lng }).catch(() => {});
     };
 
     const watchId = navigator.geolocation.watchPosition(
-      (pos) => report(pos.coords.latitude, pos.coords.longitude),
+      (pos) => report(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 999),
       () => {},
-      { enableHighAccuracy: false, maximumAge: 30000, timeout: 20000 }
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);

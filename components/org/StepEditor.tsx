@@ -75,6 +75,10 @@ export default function StepEditor({
     step?.content?.minigame?.config ?? MINIGAMES[step?.content?.minigame?.kind ?? "caesar"].defaultConfig
   );
   const [hints, setHints] = useState<Hint[]>(secrets?.hints ?? []);
+  const [points, setPoints] = useState<number>(step?.points ?? 100);
+  const [timeLimitMin, setTimeLimitMin] = useState<string>(
+    step?.time_limit_sec ? String(Math.round(step.time_limit_sec / 60)) : ""
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -118,6 +122,8 @@ export default function StepEditor({
         media_urls: mediaUrls,
         is_common_checkpoint: placement === "common",
         is_final: placement === "final",
+        points: Math.max(0, points || 0),
+        time_limit_sec: timeLimitMin.trim() ? Math.max(1, Number(timeLimitMin)) * 60 : null,
       };
 
       let stepId = step?.id;
@@ -367,6 +373,33 @@ export default function StepEditor({
             >
               💡 Ajouter un indice
             </Button>
+          </div>
+        </div>
+
+        {/* Points & timer */}
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <Label>Points (mode points)</Label>
+            <Input
+              type="number"
+              min={0}
+              inputMode="numeric"
+              value={points}
+              onChange={(e) => setPoints(Number(e.target.value))}
+            />
+            <p className="text-xs font-bold text-ink/50 mt-1">Gagnés en validant l&apos;étape.</p>
+          </div>
+          <div>
+            <Label>Temps limite (min)</Label>
+            <Input
+              type="number"
+              min={1}
+              inputMode="numeric"
+              value={timeLimitMin}
+              onChange={(e) => setTimeLimitMin(e.target.value)}
+              placeholder="∞"
+            />
+            <p className="text-xs font-bold text-ink/50 mt-1">Vide = illimité. Écoulé = 0 point.</p>
           </div>
         </div>
 

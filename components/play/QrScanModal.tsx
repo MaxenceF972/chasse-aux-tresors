@@ -78,7 +78,7 @@ export default function QrScanModal({ open, onClose, onScan }: QrScanModalProps)
   }, [open]);
 
   return (
-    <Dialog open={open} onClose={onClose} title="📷 Scanner le QR code">
+    <Dialog open={open} onClose={onClose} title="📷 Scanner la balise">
       {error ? (
         <p className="font-bold text-crimson">{error}</p>
       ) : (

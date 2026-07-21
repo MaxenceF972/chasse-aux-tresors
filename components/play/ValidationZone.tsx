@@ -20,8 +20,12 @@ interface ValidationZoneProps {
   gameId: string;
   submission: NonNullable<PlayState["current"]>["submission"];
   disabled: boolean;
+  /** Libellé de la pénalité de skip ("50 points" ou "3 minutes") */
+  skipPenaltyLabel: string;
   onSubmit: (kind: ValidateKind, payload: Record<string, unknown>) => Promise<SubmitOutcome>;
   onRefetch: () => Promise<void>;
+  /** Photo envoyée → l'équipe avance (déclenche l'animation de succès) */
+  onAdvanced: (finished: boolean) => void;
 }
 
 /** Zone de validation adaptée au type d'étape : NFC/QR/code, texte, mini-jeu, photo. */
@@ -31,8 +35,10 @@ export default function ValidationZone({
   gameId,
   submission,
   disabled,
+  skipPenaltyLabel,
   onSubmit,
   onRefetch,
+  onAdvanced,
 }: ValidationZoneProps) {
   const [wrong, setWrong] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -65,7 +71,14 @@ export default function ValidationZone({
       {step.type === "text" && <TextAnswer disabled={disabled || busy} onRun={run} />}
       {step.type === "nfc" && <NfcValidation disabled={disabled || busy} onRun={run} />}
       {step.type === "minigame" && (
-        <MinigameValidation step={step} teamId={teamId} disabled={disabled || busy} onRun={run} />
+        <MinigameValidation
+          step={step}
+          teamId={teamId}
+          disabled={disabled || busy}
+          skipPenaltyLabel={skipPenaltyLabel}
+          onRun={run}
+          onRefetch={onRefetch}
+        />
       )}
       {step.type === "photo" && (
         <PhotoValidation
@@ -73,7 +86,7 @@ export default function ValidationZone({
           gameId={gameId}
           submission={submission}
           disabled={disabled || busy}
-          onRefetch={onRefetch}
+          onAdvanced={onAdvanced}
         />
       )}
       {info && <p className="mt-3 font-bold text-sm text-ink/70 text-center">{info}</p>}
@@ -185,13 +198,18 @@ function NfcValidation({
       {nfcSupported &&
         (scanning ? (
           <Button full size="xl" variant="leaf" onClick={stopNfcScan}>
-            <span className="animate-pulse">📡 APPROCHE LA BALISE…</span>
+            <span className="animate-pulse">📡 POSITIONNE-LE SUR LA BALISE…</span>
           </Button>
         ) : (
           <Button full size="xl" onClick={startNfcScan} disabled={disabled}>
-            📡 SCANNER LA BALISE NFC
+            📡 POSITIONNE TON TÉLÉPHONE SUR LA BALISE
           </Button>
         ))}
+      {!nfcSupported && (
+        <p className="text-center font-bold text-ink/60 text-sm">
+          📡 Positionne ton téléphone sur la balise — ou scanne-la avec la caméra :
+        </p>
+      )}
       <Button
         full
         size={nfcSupported ? "lg" : "xl"}
@@ -199,7 +217,7 @@ function NfcValidation({
         onClick={() => setQrOpen(true)}
         disabled={disabled}
       >
-        📷 SCANNER LE QR CODE
+        📷 SCANNER LA BALISE (CAMÉRA)
       </Button>
       <button
         className="w-full text-center font-bold text-ink/60 underline py-1"
@@ -245,15 +263,14 @@ function NfcValidation({
 function PhotoValidation({
   step,
   gameId,
-  submission,
   disabled,
-  onRefetch,
+  onAdvanced,
 }: {
   step: PublicStep;
   gameId: string;
   submission: NonNullable<PlayState["current"]>["submission"];
   disabled: boolean;
-  onRefetch: () => Promise<void>;
+  onAdvanced: (finished: boolean) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -266,14 +283,13 @@ function PhotoValidation({
     setError(null);
     try {
       const url = await uploadSubmissionPhoto(gameId, file);
-      const res = await rpc<{ ok: boolean; error?: string }>("submit_photo", {
+      const res = await rpc<{ ok: boolean; finished?: boolean; error?: string }>("submit_photo", {
         p_step_id: step.id,
         p_url: url,
       });
       if (!res.ok) throw new Error(res.error ?? "Envoi refusé");
-      sfx.pop();
-      haptics.scan();
-      await onRefetch();
+      // Photo envoyée → on avance tout de suite ; l'organisateur jugera plus tard
+      onAdvanced(!!res.finished);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Envoi impossible");
     } finally {
@@ -282,48 +298,15 @@ function PhotoValidation({
     }
   }
 
-  const pending = submission?.status === "pending";
-  const rejected = submission?.status === "rejected";
-
   return (
     <div className="space-y-3">
-      {pending ? (
-        <div className="rounded-xl border-[3px] border-leaf bg-leaf/10 p-3 text-center">
-          {submission?.url && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={submission.url}
-              alt="Photo envoyée"
-              className="w-full max-h-56 object-cover rounded-lg border-2 border-ink mb-2"
-            />
-          )}
-          <p className="font-display text-lg text-leaf animate-pulse">
-            ⏳ PHOTO ENVOYÉE !
-          </p>
-          <p className="font-bold text-ink/60 text-sm">
-            L&apos;organisateur la vérifie… vous pouvez souffler un instant.
-          </p>
-        </div>
-      ) : (
-        <>
-          {rejected && (
-            <div className="rounded-xl border-[3px] border-crimson bg-crimson/10 p-3 text-center">
-              <p className="font-display text-crimson">❌ PHOTO REFUSÉE !</p>
-              <p className="font-bold text-ink/60 text-sm">
-                L&apos;organisateur veut mieux que ça — reprenez-en une !
-              </p>
-            </div>
-          )}
-          <Button
-            full
-            size="xl"
-            disabled={disabled || busy}
-            onClick={() => inputRef.current?.click()}
-          >
-            {busy ? "⏳ ENVOI…" : "📸 PRENDRE LA PHOTO"}
-          </Button>
-        </>
-      )}
+      <Button full size="xl" disabled={disabled || busy} onClick={() => inputRef.current?.click()}>
+        {busy ? "⏳ ENVOI…" : "📸 PRENDRE LA PHOTO"}
+      </Button>
+      <p className="text-center font-bold text-ink/55 text-sm">
+        La photo part au maître du jeu et vous passez direct à la suite — il la jugera en fin de
+        partie (refusée = 0 point sur l&apos;étape 😬).
+      </p>
       <input
         ref={inputRef}
         type="file"
@@ -332,15 +315,6 @@ function PhotoValidation({
         className="hidden"
         onChange={(e) => handleFile(e.target.files)}
       />
-      {pending && (
-        <button
-          className="w-full text-center font-bold text-ink/60 underline"
-          disabled={busy}
-          onClick={() => inputRef.current?.click()}
-        >
-          Remplacer par une autre photo
-        </button>
-      )}
       {error && <p className="text-crimson font-bold text-sm text-center">{error}</p>}
     </div>
   );
@@ -352,17 +326,39 @@ function MinigameValidation({
   step,
   teamId,
   disabled,
+  skipPenaltyLabel,
   onRun,
+  onRefetch,
 }: {
   step: PublicStep;
   teamId: string;
   disabled: boolean;
+  skipPenaltyLabel: string;
   onRun: (kind: ValidateKind, payload: Record<string, unknown>) => Promise<SubmitOutcome>;
+  onRefetch: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [skipConfirm, setSkipConfirm] = useState(false);
+  const [skipBusy, setSkipBusy] = useState(false);
 
   if (!step.content.minigame) {
     return <p className="font-bold text-crimson">Mini-jeu mal configuré.</p>;
+  }
+
+  async function doSkip() {
+    setSkipBusy(true);
+    try {
+      const res = await rpc<{ ok: boolean; error?: string }>("skip_minigame", {
+        p_step_id: step.id,
+      });
+      if (res.ok) {
+        sfx.pop();
+        setSkipConfirm(false);
+        await onRefetch();
+      }
+    } finally {
+      setSkipBusy(false);
+    }
   }
 
   return (
@@ -370,6 +366,35 @@ function MinigameValidation({
       <Button full size="xl" onClick={() => setOpen(true)} disabled={disabled}>
         🎮 LANCER LE MINI-JEU
       </Button>
+      <button
+        className="w-full text-center font-bold text-ink/55 underline py-1.5"
+        disabled={disabled}
+        onClick={() => setSkipConfirm(true)}
+      >
+        Trop dur ? Passer ce mini-jeu (pénalité : {skipPenaltyLabel})
+      </button>
+
+      <Dialog open={skipConfirm} onClose={() => setSkipConfirm(false)} title="⏭️ Passer le mini-jeu ?">
+        <div className="space-y-4">
+          <p className="font-bold text-ink/75">
+            Êtes-vous sûrs de vouloir passer ce mini-jeu ? Pénalité :{" "}
+            <span className="text-crimson">{skipPenaltyLabel}</span>.
+          </p>
+          <p className="font-bold text-ink/55 text-sm">
+            💡 Vous pourrez le retenter plus tard depuis « Mini-jeux à rattraper » — le réussir
+            annulera la pénalité !
+          </p>
+          <div className="flex gap-2">
+            <Button className="flex-1" variant="parchment" onClick={() => setSkipConfirm(false)}>
+              On continue !
+            </Button>
+            <Button className="flex-1" variant="crimson" disabled={skipBusy} onClick={doSkip}>
+              {skipBusy ? "…" : "⏭️ PASSER"}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
       {open && (
         <MinigameModal
           kind={step.content.minigame.kind}

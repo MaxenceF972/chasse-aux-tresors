@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Lilita_One, Nunito } from "next/font/google";
 import "./globals.css";
 import PwaSetup from "@/components/PwaSetup";
+import Toaster from "@/components/ui/Toaster";
 
 const lilita = Lilita_One({
   weight: "400",
@@ -46,6 +47,7 @@ export default function RootLayout({
     <html lang="fr" className={`${lilita.variable} ${nunito.variable}`}>
       <body className="min-h-dvh antialiased">
         <PwaSetup />
+        <Toaster />
         {children}
       </body>
     </html>

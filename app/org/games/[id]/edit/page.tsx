@@ -15,108 +15,6 @@ import Spinner from "@/components/ui/Spinner";
 const TYPE_ICON: Record<StepType, string> = { nfc: "🏷️", text: "💬", minigame: "🎮", photo: "📸" };
 const TYPE_LABEL: Record<StepType, string> = { nfc: "Balise", text: "Énigme", minigame: "Mini-jeu", photo: "Photo" };
 
-/** Checklist « avant le jour J » — items auto-cochés + cochables à la main. */
-function Checklist({
-  gameId,
-  stepCount,
-  hasNfc,
-  launched,
-}: {
-  gameId: string;
-  stepCount: number;
-  hasNfc: boolean;
-  launched: boolean;
-}) {
-  const [tested, setTested] = useState(false);
-  const [tagged, setTagged] = useState(false);
-
-  useEffect(() => {
-    try {
-      setTested(localStorage.getItem(`toyah:tested:${gameId}`) === "1");
-      setTagged(localStorage.getItem(`toyah:tagged:${gameId}`) === "1");
-    } catch {
-      /* noop */
-    }
-  }, [gameId]);
-
-  function toggle(key: "tested" | "tagged") {
-    const current = key === "tested" ? tested : tagged;
-    const next = !current;
-    try {
-      localStorage.setItem(`toyah:${key}:${gameId}`, next ? "1" : "0");
-    } catch {
-      /* noop */
-    }
-    if (key === "tested") setTested(next);
-    else setTagged(next);
-  }
-
-  const items: { label: string; done: boolean; onTap?: () => void; hint: string }[] = [
-    {
-      label: "Parcours créé",
-      done: stepCount > 0,
-      hint: stepCount > 0 ? `${stepCount} étape${stepCount > 1 ? "s" : ""}` : "ajoute des étapes ci-dessous",
-    },
-    {
-      label: "Parcours testé",
-      done: tested,
-      onTap: () => toggle("tested"),
-      hint: tested ? "validé en mode test" : "lance « 🧪 Tester mon parcours »",
-    },
-    ...(hasNfc
-      ? [
-          {
-            label: "Balises écrites / imprimées",
-            done: tagged,
-            onTap: () => toggle("tagged"),
-            hint: tagged ? "puces et QR prêts" : "onglet « 🏷️ Balises »",
-          },
-        ]
-      : []),
-    {
-      label: "Partie lancée",
-      done: launched,
-      hint: launched ? "c'est parti !" : "depuis le dashboard live, le jour J",
-    },
-  ];
-
-  const doneCount = items.filter((i) => i.done).length;
-
-  return (
-    <Card className="p-4 mb-6">
-      <div className="flex items-center justify-between mb-2">
-        <h2 className="font-display text-lg">🗺️ Avant le jour J</h2>
-        <span className="font-bold text-ink/60 text-sm tabular-nums">
-          {doneCount}/{items.length}
-        </span>
-      </div>
-      <ul className="space-y-1.5">
-        {items.map((item) => (
-          <li key={item.label}>
-            <button
-              className="w-full flex items-center gap-2.5 text-left rounded-lg px-1 py-1 disabled:pointer-events-none"
-              onClick={item.onTap}
-              disabled={!item.onTap}
-            >
-              <span
-                className={`w-7 h-7 shrink-0 rounded-md border-2 border-ink flex items-center justify-center font-display text-sm ${
-                  item.done ? "bg-leaf text-parchment" : "bg-white text-transparent"
-                }`}
-              >
-                ✓
-              </span>
-              <span className={`font-bold ${item.done ? "text-ink/50 line-through" : "text-ink"}`}>
-                {item.label}
-              </span>
-              <span className="ml-auto text-xs font-bold text-ink/50 text-right">{item.hint}</span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    </Card>
-  );
-}
-
 export default function GameEditPage() {
   const { user, loading } = useOrgAuth();
   const params = useParams<{ id: string }>();
@@ -230,15 +128,6 @@ export default function GameEditPage() {
         </Card>
       )}
 
-      {game.status === "lobby" && (
-        <Checklist
-          gameId={gameId}
-          stepCount={steps.length}
-          hasNfc={steps.some((s) => s.type === "nfc")}
-          launched={game.status !== "lobby"}
-        />
-      )}
-
       {/* Réglages */}
       <Card className="p-4 mb-6">
         <h2 className="font-display text-lg mb-3">Réglages</h2>
@@ -294,6 +183,44 @@ export default function GameEditPage() {
                 <span className="block text-xs font-bold text-ink/60">{o.help}</span>
               </button>
             ))}
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <div>
+            <Label>
+              Pénalité « passer un mini-jeu »
+              {(game.settings.scoring ?? "time") === "points" ? " (points)" : " (min)"}
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              inputMode="numeric"
+              disabled={!editable}
+              defaultValue={
+                (game.settings.scoring ?? "time") === "points"
+                  ? game.settings.skip_penalty_points ?? 50
+                  : Math.round((game.settings.skip_penalty_sec ?? 180) / 60)
+              }
+              onBlur={(e) =>
+                saveSettings(
+                  (game.settings.scoring ?? "time") === "points"
+                    ? { skip_penalty_points: Number(e.target.value) || 0 }
+                    : { skip_penalty_sec: (Number(e.target.value) || 0) * 60 }
+                )
+              }
+            />
+          </div>
+          <div>
+            <Label>Pénalité « photo refusée » (min)</Label>
+            <Input
+              type="number"
+              min={0}
+              inputMode="numeric"
+              disabled={!editable}
+              defaultValue={Math.round((game.settings.photo_penalty_sec ?? 180) / 60)}
+              onBlur={(e) => saveSettings({ photo_penalty_sec: (Number(e.target.value) || 0) * 60 })}
+            />
+            <p className="text-xs font-bold text-ink/50 mt-1">Mode chrono. En points : 0 point sur l&apos;étape.</p>
           </div>
         </div>
       </Card>

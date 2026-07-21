@@ -14,6 +14,8 @@ import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
+import { showToast } from "@/components/ui/Toaster";
+import { useConfirm } from "@/components/ui/Confirm";
 
 const STATUS_LABEL: Record<Game["status"], { text: string; cls: string }> = {
   lobby: { text: "Lobby ouvert", cls: "bg-gold text-ink" },
@@ -24,6 +26,7 @@ const STATUS_LABEL: Record<Game["status"], { text: string; cls: string }> = {
 
 export default function OrgDashboardPage() {
   const { user, loading } = useOrgAuth();
+  const { confirm, confirmDialog } = useConfirm();
   const router = useRouter();
   const [games, setGames] = useState<Game[] | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -56,7 +59,7 @@ export default function OrgDashboardPage() {
       // Session d'un compte supprimé côté Supabase → on purge et on repart au login
       if (/created_by_fkey|foreign key/i.test(raw)) {
         await sb().auth.signOut();
-        alert("Ta session n'est plus valide (compte supprimé ou recréé) — reconnecte-toi.");
+        showToast("Ta session n'est plus valide — reconnecte-toi.", "error");
         router.replace("/org/login");
         return;
       }
@@ -66,7 +69,14 @@ export default function OrgDashboardPage() {
   }
 
   async function deleteGame(game: Game) {
-    if (!confirm(`Supprimer définitivement « ${game.name} » (${game.code}) ?`)) return;
+    const ok = await confirm({
+      title: "Supprimer la partie ?",
+      message: `« ${game.name} » (${game.code}), ses étapes et ses photos seront définitivement effacées.`,
+      confirmLabel: "Supprimer",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
     // Nettoie d'abord les médias Storage (sinon fichiers orphelins)
     try {
       const { data } = await sb().auth.getSession();
@@ -83,8 +93,16 @@ export default function OrgDashboardPage() {
     } catch {
       /* best-effort */
     }
-    await sb().from("games").delete().eq("id", game.id);
-    void load();
+    try {
+      const { error } = await sb().from("games").delete().eq("id", game.id);
+      if (error) throw new Error(error.message);
+      showToast("Partie supprimée", "success");
+      await load();
+    } catch (err) {
+      showToast(`Suppression impossible : ${err instanceof Error ? err.message : "erreur"}`, "error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function createFromTemplate(template: GameTemplate) {
@@ -135,7 +153,7 @@ export default function OrgDashboardPage() {
       const copy = await rpc<Game>("org_duplicate_game", { p_game_id: game.id });
       router.push(`/org/games/${copy.id}/edit`);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Duplication impossible");
+      showToast(err instanceof Error ? err.message : "Duplication impossible", "error");
       setBusy(false);
     }
   }
@@ -268,6 +286,8 @@ export default function OrgDashboardPage() {
           </Button>
         </form>
       </Dialog>
+
+      {confirmDialog}
     </main>
   );
 }

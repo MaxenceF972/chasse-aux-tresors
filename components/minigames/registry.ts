@@ -19,6 +19,7 @@ import { logicDef } from "./LogicPuzzle";
 import { nonogramDef } from "./Nonogram";
 import { sokobanDef } from "./Sokoban";
 import { cryptoDef } from "./Crypto";
+import { bontoDef } from "./Bonto";
 
 /**
  * Banque de mini-jeux. Pour en ajouter un : créer le composant + son éditeur
@@ -44,6 +45,7 @@ export const MINIGAMES: Record<MinigameKind, MiniGameDef> = {
   nonogram: nonogramDef,
   sokoban: sokobanDef,
   crypto: cryptoDef,
+  bonto: bontoDef,
 };
 
 export const MINIGAME_LIST: MiniGameDef[] = Object.values(MINIGAMES);
