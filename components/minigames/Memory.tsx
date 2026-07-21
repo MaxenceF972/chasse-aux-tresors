@@ -12,7 +12,8 @@ interface MemoryConfig {
   image_urls: string[];
 }
 
-const DEFAULT_EMOJIS = ["🗺️", "💰", "🧭", "⚓", "🏴‍☠️", "🦜", "🗝️", "💎"];
+// Le dos des cartes est une boussole 🧭 → on ne la met pas dans les paires.
+const DEFAULT_EMOJIS = ["🗺️", "💰", "⛵", "⚓", "🏴‍☠️", "🦜", "🗝️", "💎"];
 
 interface MemoryCard {
   id: number;
@@ -93,35 +94,46 @@ function MemoryGame({ config, seed, onComplete }: MiniGameProps) {
           const isUp = flipped.includes(card.id) || matched.has(card.pairKey);
           const isMatched = matched.has(card.pairKey);
           return (
-            <motion.button
+            <button
               key={card.id}
               onClick={() => tap(card)}
-              className="relative aspect-square rounded-xl border-[3px] border-ink overflow-hidden"
-              animate={{ rotateY: isUp ? 180 : 0, opacity: isMatched ? 0.55 : 1 }}
-              transition={{ duration: 0.3 }}
-              style={{ transformStyle: "preserve-3d" }}
+              className="relative aspect-square"
+              style={{ perspective: 600 }}
               aria-label="Carte"
             >
-              {/* Dos */}
-              <div
-                className="absolute inset-0 bg-crimson flex items-center justify-center text-2xl"
-                style={{ backfaceVisibility: "hidden" }}
+              {/* overflow-hidden est interdit ici : il aplatirait le contexte 3D
+                  et la face resterait invisible (chaque face gère ses coins). */}
+              <motion.div
+                className="absolute inset-0"
+                animate={{ rotateY: isUp ? 180 : 0, opacity: isMatched ? 0.55 : 1 }}
+                transition={{ duration: 0.3 }}
+                style={{ transformStyle: "preserve-3d" }}
               >
-                <span className="opacity-70">🧭</span>
-              </div>
-              {/* Face */}
-              <div
-                className="absolute inset-0 parchment-texture flex items-center justify-center text-3xl"
-                style={{ backfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
-              >
-                {card.isImage ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={card.pairKey} alt="" className="w-full h-full object-cover" />
-                ) : (
-                  card.pairKey
-                )}
-              </div>
-            </motion.button>
+                {/* Dos */}
+                <div
+                  className="absolute inset-0 rounded-xl border-[3px] border-ink bg-crimson flex items-center justify-center text-2xl"
+                  style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
+                >
+                  <span className="opacity-70">🧭</span>
+                </div>
+                {/* Face */}
+                <div
+                  className="absolute inset-0 rounded-xl border-[3px] border-ink overflow-hidden parchment-texture flex items-center justify-center text-3xl"
+                  style={{
+                    backfaceVisibility: "hidden",
+                    WebkitBackfaceVisibility: "hidden",
+                    transform: "rotateY(180deg)",
+                  }}
+                >
+                  {card.isImage ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={card.pairKey} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    card.pairKey
+                  )}
+                </div>
+              </motion.div>
+            </button>
           );
         })}
       </div>
