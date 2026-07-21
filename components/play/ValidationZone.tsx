@@ -12,7 +12,6 @@ import { showToast } from "@/components/ui/Toaster";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
-import QrScanModal from "./QrScanModal";
 import MinigameModal from "./MinigameModal";
 
 interface ValidationZoneProps {
@@ -144,7 +143,6 @@ function NfcValidation({
   const [nfcSupported, setNfcSupported] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [nfcError, setNfcError] = useState<string | null>(null);
-  const [qrOpen, setQrOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualCode, setManualCode] = useState("");
   const abortRef = useRef<AbortController | null>(null);
@@ -183,11 +181,11 @@ function NfcValidation({
       if (err instanceof DOMException && err.name === "AbortError") return;
       if (err instanceof DOMException && err.name === "NotAllowedError") {
         setNfcError(
-          "📵 Accès NFC refusé. Autorise-le quand le navigateur le demande (ou dans les réglages du site), ou scanne la balise avec la caméra ci-dessous."
+          "📵 Accès NFC refusé. Autorise-le quand le navigateur le demande (ou dans les réglages du site), puis réessaie."
         );
       } else {
         setNfcError(
-          "📵 Lecture NFC impossible sur ce téléphone (NFC coupé ?). Active le NFC dans les réglages, ou scanne la balise avec la caméra ci-dessous."
+          "📵 Lecture NFC impossible (NFC coupé ?). Active le NFC dans les réglages du téléphone, puis réessaie — ou saisis le code de la balise ci-dessous."
         );
       }
     }
@@ -220,40 +218,29 @@ function NfcValidation({
           </Button>
         ))}
       {!nfcSupported && (
-        <p className="text-center font-bold text-ink/60 text-sm">
-          📡 Positionne ton téléphone sur la balise — ou scanne-la avec la caméra :
-        </p>
+        <div className="rounded-xl border-[3px] border-ink bg-gold px-4 py-4 text-center">
+          <div className="text-3xl mb-1 animate-pulse">📡</div>
+          <p className="font-display text-lg leading-tight">
+            POSITIONNE TON TÉLÉPHONE SUR LA BALISE
+          </p>
+          <p className="font-bold text-ink/60 text-sm mt-1">
+            Colle le haut du téléphone sur la balise, écran allumé : la validation
+            s&apos;ouvre toute seule !
+          </p>
+        </div>
       )}
       {nfcError && (
         <p className="text-center font-bold text-crimson text-sm rounded-xl border-2 border-crimson/40 bg-crimson/5 px-3 py-2">
           {nfcError}
         </p>
       )}
-      <Button
-        full
-        size={nfcSupported ? "lg" : "xl"}
-        variant={nfcSupported ? "parchment" : "gold"}
-        onClick={() => setQrOpen(true)}
-        disabled={disabled}
-      >
-        📷 SCANNER LA BALISE (CAMÉRA)
-      </Button>
       <button
         className="w-full text-center font-bold text-ink/60 underline py-1"
         onClick={() => setManualOpen(true)}
         disabled={disabled}
       >
-        Balise abîmée ? Saisir le code imprimé
+        Balise abîmée ou introuvable ? Saisir son code
       </button>
-
-      <QrScanModal
-        open={qrOpen}
-        onClose={() => setQrOpen(false)}
-        onScan={(value) => {
-          setQrOpen(false);
-          void onRun("qr", { tag: extractTagId(value) });
-        }}
-      />
 
       <Dialog open={manualOpen} onClose={() => setManualOpen(false)} title="🔢 Code de la balise">
         <form onSubmit={submitManual} className="space-y-4">
