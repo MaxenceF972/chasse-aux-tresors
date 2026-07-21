@@ -165,7 +165,7 @@ export default function FinalPage() {
   return (
     <main className="min-h-dvh px-5 py-8 max-w-lg mx-auto">
       <div className="text-center mb-8">
-        <Logo className="w-32 mx-auto" />
+        <Logo className="w-52 max-w-[60vw] mx-auto" />
         <motion.h1
           initial={{ scale: 0, rotate: -8 }}
           animate={{ scale: 1, rotate: -2 }}

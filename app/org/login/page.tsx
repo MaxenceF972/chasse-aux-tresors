@@ -65,7 +65,7 @@ export default function OrgLoginPage() {
   return (
     <main className="min-h-dvh flex flex-col items-center justify-center px-5 py-10 gap-8">
       <Link href="/">
-        <Logo className="w-44" />
+        <Logo className="w-64 max-w-[70vw]" />
       </Link>
 
       <Card className="w-full max-w-sm p-6">

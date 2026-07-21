@@ -217,7 +217,7 @@ export default function LobbyPage() {
     <main className="min-h-dvh px-5 py-8 max-w-lg mx-auto flex flex-col gap-6">
       <div className="text-center">
         <Link href="/" className="inline-block">
-          <Logo className="w-36 mx-auto" />
+          <Logo className="w-56 max-w-[65vw] mx-auto" />
         </Link>
         <h1 className="font-display text-2xl text-parchment mt-3 leading-tight">
           {lobby.game.name}
