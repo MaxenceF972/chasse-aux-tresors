@@ -265,7 +265,13 @@ export default function LiveDashboardPage() {
   async function sendHint() {
     if (!hintTarget || !hintMessage.trim()) return;
     const message = hintMessage.trim();
-    await rpc("org_send_hint", { p_team_id: hintTarget.id, p_message: message });
+    try {
+      await rpc("org_send_hint", { p_team_id: hintTarget.id, p_message: message });
+    } catch (err) {
+      showToast(`Envoi impossible : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      return;
+    }
+    showToast("Indice envoyé 📨", "success");
     // Notification push en bonus (vibre même app fermée) — best-effort
     try {
       const { data } = await sb().auth.getSession();
@@ -386,7 +392,7 @@ export default function LiveDashboardPage() {
       <div className="flex flex-wrap gap-2 mb-6">
         {game.status === "lobby" && (
           <Button size="lg" disabled={busy} onClick={doStart}>
-            🚀 LANCER LA PARTIE
+            {busy ? "⏳ LANCEMENT…" : "🚀 LANCER LA PARTIE"}
           </Button>
         )}
         {game.status === "running" && (

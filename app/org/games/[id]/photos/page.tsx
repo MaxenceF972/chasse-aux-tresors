@@ -207,7 +207,7 @@ export default function PhotosPage() {
                           <div className="flex gap-1">
                             {sub.status !== "approved" && (
                               <button
-                                className="flex-1 h-8 rounded-lg border-2 border-ink bg-leaf text-parchment text-xs font-bold"
+                                className="flex-1 h-10 rounded-lg border-2 border-ink bg-leaf text-parchment text-xs font-bold"
                                 onClick={() => review(sub, true)}
                               >
                                 ✅
@@ -215,14 +215,14 @@ export default function PhotosPage() {
                             )}
                             {sub.status !== "rejected" && (
                               <button
-                                className="flex-1 h-8 rounded-lg border-2 border-ink bg-crimson text-parchment text-xs font-bold"
+                                className="flex-1 h-10 rounded-lg border-2 border-ink bg-crimson text-parchment text-xs font-bold"
                                 onClick={() => review(sub, false)}
                               >
                                 ❌
                               </button>
                             )}
                             <button
-                              className={`flex-1 h-8 rounded-lg border-2 border-ink text-xs font-bold ${
+                              className={`flex-1 h-10 rounded-lg border-2 border-ink text-xs font-bold ${
                                 sub.is_winner ? "bg-gold text-ink" : "bg-white text-ink"
                               }`}
                               onClick={() => setWinner(sub)}

@@ -101,7 +101,8 @@ export default function GameEditPage() {
     if (!game) return;
     const settings = { ...game.settings, ...patch };
     setGame({ ...game, settings });
-    await sb().from("games").update({ settings }).eq("id", gameId);
+    const { error } = await sb().from("games").update({ settings }).eq("id", gameId);
+    if (error) showToast(`Réglage non enregistré : ${error.message}`, "error");
   }
 
   if (loading || !user || !game) return <Spinner label="Chargement…" />;
