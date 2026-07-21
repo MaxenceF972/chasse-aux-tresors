@@ -451,62 +451,6 @@ export default function LiveDashboardPage() {
         </Card>
       )}
 
-      {/* Messages des équipes : panneau dédié pour ne jamais rater un SOS */}
-      {teamMessages.length > 0 && (
-        <>
-          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-            <h2 className="font-display text-2xl text-gold">
-              🆘 Messages des équipes
-              {unreadCount > 0 && (
-                <span className="ml-2 inline-block align-middle text-sm font-bold bg-crimson text-parchment border-2 border-ink rounded-full px-2.5 py-0.5 animate-pulse">
-                  {unreadCount} nouveau{unreadCount > 1 ? "x" : ""}
-                </span>
-              )}
-            </h2>
-            {unreadCount > 0 && (
-              <button className="font-bold text-parchment/60 underline text-sm py-1" onClick={markMessagesRead}>
-                Tout marquer lu
-              </button>
-            )}
-          </div>
-          <div className="space-y-2 mb-8">
-            {teamMessages.slice(0, 8).map((msg) => {
-              const team = msg.team_id ? teamMap.get(msg.team_id) : undefined;
-              const isNew = msg.id > seenMsgId;
-              return (
-                <Card key={msg.id} className={`p-3 ${isNew ? "ring-4 ring-crimson" : ""}`}>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
-                      style={{ backgroundColor: team?.color }}
-                    />
-                    <span className="font-display truncate">{team?.name ?? "?"}</span>
-                    <span className="font-bold text-ink/45 text-xs">{formatClock(msg.created_at)}</span>
-                    {isNew && <span className="font-bold text-crimson text-xs animate-pulse">● NOUVEAU</span>}
-                    {team && (
-                      <div className="ml-auto">
-                        <Button size="sm" variant="gold" onClick={() => setHintTarget(team)}>
-                          💬 Répondre
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                  <p className="font-bold text-ink/85 mt-1.5">{String(msg.payload.message ?? "")}</p>
-                  {!!msg.payload.nickname && (
-                    <p className="font-bold text-ink/45 text-xs mt-0.5">— {String(msg.payload.nickname)}</p>
-                  )}
-                </Card>
-              );
-            })}
-            {teamMessages.length > 8 && (
-              <p className="font-bold text-parchment/50 text-sm">
-                Les messages plus anciens restent dans le journal (filtre 🆘 SOS).
-              </p>
-            )}
-          </div>
-        </>
-      )}
-
       {game.status === "lobby" && (
         <Card className="p-4 mb-6">
           <h2 className="font-display text-lg mb-1">En attente dans le lobby…</h2>
@@ -558,92 +502,6 @@ export default function LiveDashboardPage() {
         </Card>
       )}
 
-      {/* Photos à valider */}
-      {submissions.length > 0 && (
-        <>
-          <h2 className="font-display text-2xl text-gold mb-3 animate-pulse">
-            📸 Photos à valider ({submissions.length})
-          </h2>
-          <div className="space-y-4 mb-8">
-            {submissions.map((submission) => {
-              const team = teamMap.get(submission.team_id);
-              const step = stepMap.get(submission.step_id);
-              return (
-                <Card key={submission.id} className="p-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span
-                      className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
-                      style={{ backgroundColor: team?.color }}
-                    />
-                    <span className="font-display truncate">{team?.name ?? "?"}</span>
-                    <span className="font-bold text-ink/50 text-sm truncate">
-                      — {step?.title ?? "?"}
-                    </span>
-                  </div>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={submission.url}
-                    alt={`Photo de ${team?.name ?? "?"}`}
-                    className="w-full max-h-80 object-contain rounded-xl border-[3px] border-ink bg-ink mb-3"
-                  />
-                  <div className="flex gap-2">
-                    <Button className="flex-1" variant="leaf" onClick={() => reviewPhoto(submission, true)}>
-                      ✅ VALIDER
-                    </Button>
-                    <Button className="flex-1" variant="crimson" onClick={() => reviewPhoto(submission, false)}>
-                      ❌ REFUSER
-                    </Button>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </>
-      )}
-
-      {/* Carte de suivi GPS */}
-      {game.status !== "lobby" && (
-        <>
-          <h2 className="font-display text-2xl text-parchment mb-3">📍 Sur le terrain</h2>
-          <div className="mb-3">
-            <TeamMap players={players} teams={teams} />
-          </div>
-          {players.some((p) => p.last_lat != null) && (
-            <ul className="mb-8 space-y-1">
-              {players
-                .filter((p) => p.last_lat != null && p.last_lng != null)
-                .sort((a, b) => (a.pos_updated_at ?? "") < (b.pos_updated_at ?? "") ? 1 : -1)
-                .map((p) => {
-                  const ageMin = p.pos_updated_at
-                    ? Math.round((Date.now() - new Date(p.pos_updated_at).getTime()) / 60000)
-                    : null;
-                  return (
-                    <li key={p.id} className="flex items-center gap-2 font-bold text-sm text-parchment/80">
-                      <span
-                        className="w-3 h-3 rounded-full border border-parchment/40 shrink-0"
-                        style={{ backgroundColor: teamMap.get(p.team_id)?.color }}
-                      />
-                      <span className="truncate">{p.nickname}</span>
-                      <span className="text-parchment/45">
-                        {ageMin != null ? (ageMin < 1 ? "à l'instant" : `il y a ${ageMin} min`) : ""}
-                      </span>
-                      <a
-                        className="ml-auto underline text-parchment/60 py-1"
-                        href={`https://maps.google.com/?q=${p.last_lat},${p.last_lng}`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        🗺️ Maps
-                      </a>
-                    </li>
-                  );
-                })}
-            </ul>
-          )}
-          {!players.some((p) => p.last_lat != null) && <div className="mb-8" />}
-        </>
-      )}
-
       {/* Classement live */}
       {game.status !== "lobby" && (
         <>
@@ -658,7 +516,7 @@ export default function LiveDashboardPage() {
             🔴 : passée avec pénalité · grise : temps écoulé · blanche : à venir. Touche une case
             pour voir le nom de l&apos;étape.
           </p>
-          <div className="space-y-3 mb-8">
+          <div className="space-y-3 mb-8 max-h-[30rem] overflow-y-auto overscroll-contain pr-1">
             {ranking.map((live, i) => (
               <Card key={live.team.id} className="p-4">
                 <div className="flex items-center gap-3 mb-2">
@@ -768,6 +626,57 @@ export default function LiveDashboardPage() {
         </>
       )}
 
+      {/* Messages des équipes : panneau dédié pour ne jamais rater un SOS */}
+      {teamMessages.length > 0 && (
+        <>
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <h2 className="font-display text-2xl text-gold">
+              🆘 Messages des équipes
+              {unreadCount > 0 && (
+                <span className="ml-2 inline-block align-middle text-sm font-bold bg-crimson text-parchment border-2 border-ink rounded-full px-2.5 py-0.5 animate-pulse">
+                  {unreadCount} nouveau{unreadCount > 1 ? "x" : ""}
+                </span>
+              )}
+            </h2>
+            {unreadCount > 0 && (
+              <button className="font-bold text-parchment/60 underline text-sm py-1" onClick={markMessagesRead}>
+                Tout marquer lu
+              </button>
+            )}
+          </div>
+          <div className="space-y-2 mb-8 max-h-80 overflow-y-auto overscroll-contain pr-1">
+            {teamMessages.slice(0, 30).map((msg) => {
+              const team = msg.team_id ? teamMap.get(msg.team_id) : undefined;
+              const isNew = msg.id > seenMsgId;
+              return (
+                <Card key={msg.id} className={`p-3 ${isNew ? "ring-4 ring-crimson" : ""}`}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
+                      style={{ backgroundColor: team?.color }}
+                    />
+                    <span className="font-display truncate">{team?.name ?? "?"}</span>
+                    <span className="font-bold text-ink/45 text-xs">{formatClock(msg.created_at)}</span>
+                    {isNew && <span className="font-bold text-crimson text-xs animate-pulse">● NOUVEAU</span>}
+                    {team && (
+                      <div className="ml-auto">
+                        <Button size="sm" variant="gold" onClick={() => setHintTarget(team)}>
+                          💬 Répondre
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  <p className="font-bold text-ink/85 mt-1.5">{String(msg.payload.message ?? "")}</p>
+                  {!!msg.payload.nickname && (
+                    <p className="font-bold text-ink/45 text-xs mt-0.5">— {String(msg.payload.nickname)}</p>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        </>
+      )}
+
       {/* Log d'événements */}
       <h2 className="font-display text-2xl text-parchment mb-3">Journal</h2>
       <div className="flex gap-1.5 mb-3 flex-wrap">
@@ -825,6 +734,91 @@ export default function LiveDashboardPage() {
           );
         })()}
       </Card>
+
+      {/* Photos à valider */}
+      {submissions.length > 0 && (
+        <>
+          <h2 className="font-display text-2xl text-gold mb-3 mt-8 animate-pulse">
+            📸 Photos à valider ({submissions.length})
+          </h2>
+          <div className="space-y-4 mb-8">
+            {submissions.map((submission) => {
+              const team = teamMap.get(submission.team_id);
+              const step = stepMap.get(submission.step_id);
+              return (
+                <Card key={submission.id} className="p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <span
+                      className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
+                      style={{ backgroundColor: team?.color }}
+                    />
+                    <span className="font-display truncate">{team?.name ?? "?"}</span>
+                    <span className="font-bold text-ink/50 text-sm truncate">
+                      — {step?.title ?? "?"}
+                    </span>
+                  </div>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={submission.url}
+                    alt={`Photo de ${team?.name ?? "?"}`}
+                    className="w-full max-h-80 object-contain rounded-xl border-[3px] border-ink bg-ink mb-3"
+                  />
+                  <div className="flex gap-2">
+                    <Button className="flex-1" variant="leaf" onClick={() => reviewPhoto(submission, true)}>
+                      ✅ VALIDER
+                    </Button>
+                    <Button className="flex-1" variant="crimson" onClick={() => reviewPhoto(submission, false)}>
+                      ❌ REFUSER
+                    </Button>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {/* Carte de suivi GPS */}
+      {game.status !== "lobby" && (
+        <>
+          <h2 className="font-display text-2xl text-parchment mb-3 mt-8">📍 Sur le terrain</h2>
+          <div className="mb-3">
+            <TeamMap players={players} teams={teams} />
+          </div>
+          {players.some((p) => p.last_lat != null) && (
+            <ul className="mb-8 space-y-1">
+              {players
+                .filter((p) => p.last_lat != null && p.last_lng != null)
+                .sort((a, b) => (a.pos_updated_at ?? "") < (b.pos_updated_at ?? "") ? 1 : -1)
+                .map((p) => {
+                  const ageMin = p.pos_updated_at
+                    ? Math.round((Date.now() - new Date(p.pos_updated_at).getTime()) / 60000)
+                    : null;
+                  return (
+                    <li key={p.id} className="flex items-center gap-2 font-bold text-sm text-parchment/80">
+                      <span
+                        className="w-3 h-3 rounded-full border border-parchment/40 shrink-0"
+                        style={{ backgroundColor: teamMap.get(p.team_id)?.color }}
+                      />
+                      <span className="truncate">{p.nickname}</span>
+                      <span className="text-parchment/45">
+                        {ageMin != null ? (ageMin < 1 ? "à l'instant" : `il y a ${ageMin} min`) : ""}
+                      </span>
+                      <a
+                        className="ml-auto underline text-parchment/60 py-1"
+                        href={`https://maps.google.com/?q=${p.last_lat},${p.last_lng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        🗺️ Maps
+                      </a>
+                    </li>
+                  );
+                })}
+            </ul>
+          )}
+        </>
+      )}
 
       {/* Dialog gestion des joueurs d'une équipe */}
       <Dialog
