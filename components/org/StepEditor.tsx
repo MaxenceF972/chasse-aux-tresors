@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { sb } from "@/lib/supabase/client";
+import { frError, sb } from "@/lib/supabase/client";
 import type { Hint, MinigameKind, Step, StepSecrets, StepType } from "@/lib/types";
 import { newTagId, randomCode, tagUrl } from "@/lib/game/codes";
 import { MINIGAMES, MINIGAME_LIST } from "@/components/minigames/registry";
@@ -151,7 +151,7 @@ export default function StepEditor({
 
       onSaved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Enregistrement impossible");
+      setError(frError(err, "Enregistrement impossible — réessaie"));
       setBusy(false);
     }
   }

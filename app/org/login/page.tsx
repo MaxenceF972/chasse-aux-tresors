@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { sb } from "@/lib/supabase/client";
+import { frError, sb } from "@/lib/supabase/client";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import { Input, Label } from "@/components/ui/Input";
@@ -55,7 +55,7 @@ export default function OrgLoginPage() {
           ? "Email non confirmé — vérifie ta boîte mail."
           : /at least 6/i.test(raw)
             ? "Le mot de passe doit faire au moins 6 caractères."
-            : raw;
+            : frError(err, "Connexion impossible — réessaie");
       setMessage({ kind: "error", text });
     } finally {
       setBusy(false);

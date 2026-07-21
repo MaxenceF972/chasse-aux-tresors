@@ -92,10 +92,13 @@ export default function BalisesPage() {
       await ndef.write({ records: [{ recordType: "url", data: tagUrl(balise.tagId) }] });
       setNfcStatus((s) => ({ ...s, [balise.step.id]: "✅ Puce écrite avec succès !" }));
     } catch (err) {
-      setNfcStatus((s) => ({
-        ...s,
-        [balise.step.id]: `❌ Échec : ${err instanceof Error ? err.message : "erreur"}`,
-      }));
+      const reason =
+        err instanceof DOMException && err.name === "NotAllowedError"
+          ? "accès NFC refusé — autorise-le quand Chrome le demande, puis réessaie"
+          : err instanceof DOMException && err.name === "AbortError"
+            ? "écriture annulée"
+            : "vérifie que le NFC du téléphone est activé, puis réessaie";
+      setNfcStatus((s) => ({ ...s, [balise.step.id]: `❌ Échec : ${reason}` }));
     }
   }
 

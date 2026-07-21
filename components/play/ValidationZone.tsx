@@ -5,9 +5,10 @@ import type { PlayState, PublicStep, ValidateKind } from "@/lib/types";
 import type { SubmitOutcome } from "./usePlayState";
 import { extractTagId } from "@/lib/game/codes";
 import { uploadSubmissionPhoto } from "@/lib/game/media";
-import { rpc } from "@/lib/supabase/client";
+import { frError, rpc } from "@/lib/supabase/client";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
+import { showToast } from "@/components/ui/Toaster";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
@@ -142,6 +143,7 @@ function NfcValidation({
 }) {
   const [nfcSupported, setNfcSupported] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [nfcError, setNfcError] = useState<string | null>(null);
   const [qrOpen, setQrOpen] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualCode, setManualCode] = useState("");
@@ -154,6 +156,7 @@ function NfcValidation({
 
   async function startNfcScan() {
     setScanning(true);
+    setNfcError(null);
     try {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
@@ -174,8 +177,19 @@ function NfcValidation({
         }
       };
       await ndef.scan({ signal: ctrl.signal });
-    } catch {
+    } catch (err) {
       setScanning(false);
+      // Arrêt volontaire (bouton ou fermeture) : pas une erreur
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof DOMException && err.name === "NotAllowedError") {
+        setNfcError(
+          "📵 Accès NFC refusé. Autorise-le quand le navigateur le demande (ou dans les réglages du site), ou scanne la balise avec la caméra ci-dessous."
+        );
+      } else {
+        setNfcError(
+          "📵 Lecture NFC impossible sur ce téléphone (NFC coupé ?). Active le NFC dans les réglages, ou scanne la balise avec la caméra ci-dessous."
+        );
+      }
     }
   }
 
@@ -208,6 +222,11 @@ function NfcValidation({
       {!nfcSupported && (
         <p className="text-center font-bold text-ink/60 text-sm">
           📡 Positionne ton téléphone sur la balise — ou scanne-la avec la caméra :
+        </p>
+      )}
+      {nfcError && (
+        <p className="text-center font-bold text-crimson text-sm rounded-xl border-2 border-crimson/40 bg-crimson/5 px-3 py-2">
+          {nfcError}
         </p>
       )}
       <Button
@@ -291,7 +310,7 @@ function PhotoValidation({
       // Photo envoyée → on avance tout de suite ; l'organisateur jugera plus tard
       onAdvanced(!!res.finished);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Envoi impossible");
+      setError(frError(err, "Envoi impossible — réessaie"));
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -355,7 +374,11 @@ function MinigameValidation({
         sfx.pop();
         setSkipConfirm(false);
         await onRefetch();
+      } else {
+        showToast(res.error ?? "Impossible de passer le mini-jeu — réessaie", "error");
       }
+    } catch {
+      showToast("Connexion instable — impossible de passer le mini-jeu, réessaie", "error");
     } finally {
       setSkipBusy(false);
     }

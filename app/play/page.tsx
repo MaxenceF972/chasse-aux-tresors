@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ensureAnonSession, rpc } from "@/lib/supabase/client";
+import { ensureAnonSession, frError, rpc } from "@/lib/supabase/client";
 import type { LobbyState } from "@/lib/types";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
@@ -30,7 +30,7 @@ export default function JoinPage() {
       }
       router.push(`/play/${lobby.game.code}/lobby`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erreur de connexion");
+      setError(frError(err, "Connexion impossible — réessaie"));
       setBusy(false);
     }
   }

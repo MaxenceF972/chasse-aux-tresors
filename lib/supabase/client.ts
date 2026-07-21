@@ -49,3 +49,26 @@ export function isNetworkError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err);
   return /fetch|network|failed to fetch|load failed|timeout/i.test(msg);
 }
+
+/**
+ * Message d'erreur lisible par un humain : traduit les erreurs techniques
+ * courantes (réseau coupé, session expirée, anti-spam) qui sortent en anglais
+ * de Supabase/fetch. À utiliser à l'AFFICHAGE uniquement — jamais avant les
+ * tests logiques sur le message brut (codes INTERDIT, *_fkey, etc.).
+ */
+export function frError(err: unknown, fallback = "Une erreur est survenue — réessaie."): string {
+  const raw =
+    err instanceof Error
+      ? err.message
+      : err && typeof err === "object" && "message" in err
+        ? String((err as { message: unknown }).message)
+        : "";
+  if (!raw) return fallback;
+  if (/fetch|network|load failed|timeout/i.test(raw))
+    return "Pas de réseau — vérifie ta connexion et réessaie.";
+  if (/jwt|refresh token/i.test(raw) && /expired|invalid|not found|missing/i.test(raw))
+    return "Session expirée — recharge la page.";
+  if (/security purposes|rate limit/i.test(raw))
+    return "Trop de tentatives — patiente quelques secondes et réessaie.";
+  return raw;
+}

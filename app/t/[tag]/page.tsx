@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ensureAnonSession, isNetworkError, rpc } from "@/lib/supabase/client";
+import { ensureAnonSession, frError, isNetworkError, rpc } from "@/lib/supabase/client";
 import { enqueueValidation } from "@/lib/game/offline-queue";
 import { getPlayerSession } from "@/lib/game/session";
 import { sfx } from "@/lib/game/sounds";
@@ -110,7 +110,7 @@ export default function TagScanPage() {
           setGameCode(getPlayerSession()?.code ?? null);
           setState("offline");
         } else {
-          setMessage(err instanceof Error ? err.message : "Erreur inconnue");
+          setMessage(frError(err, "Erreur inconnue — réessaie"));
           setState("error");
         }
       }

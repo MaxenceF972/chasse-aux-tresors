@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { sb, rpc } from "@/lib/supabase/client";
+import { frError, sb, rpc } from "@/lib/supabase/client";
 import type { Game } from "@/lib/types";
 import { GAME_TEMPLATES, type GameTemplate } from "@/lib/game/templates";
 import { newTagId, randomCode } from "@/lib/game/codes";
@@ -67,7 +67,7 @@ export default function OrgDashboardPage() {
         router.replace("/org/login");
         return;
       }
-      setError(raw);
+      setError(frError(err, "Création impossible — réessaie"));
       setBusy(false);
     }
   }
@@ -103,7 +103,7 @@ export default function OrgDashboardPage() {
       showToast("Partie supprimée", "success");
       await load();
     } catch (err) {
-      showToast(`Suppression impossible : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Suppression impossible : ${frError(err, "erreur")}`, "error");
     } finally {
       setBusy(false);
     }
@@ -145,7 +145,7 @@ export default function OrgDashboardPage() {
       }
       router.push(`/org/games/${game.id}/edit`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Création impossible");
+      setError(frError(err, "Création impossible — réessaie"));
       setBusy(false);
       setTemplatesOpen(false);
     }
@@ -157,7 +157,7 @@ export default function OrgDashboardPage() {
       const copy = await rpc<Game>("org_duplicate_game", { p_game_id: game.id });
       router.push(`/org/games/${copy.id}/edit`);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Duplication impossible", "error");
+      showToast(frError(err, "Duplication impossible"), "error");
       setBusy(false);
     }
   }

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ensureAnonSession, rpc } from "@/lib/supabase/client";
+import { ensureAnonSession, frError, rpc } from "@/lib/supabase/client";
 import type { LobbyState, LobbyTeam } from "@/lib/types";
 import { setPlayerSession } from "@/lib/game/session";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
@@ -65,7 +65,7 @@ export default function LobbyPage() {
 
   useEffect(() => {
     void ensureAnonSession().then(load).catch((err) => {
-      setError(err instanceof Error ? err.message : "Erreur");
+      setError(frError(err, "Connexion impossible — recharge la page"));
     });
     const poll = setInterval(load, 4000);
     return () => clearInterval(poll);
@@ -572,5 +572,5 @@ function frenchError(err: unknown): string {
   if (raw.includes("MAX_EQUIPES_ATTEINT")) return "Le nombre maximum d'équipes est atteint.";
   if (raw.includes("PSEUDO_REQUIS")) return "Choisis un pseudo !";
   if (raw.includes("NOM_EQUIPE_REQUIS")) return "Donne un nom à ton équipe !";
-  return raw || "Erreur inconnue";
+  return frError(err, "Erreur inconnue — réessaie");
 }

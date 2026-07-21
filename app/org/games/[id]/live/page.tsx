@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { sb, rpc } from "@/lib/supabase/client";
+import { frError, sb, rpc } from "@/lib/supabase/client";
 import type { Game, GameEvent, Player, RankingData, Step, Submission, Team, TeamRoute } from "@/lib/types";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
@@ -193,7 +193,7 @@ export default function LiveDashboardPage() {
     } catch (err) {
       const raw = err instanceof Error ? err.message : "";
       const key = Object.keys(START_ERRORS).find((k) => raw.includes(k));
-      setError(key ? START_ERRORS[key] : raw);
+      setError(key ? START_ERRORS[key] : frError(err, "Lancement impossible — réessaie"));
     } finally {
       setBusy(false);
       void load();
@@ -219,7 +219,7 @@ export default function LiveDashboardPage() {
       );
       await load();
     } catch (err) {
-      showToast(`Échec : ${err instanceof Error ? err.message : "erreur inconnue"}`, "error");
+      showToast(`Échec : ${frError(err, "erreur inconnue")}`, "error");
     } finally {
       setBusy(false);
     }
@@ -238,7 +238,7 @@ export default function LiveDashboardPage() {
       showToast("Étape validée ✅", "success");
       await load();
     } catch (err) {
-      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Échec : ${frError(err, "erreur")}`, "error");
     }
   }
 
@@ -258,7 +258,7 @@ export default function LiveDashboardPage() {
       showToast(`Étape neutralisée pour ${res.teams_affected} équipe(s) ✅`, "success");
       await load();
     } catch (err) {
-      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Échec : ${frError(err, "erreur")}`, "error");
     }
   }
 
@@ -268,7 +268,7 @@ export default function LiveDashboardPage() {
     try {
       await rpc("org_send_hint", { p_team_id: hintTarget.id, p_message: message });
     } catch (err) {
-      showToast(`Envoi impossible : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Envoi impossible : ${frError(err, "erreur")}`, "error");
       return;
     }
     showToast("Indice envoyé 📨", "success");
@@ -300,7 +300,7 @@ export default function LiveDashboardPage() {
       showToast("Équipe renommée ✅", "success");
       await load();
     } catch (err) {
-      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Échec : ${frError(err, "erreur")}`, "error");
     }
   }
 
@@ -317,7 +317,7 @@ export default function LiveDashboardPage() {
       showToast("Équipe supprimée", "success");
       await load();
     } catch (err) {
-      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Échec : ${frError(err, "erreur")}`, "error");
     }
   }
 
@@ -327,7 +327,7 @@ export default function LiveDashboardPage() {
       showToast(approve ? "Photo validée ✅" : "Photo refusée", approve ? "success" : "info");
       await load();
     } catch (err) {
-      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Échec : ${frError(err, "erreur")}`, "error");
     }
   }
 
@@ -343,7 +343,7 @@ export default function LiveDashboardPage() {
       await sb().from("players").delete().eq("id", player.id);
       await load();
     } catch (err) {
-      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Échec : ${frError(err, "erreur")}`, "error");
     }
   }
 

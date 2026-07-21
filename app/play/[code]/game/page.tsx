@@ -126,6 +126,8 @@ export default function GameScreen() {
     if (res.ok) {
       showToast("Temps écoulé — étape passée (0 point)", "info");
       await refetch();
+    } else {
+      showToast("Impossible de passer l'étape — vérifie ta connexion et réessaie", "error");
     }
   }
 

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { sb } from "@/lib/supabase/client";
+import { frError, sb } from "@/lib/supabase/client";
 import type { Game, Step, StepSecrets, StepType } from "@/lib/types";
 import { DEFAULT_CHARTER_LINES } from "@/lib/game/charter";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
@@ -90,7 +90,7 @@ export default function GameEditPage() {
     if (!ok) return;
     const { error } = await sb().from("steps").delete().eq("id", step.id);
     if (error) {
-      showToast(`Suppression impossible : ${error.message}`, "error");
+      showToast(`Suppression impossible : ${frError(error, "erreur")}`, "error");
       return;
     }
     showToast("Étape supprimée", "success");
@@ -102,7 +102,7 @@ export default function GameEditPage() {
     const settings = { ...game.settings, ...patch };
     setGame({ ...game, settings });
     const { error } = await sb().from("games").update({ settings }).eq("id", gameId);
-    if (error) showToast(`Réglage non enregistré : ${error.message}`, "error");
+    if (error) showToast(`Réglage non enregistré : ${frError(error, "erreur")}`, "error");
   }
 
   if (loading || !user || !game) return <Spinner label="Chargement…" />;

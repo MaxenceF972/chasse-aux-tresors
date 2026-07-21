@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { uploadMedia } from "@/lib/game/media";
+import { frError } from "@/lib/supabase/client";
 import { Label } from "@/components/ui/Input";
 
 interface ImageFieldProps {
@@ -29,7 +30,7 @@ export default function ImageField({ label, gameId, urls, max = 1, onChange }: I
       }
       onChange(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload impossible");
+      setError(frError(err, "Envoi du fichier impossible — réessaie"));
     } finally {
       setBusy(false);
       if (inputRef.current) inputRef.current.value = "";

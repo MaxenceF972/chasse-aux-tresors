@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { sb, rpc } from "@/lib/supabase/client";
+import { frError, sb, rpc } from "@/lib/supabase/client";
 import type { Game, Step, Submission, Team } from "@/lib/types";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
@@ -71,7 +71,7 @@ export default function PhotosPage() {
       await rpc("org_review_photo", { p_submission_id: sub.id, p_approve: approve });
       await load();
     } catch (err) {
-      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Échec : ${frError(err, "erreur")}`, "error");
     }
   }
 
@@ -80,7 +80,7 @@ export default function PhotosPage() {
       await rpc("org_set_photo_winner", { p_submission_id: sub.id });
       await load();
     } catch (err) {
-      showToast(`Échec : ${err instanceof Error ? err.message : "erreur"}`, "error");
+      showToast(`Échec : ${frError(err, "erreur")}`, "error");
     }
   }
 

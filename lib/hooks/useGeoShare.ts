@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { rpc } from "@/lib/supabase/client";
+import { showToast } from "@/components/ui/Toaster";
 
 const MIN_INTERVAL_MS = 12000; // au plus une fois toutes les 12 s
 const MIN_MOVE_METERS = 12; // …ou dès 12 m de déplacement
@@ -19,6 +20,7 @@ function distanceMeters(a: { lat: number; lng: number }, b: { lat: number; lng: 
 /**
  * Partage la position de l'équipe avec l'organisateur (consentement requis).
  * Réactif : haute précision, lissage léger, et remontée dès 12 m / 12 s.
+ * Économe : le suivi est suspendu quand l'app passe en arrière-plan.
  */
 export function useGeoShare(enabled: boolean) {
   useEffect(() => {
@@ -27,6 +29,7 @@ export function useGeoShare(enabled: boolean) {
     let last: { lat: number; lng: number; at: number } | null = null;
     // Lissage exponentiel léger : atténue les sauts GPS sans traîner
     let smooth: { lat: number; lng: number } | null = null;
+    let deniedNotified = false;
 
     const report = (rawLat: number, rawLng: number, accuracy: number) => {
       // Ignore les points très imprécis (> 100 m) sauf tout premier fix
@@ -45,12 +48,40 @@ export function useGeoShare(enabled: boolean) {
       rpc("report_position", { p_lat: smooth.lat, p_lng: smooth.lng }).catch(() => {});
     };
 
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => report(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 999),
-      () => {},
-      { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
-    );
+    let watchId: number | null = null;
 
-    return () => navigator.geolocation.clearWatch(watchId);
+    const start = () => {
+      if (watchId != null) return;
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => report(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy ?? 999),
+        (err) => {
+          // Permission refusée au niveau du téléphone : sans message, l'équipe
+          // croit partager sa position alors que l'organisateur ne voit rien.
+          if (err.code === err.PERMISSION_DENIED && !deniedNotified) {
+            deniedNotified = true;
+            showToast(
+              "📍 Position bloquée par le téléphone. Pour que l'organisateur te voie sur la carte, autorise la localisation dans les réglages du navigateur, puis réactive le partage dans le menu ☰.",
+              "error"
+            );
+          }
+        },
+        { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
+      );
+    };
+    const stop = () => {
+      if (watchId != null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+    };
+    // Écran verrouillé / app en arrière-plan → on coupe le GPS (batterie)
+    const onVisibility = () => (document.hidden ? stop() : start());
+
+    start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [enabled]);
 }
