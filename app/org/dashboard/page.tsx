@@ -11,7 +11,7 @@ import { useOrgAuth } from "@/components/org/useOrgAuth";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Dialog from "@/components/ui/Dialog";
-import { Input, Label } from "@/components/ui/Input";
+import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
 import { showToast } from "@/components/ui/Toaster";
@@ -32,6 +32,7 @@ export default function OrgDashboardPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [newName, setNewName] = useState("");
+  const [newBriefing, setNewBriefing] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -52,7 +53,10 @@ export default function OrgDashboardPage() {
     setBusy(true);
     setError(null);
     try {
-      const game = await rpc<Game>("org_create_game", { p_name: newName });
+      const game = await rpc<Game>("org_create_game", {
+        p_name: newName,
+        p_settings: newBriefing.trim() ? { briefing: newBriefing.trim() } : {},
+      });
       router.push(`/org/games/${game.id}/edit`);
     } catch (err) {
       const raw = err instanceof Error ? err.message : "Création impossible";
@@ -278,6 +282,15 @@ export default function OrgDashboardPage() {
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="La chasse du Capitaine Toyah"
+            />
+          </div>
+          <div>
+            <Label>Présentation (affichée aux joueurs au lobby)</Label>
+            <TextArea
+              rows={4}
+              value={newBriefing}
+              onChange={(e) => setNewBriefing(e.target.value)}
+              placeholder={"Bienvenue moussaillons ! Le trésor du Capitaine a disparu…\nExpliquez le thème, le déroulé, les consignes du jour. (modifiable ensuite dans l'éditeur)"}
             />
           </div>
           {error && <p className="text-crimson font-bold text-sm">{error}</p>}

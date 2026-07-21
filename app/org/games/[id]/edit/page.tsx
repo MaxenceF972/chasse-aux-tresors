@@ -5,11 +5,12 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { sb } from "@/lib/supabase/client";
 import type { Game, Step, StepSecrets, StepType } from "@/lib/types";
+import { DEFAULT_CHARTER_LINES } from "@/lib/game/charter";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import StepEditor from "@/components/org/StepEditor";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
-import { Input, Label } from "@/components/ui/Input";
+import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 
 const TYPE_ICON: Record<StepType, string> = { nfc: "🏷️", text: "💬", minigame: "🎮", photo: "📸" };
@@ -127,6 +128,42 @@ export default function GameEditPage() {
           </p>
         </Card>
       )}
+
+      {/* Présentation & charte */}
+      <Card className="p-4 mb-6">
+        <h2 className="font-display text-lg mb-3">📜 Présentation & charte</h2>
+        <div className="space-y-3">
+          <div>
+            <Label>Le mot du maître du jeu (affiché aux joueurs au lobby)</Label>
+            <TextArea
+              rows={4}
+              defaultValue={game.settings.briefing ?? ""}
+              placeholder={"Bienvenue moussaillons ! Le trésor du Capitaine a disparu…\nThème, déroulé, consignes du jour — **gras** et *italique* supportés."}
+              onBlur={(e) => saveSettings({ briefing: e.target.value.trim() || undefined })}
+            />
+          </div>
+          <div>
+            <Label>Charte du capitaine (une règle par ligne — vide = charte par défaut)</Label>
+            <TextArea
+              rows={5}
+              defaultValue={(game.settings.charter ?? []).join("\n")}
+              placeholder={DEFAULT_CHARTER_LINES.join("\n")}
+              onBlur={(e) =>
+                saveSettings({
+                  charter: e.target.value
+                    .split("\n")
+                    .map((l) => l.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+            <p className="text-xs font-bold text-ink/50 mt-1">
+              Le capitaine devra l&apos;accepter au nom de son équipe avant de la créer. Astuce :
+              « Titre : détail » met le titre en avant.
+            </p>
+          </div>
+        </div>
+      </Card>
 
       {/* Réglages */}
       <Card className="p-4 mb-6">

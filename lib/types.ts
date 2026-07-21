@@ -37,6 +37,10 @@ export interface GameSettings {
   skip_penalty_points?: number;
   skip_penalty_sec?: number;
   photo_penalty_sec?: number;
+  /** Présentation de la chasse (thème, déroulé…) affichée aux joueurs au lobby */
+  briefing?: string;
+  /** Charte personnalisée par l'organisateur (une règle par ligne) — défaut si absente */
+  charter?: string[];
 }
 
 export interface Game {

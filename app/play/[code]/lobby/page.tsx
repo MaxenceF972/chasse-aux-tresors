@@ -17,6 +17,8 @@ import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
 import HowToPlay from "@/components/play/HowToPlay";
 import { showToast } from "@/components/ui/Toaster";
+import { charterRules } from "@/lib/game/charter";
+import { renderRich } from "@/lib/game/rich";
 import QRCode from "qrcode";
 
 export default function LobbyPage() {
@@ -209,6 +211,7 @@ export default function LobbyPage() {
   const myTeam = me ? lobby.teams?.find((t) => t.id === me.team_id) : null;
   const settings = lobby.game.settings;
   const maxPlayers = settings.max_players_per_team ?? null;
+  const rules = charterRules(settings.charter);
 
   return (
     <main className="min-h-dvh px-5 py-8 max-w-lg mx-auto flex flex-col gap-6">
@@ -226,6 +229,17 @@ export default function LobbyPage() {
           </Link>
         )}
       </div>
+
+      {/* Le mot du maître du jeu : thème et déroulé de la chasse */}
+      {settings.briefing && (
+        <Card className="p-4">
+          <p className="font-display text-sm text-ink/60 mb-1.5">📜 LE MOT DU MAÎTRE DU JEU</p>
+          <div
+            className="font-bold text-ink/85 leading-relaxed"
+            dangerouslySetInnerHTML={{ __html: renderRich(settings.briefing) }}
+          />
+        </Card>
+      )}
 
       {me && myTeam ? (
         <>
@@ -447,18 +461,14 @@ export default function LobbyPage() {
             En tant que capitaine, je m&apos;engage — pour toute mon équipe — à :
           </p>
           <ul className="space-y-2.5">
-            {[
-              ["🏷️", "Respecter les balises", "Ne pas récupérer, déplacer, cacher ni abîmer les balises. Elles servent aux autres équipes."],
-              ["🤝", "Respecter les autres équipes", "Jouer fair-play : pas de sabotage, pas de suivi d'une autre équipe, pas de triche."],
-              ["🚗", "Priorité à la sécurité", "Zéro alcool au volant. Respecter le code de la route et les règles des lieux traversés."],
-              ["🌿", "Respecter les lieux", "Ne pas dégrader l'environnement ni les propriétés privées. On ne laisse aucune trace."],
-              ["📱", "Rester prudent en marchant", "Lever les yeux de l'écran, surveiller la circulation, garder le groupe ensemble."],
-            ].map(([icon, title, text]) => (
-              <li key={title} className="flex gap-2.5">
-                <span className="text-2xl shrink-0">{icon}</span>
+            {rules.map((rule, i) => (
+              <li key={i} className="flex gap-2.5">
+                <span className="text-2xl shrink-0">{rule.icon}</span>
                 <div>
-                  <p className="font-display text-sm leading-tight">{title}</p>
-                  <p className="font-bold text-ink/65 text-sm">{text}</p>
+                  {rule.title && (
+                    <p className="font-display text-sm leading-tight">{rule.title}</p>
+                  )}
+                  <p className="font-bold text-ink/65 text-sm">{rule.text}</p>
                 </div>
               </li>
             ))}
