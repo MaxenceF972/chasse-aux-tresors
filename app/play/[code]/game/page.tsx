@@ -228,6 +228,38 @@ export default function GameScreen() {
           </div>
         )}
 
+        {/* Compte à rebours d'étape — bien visible, pleine largeur */}
+        {timerLeftSec != null && current && (
+          <div className="mt-3 rounded-xl border-[3px] border-ink bg-white/70 p-2.5">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="font-display text-sm text-ink/70">⏱️ TEMPS RESTANT</span>
+              <span
+                className={`font-display text-2xl tabular-nums ${
+                  timerLeftSec <= 0
+                    ? "text-crimson"
+                    : timerLeftSec <= 30
+                      ? "text-crimson animate-pulse"
+                      : "text-ink"
+                }`}
+              >
+                {timerLeftSec > 0
+                  ? `${Math.floor(timerLeftSec / 60)}:${String(timerLeftSec % 60).padStart(2, "0")}`
+                  : "0:00"}
+              </span>
+            </div>
+            <div className="h-3 rounded-full border-2 border-ink bg-parchment overflow-hidden">
+              <div
+                className={`h-full transition-[width] duration-1000 ease-linear ${
+                  timerLeftSec <= 30 ? "bg-crimson" : "bg-gold"
+                }`}
+                style={{
+                  width: `${Math.max(0, Math.min(100, (timerLeftSec / (current.step.time_limit_sec || 1)) * 100))}%`,
+                }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Chemin de progression vers le X */}
         <div className="mt-2">
           <ProgressPath total={progress.total} done={progress.done} color={team.color} />
@@ -289,22 +321,6 @@ export default function GameScreen() {
                 {isPoints && (
                   <span className="font-display text-sm bg-gold text-ink px-2.5 py-1 rounded-lg rotate-1">
                     {current.step.points} PTS
-                  </span>
-                )}
-                {timerLeftSec != null && (
-                  <span
-                    className={`font-display text-sm px-2.5 py-1 rounded-lg tabular-nums ${
-                      timerLeftSec <= 0
-                        ? "bg-crimson text-parchment"
-                        : timerLeftSec <= 60
-                          ? "bg-crimson/80 text-parchment animate-pulse"
-                          : "bg-ink text-parchment"
-                    }`}
-                  >
-                    ⌛{" "}
-                    {timerLeftSec > 0
-                      ? `${Math.floor(timerLeftSec / 60)}:${String(timerLeftSec % 60).padStart(2, "0")}`
-                      : "TEMPS ÉCOULÉ"}
                   </span>
                 )}
               </div>

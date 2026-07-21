@@ -22,6 +22,53 @@ interface Swap {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Gobelet cartoon dessiné (identique sur tous les téléphones, contrairement aux emojis). */
+function Cup({ grayscale }: { grayscale?: boolean }) {
+  return (
+    <svg
+      viewBox="0 0 80 92"
+      className="w-full max-w-[5rem]"
+      style={grayscale ? { filter: "grayscale(1)" } : undefined}
+      aria-hidden
+    >
+      {/* corps du gobelet renversé : plus large en bas (le bord posé au sol) */}
+      <path
+        d="M20 10 L60 10 L70 82 L10 82 Z"
+        fill="#C0392B"
+        stroke="#111111"
+        strokeWidth="4"
+        strokeLinejoin="round"
+      />
+      {/* reflet */}
+      <path d="M27 16 L33 16 L26 78 L19 78 Z" fill="#ffffff" opacity="0.18" />
+      {/* bandes dorées */}
+      <rect x="15" y="66" width="50" height="9" fill="#F5A623" stroke="#111111" strokeWidth="3" />
+      <rect x="21" y="12" width="38" height="7" rx="3" fill="#F5A623" stroke="#111111" strokeWidth="3" />
+    </svg>
+  );
+}
+
+/** Pièce d'or cartoon dessinée. */
+function Coin() {
+  return (
+    <svg viewBox="0 0 48 48" className="w-9 h-9" aria-hidden>
+      <circle cx="24" cy="24" r="20" fill="#F5A623" stroke="#111111" strokeWidth="4" />
+      <circle cx="24" cy="24" r="13" fill="none" stroke="#D68910" strokeWidth="3" />
+      <text
+        x="24"
+        y="31"
+        textAnchor="middle"
+        fontSize="18"
+        fontWeight="bold"
+        fill="#D68910"
+        fontFamily="serif"
+      >
+        $
+      </text>
+    </svg>
+  );
+}
+
 function BontoGame({ config, seed, onComplete }: MiniGameProps) {
   const cfg = config as unknown as BontoConfig;
   const cups = Math.min(5, Math.max(3, cfg.cups || 3));
@@ -180,25 +227,24 @@ function BontoGame({ config, seed, onComplete }: MiniGameProps) {
             >
               {/* Emplacement pièce : IDENTIQUE pour tous les gobelets (aucun tell).
                   La pièce n'apparaît que sous le bon gobelet ET seulement soulevé. */}
-              <div className="h-9 flex items-end justify-center">
+              <div className="h-10 flex items-end justify-center">
                 {hasCoin && (
-                  <motion.span
-                    className="text-3xl"
+                  <motion.div
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: isLifted ? 1 : 0, y: isLifted ? 0 : 8 }}
                     transition={{ duration: 0.2 }}
                   >
-                    🪙
-                  </motion.span>
+                    <Coin />
+                  </motion.div>
                 )}
               </div>
-              {/* Le gobelet */}
+              {/* Le gobelet (SVG plus grand, contours cartoon) */}
               <motion.div
-                animate={{ y: isLifted ? -34 : 0, rotate: isWrongPick ? [0, -8, 8, 0] : 0 }}
+                animate={{ y: isLifted ? -40 : 0, rotate: isWrongPick ? [0, -8, 8, 0] : 0 }}
                 transition={{ duration: 0.3 }}
-                className={`text-5xl ${isWrongPick ? "grayscale" : ""}`}
+                className="w-full flex justify-center px-1"
               >
-                🥥
+                <Cup grayscale={isWrongPick} />
               </motion.div>
             </motion.button>
           );
