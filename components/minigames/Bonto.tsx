@@ -178,16 +178,20 @@ function BontoGame({ config, seed, onComplete }: MiniGameProps) {
               disabled={phase !== "pick"}
               aria-label={`Gobelet ${slot + 1}`}
             >
-              {/* La pièce (visible si gobelet soulevé) */}
-              {hasCoin && (
-                <motion.div
-                  className="text-3xl mb-0.5"
-                  animate={{ opacity: isLifted ? 1 : 0, y: isLifted ? 0 : 10 }}
-                >
-                  🪙
-                </motion.div>
-              )}
-              {!hasCoin && <div className="h-9" />}
+              {/* Emplacement pièce : IDENTIQUE pour tous les gobelets (aucun tell).
+                  La pièce n'apparaît que sous le bon gobelet ET seulement soulevé. */}
+              <div className="h-9 flex items-end justify-center">
+                {hasCoin && (
+                  <motion.span
+                    className="text-3xl"
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: isLifted ? 1 : 0, y: isLifted ? 0 : 8 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    🪙
+                  </motion.span>
+                )}
+              </div>
               {/* Le gobelet */}
               <motion.div
                 animate={{ y: isLifted ? -34 : 0, rotate: isWrongPick ? [0, -8, 8, 0] : 0 }}
