@@ -140,6 +140,8 @@ export interface TeamRoute {
   position: number;
   status: RouteStatus;
   validated_at: string | null;
+  skipped: boolean;
+  timed_out: boolean;
 }
 
 export interface GameEvent {

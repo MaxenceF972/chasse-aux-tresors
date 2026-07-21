@@ -72,6 +72,8 @@ export default function LiveDashboardPage() {
   const [hintMessage, setHintMessage] = useState("");
   const [manageTeam, setManageTeam] = useState<Team | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [journalFilter, setJournalFilter] = useState<"all" | "sos" | "valid" | "warn" | "photo">("all");
+  const [seenMsgId, setSeenMsgId] = useState(0);
   const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
@@ -129,6 +131,27 @@ export default function LiveDashboardPage() {
 
   const stepMap = useMemo(() => new Map(steps.map((s) => [s.id, s])), [steps]);
   const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
+
+  // Messages SOS des équipes : panneau dédié + compteur de non-lus persistant
+  const teamMessages = useMemo(() => events.filter((e) => e.type === "team_message"), [events]);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`toyah:sos-seen:${gameId}`);
+      if (raw) setSeenMsgId(Number(raw) || 0);
+    } catch {
+      /* stockage indisponible : tout apparaîtra comme nouveau */
+    }
+  }, [gameId]);
+  const unreadCount = teamMessages.filter((m) => m.id > seenMsgId).length;
+  function markMessagesRead() {
+    const newest = teamMessages[0]?.id ?? 0;
+    setSeenMsgId(newest);
+    try {
+      localStorage.setItem(`toyah:sos-seen:${gameId}`, String(newest));
+    } catch {
+      /* noop */
+    }
+  }
   const teamMapRef = useRef(teamMap);
   teamMapRef.current = teamMap;
   const playersByTeam = useMemo(() => {
@@ -428,6 +451,62 @@ export default function LiveDashboardPage() {
         </Card>
       )}
 
+      {/* Messages des équipes : panneau dédié pour ne jamais rater un SOS */}
+      {teamMessages.length > 0 && (
+        <>
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+            <h2 className="font-display text-2xl text-gold">
+              🆘 Messages des équipes
+              {unreadCount > 0 && (
+                <span className="ml-2 inline-block align-middle text-sm font-bold bg-crimson text-parchment border-2 border-ink rounded-full px-2.5 py-0.5 animate-pulse">
+                  {unreadCount} nouveau{unreadCount > 1 ? "x" : ""}
+                </span>
+              )}
+            </h2>
+            {unreadCount > 0 && (
+              <button className="font-bold text-parchment/60 underline text-sm py-1" onClick={markMessagesRead}>
+                Tout marquer lu
+              </button>
+            )}
+          </div>
+          <div className="space-y-2 mb-8">
+            {teamMessages.slice(0, 8).map((msg) => {
+              const team = msg.team_id ? teamMap.get(msg.team_id) : undefined;
+              const isNew = msg.id > seenMsgId;
+              return (
+                <Card key={msg.id} className={`p-3 ${isNew ? "ring-4 ring-crimson" : ""}`}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
+                      style={{ backgroundColor: team?.color }}
+                    />
+                    <span className="font-display truncate">{team?.name ?? "?"}</span>
+                    <span className="font-bold text-ink/45 text-xs">{formatClock(msg.created_at)}</span>
+                    {isNew && <span className="font-bold text-crimson text-xs animate-pulse">● NOUVEAU</span>}
+                    {team && (
+                      <div className="ml-auto">
+                        <Button size="sm" variant="gold" onClick={() => setHintTarget(team)}>
+                          💬 Répondre
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  <p className="font-bold text-ink/85 mt-1.5">{String(msg.payload.message ?? "")}</p>
+                  {!!msg.payload.nickname && (
+                    <p className="font-bold text-ink/45 text-xs mt-0.5">— {String(msg.payload.nickname)}</p>
+                  )}
+                </Card>
+              );
+            })}
+            {teamMessages.length > 8 && (
+              <p className="font-bold text-parchment/50 text-sm">
+                Les messages plus anciens restent dans le journal (filtre 🆘 SOS).
+              </p>
+            )}
+          </div>
+        </>
+      )}
+
       {game.status === "lobby" && (
         <Card className="p-4 mb-6">
           <h2 className="font-display text-lg mb-1">En attente dans le lobby…</h2>
@@ -568,12 +647,17 @@ export default function LiveDashboardPage() {
       {/* Classement live */}
       {game.status !== "lobby" && (
         <>
-          <h2 className="font-display text-2xl text-parchment mb-3">
+          <h2 className="font-display text-2xl text-parchment mb-1">
             Classement live
             {game.settings.scoring === "points" && (
               <span className="text-gold text-base ml-2">(au barème points)</span>
             )}
           </h2>
+          <p className="font-bold text-parchment/50 text-xs mb-3">
+            Une case par étape — couleur de l&apos;équipe : validée · 🟡 clignotante : en cours ·
+            🔴 : passée avec pénalité · grise : temps écoulé · blanche : à venir. Touche une case
+            pour voir le nom de l&apos;étape.
+          </p>
           <div className="space-y-3 mb-8">
             {ranking.map((live, i) => (
               <Card key={live.team.id} className="p-4">
@@ -591,15 +675,37 @@ export default function LiveDashboardPage() {
                   </span>
                 </div>
 
-                {/* Barre de progression */}
-                <div className="h-3.5 rounded-full border-2 border-ink bg-white overflow-hidden mb-2">
-                  <div
-                    className="h-full transition-[width] duration-500"
-                    style={{
-                      width: `${live.total ? (live.done / live.total) * 100 : 0}%`,
-                      backgroundColor: live.team.color,
-                    }}
-                  />
+                {/* Avancement étape par étape (une case = une étape) */}
+                <div className="flex gap-[3px] mb-2">
+                  {routes
+                    .filter((r) => r.team_id === live.team.id)
+                    .sort((a, b) => a.position - b.position)
+                    .map((r) => {
+                      const st = stepMap.get(r.step_id);
+                      const label = `${r.position + 1}. ${st?.title ?? "?"}${
+                        r.skipped ? " (passée, pénalité)" : r.timed_out ? " (temps écoulé)" : ""
+                      }`;
+                      let cls = "bg-white";
+                      let bg: string | undefined;
+                      if (r.status === "done") {
+                        if (r.skipped) cls = "bg-crimson";
+                        else if (r.timed_out) cls = "bg-ink/25";
+                        else {
+                          cls = "";
+                          bg = live.team.color;
+                        }
+                      } else if (r.status === "current") {
+                        cls = "bg-gold animate-pulse";
+                      }
+                      return (
+                        <div
+                          key={r.id}
+                          title={label}
+                          className={`h-3.5 flex-1 rounded-sm border border-ink ${cls}`}
+                          style={bg ? { backgroundColor: bg } : undefined}
+                        />
+                      );
+                    })}
                 </div>
 
                 <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -617,12 +723,25 @@ export default function LiveDashboardPage() {
                           ` · ${Math.round(rankMap.get(live.team.id)?.points ?? 0)} pts`}
                       </>
                     ) : live.current ? (
-                      <>
-                        ➡️ {live.current.step.title}
-                        {live.current.since && (
-                          <span className="text-ink/45"> · depuis {formatClock(live.current.since)}</span>
-                        )}
-                      </>
+                      (() => {
+                        const cur = live.current;
+                        const min = cur.since
+                          ? Math.floor((Date.now() - new Date(cur.since).getTime()) / 60000)
+                          : null;
+                        const stuck = min != null && min >= 10 && game.status === "running";
+                        return (
+                          <>
+                            ➡️ {cur.step.title}
+                            {min != null && (
+                              <span className={stuck ? "text-crimson" : "text-ink/45"}>
+                                {" "}
+                                · depuis {min < 1 ? "moins d'une min" : `${min} min`}
+                                {stuck && " ⚠️ bloquée ? Envoie un indice !"}
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()
                     ) : (
                       "En attente…"
                     )}
@@ -651,19 +770,60 @@ export default function LiveDashboardPage() {
 
       {/* Log d'événements */}
       <h2 className="font-display text-2xl text-parchment mb-3">Journal</h2>
+      <div className="flex gap-1.5 mb-3 flex-wrap">
+        {(
+          [
+            ["all", "Tout"],
+            ["sos", `🆘 SOS${teamMessages.length ? ` (${teamMessages.length})` : ""}`],
+            ["valid", "✅ Validations"],
+            ["warn", "⚠️ Problèmes"],
+            ["photo", "📸 Photos"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setJournalFilter(key)}
+            className={`h-9 px-3 rounded-lg border-2 border-ink font-bold text-sm ${
+              journalFilter === key ? "bg-gold text-ink" : "bg-parchment/10 text-parchment/70"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <Card dark className="p-4 max-h-96 overflow-y-auto">
-        {events.length === 0 ? (
-          <p className="font-bold text-parchment/50">Rien pour l&apos;instant…</p>
-        ) : (
-          <ul className="space-y-2">
-            {events.map((e) => (
-              <li key={e.id} className="font-bold text-sm leading-snug">
-                <span className="text-parchment/40 font-mono mr-2">{formatClock(e.created_at)}</span>
-                {eventLabel(e, e.team_id ? teamMap.get(e.team_id)?.name : undefined)}
-              </li>
-            ))}
-          </ul>
-        )}
+        {(() => {
+          const FILTER_TYPES: Record<string, string[]> = {
+            sos: ["team_message"],
+            valid: ["step_validated", "team_finished", "manual_validate", "step_neutralized", "minigame_redeemed"],
+            warn: ["wrong_answer", "minigame_skipped", "step_timeout", "hint_unlocked", "game_paused"],
+            photo: ["photo_submitted", "photo_approved", "photo_rejected", "photo_winner"],
+          };
+          const shown =
+            journalFilter === "all"
+              ? events
+              : events.filter((e) => FILTER_TYPES[journalFilter]?.includes(e.type));
+          if (shown.length === 0) {
+            return <p className="font-bold text-parchment/50">Rien pour l&apos;instant…</p>;
+          }
+          return (
+            <ul className="space-y-2">
+              {shown.map((e) => (
+                <li
+                  key={e.id}
+                  className={`font-bold text-sm leading-snug ${
+                    e.type === "team_message"
+                      ? "text-gold bg-gold/10 rounded-lg px-2 py-1 -mx-2"
+                      : ""
+                  }`}
+                >
+                  <span className="text-parchment/40 font-mono mr-2">{formatClock(e.created_at)}</span>
+                  {eventLabel(e, e.team_id ? teamMap.get(e.team_id)?.name : undefined)}
+                </li>
+              ))}
+            </ul>
+          );
+        })()}
       </Card>
 
       {/* Dialog gestion des joueurs d'une équipe */}
@@ -760,9 +920,12 @@ export default function LiveDashboardPage() {
       <Dialog
         open={!!hintTarget}
         onClose={() => setHintTarget(null)}
-        title={`💡 Indice pour « ${hintTarget?.name ?? ""} »`}
+        title={`📨 Message pour « ${hintTarget?.name ?? ""} »`}
       >
         <div className="space-y-4">
+          <p className="font-bold text-ink/55 text-sm">
+            L&apos;équipe le reçoit immédiatement à l&apos;écran (et en notification si activée).
+          </p>
           <div>
             <Label>Message</Label>
             <TextArea
