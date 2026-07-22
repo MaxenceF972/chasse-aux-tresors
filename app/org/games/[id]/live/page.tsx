@@ -72,6 +72,7 @@ export default function LiveDashboardPage() {
   const [hintMessage, setHintMessage] = useState("");
   const [manageTeam, setManageTeam] = useState<Team | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
   const [journalFilter, setJournalFilter] = useState<"all" | "sos" | "valid" | "warn" | "photo">("all");
   const [seenMsgId, setSeenMsgId] = useState(0);
   const { confirm, confirmDialog } = useConfirm();
@@ -207,6 +208,38 @@ export default function LiveDashboardPage() {
     () => new Map((rank?.teams ?? []).map((t) => [t.id, t])),
     [rank]
   );
+
+  // Stats fun : temps par étape depuis les routes (validated_at successifs).
+  // Les étapes passées/expirées ne comptent pas comme des réussites.
+  const funStats = useMemo(() => {
+    if (!game?.started_at) return null;
+    const start = new Date(game.started_at).getTime();
+    const byTeam = new Map<string, TeamRoute[]>();
+    for (const r of routes) byTeam.set(r.team_id, [...(byTeam.get(r.team_id) ?? []), r]);
+    const bestByStep = new Map<string, { teamId: string; ms: number }>();
+    let flash: { teamId: string; stepId: string; ms: number } | null = null;
+    for (const [teamId, rs] of byTeam) {
+      let prev = start;
+      for (const r of rs.slice().sort((a, b) => a.position - b.position)) {
+        if (!r.validated_at) break;
+        const t = new Date(r.validated_at).getTime();
+        const ms = t - prev;
+        prev = t;
+        if (r.skipped || r.timed_out || ms <= 0) continue;
+        const best = bestByStep.get(r.step_id);
+        if (!best || ms < best.ms) bestByStep.set(r.step_id, { teamId, ms });
+        if (!flash || ms < flash.ms) flash = { teamId, stepId: r.step_id, ms };
+      }
+    }
+    let hardest: { stepId: string; ms: number } | null = null;
+    for (const [stepId, best] of bestByStep) {
+      if (!hardest || best.ms > hardest.ms) hardest = { stepId, ms: best.ms };
+    }
+    const firstFinisher = teams
+      .filter((t) => t.finished_at)
+      .sort((a, b) => (a.finished_at! < b.finished_at! ? -1 : 1))[0];
+    return { bestByStep, flash, hardest, firstFinisher };
+  }, [routes, teams, game?.started_at]);
 
   async function doStart() {
     setBusy(true);
@@ -426,6 +459,11 @@ export default function LiveDashboardPage() {
         {game.status === "paused" && (
           <Button variant="leaf" disabled={busy} onClick={() => setStatus("running")}>
             ▶️ Reprendre
+          </Button>
+        )}
+        {game.status !== "lobby" && (
+          <Button variant="parchment" disabled={busy} onClick={() => setStatsOpen(true)}>
+            📈 Stats
           </Button>
         )}
         {(game.status === "running" || game.status === "paused") && (
@@ -874,6 +912,87 @@ export default function LiveDashboardPage() {
         )}
       </Dialog>
 
+      {/* Dialog Stats : records par épreuve + infos fun */}
+      <Dialog open={statsOpen} onClose={() => setStatsOpen(false)} title="📈 Stats de la partie">
+        {!funStats || funStats.bestByStep.size === 0 ? (
+          <p className="font-bold text-ink/60">
+            Encore rien à raconter — les records apparaîtront dès les premières validations !
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {/* Infos fun */}
+            <div className="space-y-2">
+              {funStats.firstFinisher && (
+                <p className="font-bold text-sm rounded-xl border-2 border-ink/20 px-3 py-2">
+                  🏁 Premier arrivé au trésor :{" "}
+                  <span style={{ color: funStats.firstFinisher.color }} className="font-display">
+                    {funStats.firstFinisher.name}
+                  </span>
+                </p>
+              )}
+              {funStats.flash && (
+                <p className="font-bold text-sm rounded-xl border-2 border-ink/20 px-3 py-2">
+                  ⚡ Étape éclair : « {stepMap.get(funStats.flash.stepId)?.title ?? "?"} » par{" "}
+                  <span
+                    style={{ color: teamMap.get(funStats.flash.teamId)?.color }}
+                    className="font-display"
+                  >
+                    {teamMap.get(funStats.flash.teamId)?.name ?? "?"}
+                  </span>{" "}
+                  en {formatDuration(funStats.flash.ms)} !
+                </p>
+              )}
+              {funStats.hardest && funStats.bestByStep.size > 1 && (
+                <p className="font-bold text-sm rounded-xl border-2 border-ink/20 px-3 py-2">
+                  🪨 La plus coriace : « {stepMap.get(funStats.hardest.stepId)?.title ?? "?"} » —
+                  même les plus rapides ont mis {formatDuration(funStats.hardest.ms)}.
+                </p>
+              )}
+            </div>
+
+            {/* Record par épreuve */}
+            <div>
+              <p className="font-display mb-2">🏆 Les plus rapides par épreuve</p>
+              <div className="space-y-1.5 max-h-[45dvh] overflow-y-auto overscroll-contain pr-1">
+                {steps
+                  .slice()
+                  .sort((a, b) => a.order_hint - b.order_hint)
+                  .map((step) => {
+                    const best = funStats.bestByStep.get(step.id);
+                    const team = best ? teamMap.get(best.teamId) : undefined;
+                    return (
+                      <div
+                        key={step.id}
+                        className="flex items-center gap-2 rounded-xl border-2 border-ink/15 px-3 py-1.5 text-sm font-bold"
+                      >
+                        <span className="flex-1 min-w-0 truncate">{step.title}</span>
+                        {best && team ? (
+                          <>
+                            <span
+                              className="w-3 h-3 rounded-full border border-ink shrink-0"
+                              style={{ backgroundColor: team.color }}
+                            />
+                            <span className="font-display truncate max-w-[7rem]">{team.name}</span>
+                            <span className="tabular-nums text-ink/60">
+                              {formatDuration(best.ms)}
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-ink/40">—</span>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+              <p className="text-xs font-bold text-ink/45 mt-2">
+                Temps mesuré entre deux validations (les étapes passées ou expirées ne comptent
+                pas). Partage ces records au moment de la remise des prix ! 🎉
+              </p>
+            </div>
+          </div>
+        )}
+      </Dialog>
+
       {/* Dialog Outils : neutraliser une étape */}
       <Dialog open={toolsOpen} onClose={() => setToolsOpen(false)} title="🛠️ Outils de secours">
         <div className="space-y-3">
@@ -891,7 +1010,7 @@ export default function LiveDashboardPage() {
                   className="flex items-center gap-2 rounded-xl border-2 border-ink/20 px-3 py-2"
                 >
                   <span className="font-bold text-sm flex-1 truncate">
-                    {step.type === "nfc" ? "🏷️" : step.type === "photo" ? "📸" : step.type === "minigame" ? "🎮" : "💬"}{" "}
+                    {step.type === "nfc" ? "🏷️" : step.type === "photo" ? "📸" : step.type === "minigame" ? "🎮" : step.type === "gps" ? "📍" : "💬"}{" "}
                     {step.title}
                   </span>
                   <Button

@@ -70,6 +70,7 @@ export default function ValidationZone({
     <div className={wrong ? "animate-shake" : ""}>
       {step.type === "text" && <TextAnswer disabled={disabled || busy} onRun={run} />}
       {step.type === "nfc" && <NfcValidation disabled={disabled || busy} onRun={run} />}
+      {step.type === "gps" && <GpsValidation disabled={disabled || busy} onRun={run} />}
       {step.type === "minigame" && (
         <MinigameValidation
           step={step}
@@ -264,6 +265,73 @@ function NfcValidation({
   );
 }
 
+// --- Balise GPS ---------------------------------------------------------------
+
+function GpsValidation({
+  disabled,
+  onRun,
+}: {
+  disabled: boolean;
+  onRun: (kind: ValidateKind, payload: Record<string, unknown>) => Promise<SubmitOutcome>;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  function check() {
+    if (!navigator.geolocation) {
+      setStatus("📵 Pas de GPS sur ce téléphone — contacte le maître du jeu.");
+      return;
+    }
+    setChecking(true);
+    setStatus(null);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        const outcome = await onRun("gps", {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+        if (outcome.status === "wrong") {
+          setStatus(
+            outcome.distanceM != null
+              ? `🧭 Pas encore ! Vous êtes à environ ${
+                  outcome.distanceM >= 1000
+                    ? `${(outcome.distanceM / 1000).toFixed(1)} km`
+                    : `${Math.round(outcome.distanceM)} m`
+                } du lieu mystère.`
+              : "🧭 Pas encore au bon endroit — continuez à chercher !"
+          );
+        }
+        setChecking(false);
+      },
+      (err) => {
+        setChecking(false);
+        setStatus(
+          err.code === err.PERMISSION_DENIED
+            ? "📵 Localisation refusée. Autorise la position dans les réglages du navigateur, puis réessaie."
+            : "🛰️ Position introuvable — sors à découvert (loin des bâtiments) et réessaie."
+        );
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <Button full size="xl" onClick={check} disabled={disabled || checking}>
+        {checking ? "🛰️ POSITION EN COURS…" : "📍 ON EST SUR PLACE !"}
+      </Button>
+      <p className="text-center font-bold text-ink/55 text-sm">
+        Rendez-vous au lieu mystère puis appuie : le téléphone vérifie que vous y êtes vraiment.
+      </p>
+      {status && (
+        <p className="text-center font-bold text-ink/75 text-sm rounded-xl border-2 border-ink/20 bg-white/60 px-3 py-2">
+          {status}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // --- Épreuve photo -------------------------------------------------------------
 
 function PhotoValidation({
@@ -279,40 +347,87 @@ function PhotoValidation({
   onAdvanced: (finished: boolean) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState<{ file: File; url: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleFile(files: FileList | null) {
+  // Libère l'aperçu si on quitte l'écran sans envoyer
+  useEffect(() => {
+    return () => {
+      if (pending) URL.revokeObjectURL(pending.url);
+    };
+  }, [pending]);
+
+  function handleFile(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
+    setError(null);
+    setPending({ file, url: URL.createObjectURL(file) });
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  function retake() {
+    setPending(null);
+    setError(null);
+    // rouvre directement l'appareil photo
+    setTimeout(() => inputRef.current?.click(), 50);
+  }
+
+  async function send() {
+    if (!pending) return;
     setBusy(true);
     setError(null);
     try {
-      const url = await uploadSubmissionPhoto(gameId, file);
+      const url = await uploadSubmissionPhoto(gameId, pending.file);
       const res = await rpc<{ ok: boolean; finished?: boolean; error?: string }>("submit_photo", {
         p_step_id: step.id,
         p_url: url,
       });
       if (!res.ok) throw new Error(res.error ?? "Envoi refusé");
+      setPending(null);
       // Photo envoyée → on avance tout de suite ; l'organisateur jugera plus tard
       onAdvanced(!!res.finished);
     } catch (err) {
       setError(frError(err, "Envoi impossible — réessaie"));
     } finally {
       setBusy(false);
-      if (inputRef.current) inputRef.current.value = "";
     }
   }
 
   return (
     <div className="space-y-3">
-      <Button full size="xl" disabled={disabled || busy} onClick={() => inputRef.current?.click()}>
-        {busy ? "⏳ ENVOI…" : "📸 PRENDRE LA PHOTO"}
-      </Button>
-      <p className="text-center font-bold text-ink/55 text-sm">
-        La photo part au maître du jeu et vous passez direct à la suite — il la jugera en fin de
-        partie (refusée = 0 point sur l&apos;étape 😬).
-      </p>
+      {pending ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={pending.url}
+            alt="Aperçu de la photo"
+            className="w-full rounded-2xl border-[3px] border-ink shadow-[4px_4px_0_0_#111111] bg-ink"
+          />
+          <div className="flex gap-2">
+            <Button className="flex-1" size="lg" variant="parchment" disabled={busy} onClick={retake}>
+              🔄 REPRENDRE
+            </Button>
+            <Button className="flex-1" size="lg" variant="leaf" disabled={busy} onClick={send}>
+              {busy ? "⏳ ENVOI…" : "✅ ENVOYER"}
+            </Button>
+          </div>
+          <p className="text-center font-bold text-ink/55 text-sm">
+            Vérifiez la photo avant d&apos;envoyer — une fois partie, le maître du jeu la jugera
+            (refusée = 0 point sur l&apos;étape 😬).
+          </p>
+        </>
+      ) : (
+        <>
+          <Button full size="xl" disabled={disabled || busy} onClick={() => inputRef.current?.click()}>
+            📸 PRENDRE LA PHOTO
+          </Button>
+          <p className="text-center font-bold text-ink/55 text-sm">
+            Vous verrez un aperçu avant l&apos;envoi — possible de la reprendre autant de fois que
+            vous voulez.
+          </p>
+        </>
+      )}
       <input
         ref={inputRef}
         type="file"

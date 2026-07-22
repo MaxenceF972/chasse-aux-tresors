@@ -23,6 +23,9 @@ exception when duplicate_object then null; end $$;
 -- Migration pour les bases créées avant l'épreuve photo
 alter type public.step_type add value if not exists 'photo';
 
+-- Migration pour les bases créées avant les balises GPS
+alter type public.step_type add value if not exists 'gps';
+
 do $$ begin
   create type public.route_status as enum ('locked','current','done');
 exception when duplicate_object then null; end $$;
@@ -72,8 +75,15 @@ create table if not exists public.step_secrets (
   answers     text[] not null default '{}',
   nfc_tag_id  text,
   manual_code text,
-  hints       jsonb not null default '[]'::jsonb  -- [{text, penalty_sec?, unlock_after_sec?}]
+  hints       jsonb not null default '[]'::jsonb, -- [{text, penalty_sec?, unlock_after_sec?}]
+  gps_lat     double precision,                   -- balise GPS : coordonnées cibles
+  gps_lng     double precision,
+  gps_radius_m int                                -- rayon de validation (défaut 30 m)
 );
+
+alter table public.step_secrets add column if not exists gps_lat double precision;
+alter table public.step_secrets add column if not exists gps_lng double precision;
+alter table public.step_secrets add column if not exists gps_radius_m int;
 
 create table if not exists public.teams (
   id              uuid primary key default gen_random_uuid(),
@@ -209,6 +219,20 @@ begin
   end loop;
   return v_code;
 end $$;
+
+-- Distance en mètres entre deux points GPS (haversine).
+create or replace function public.gps_distance_m(
+  lat1 double precision, lng1 double precision,
+  lat2 double precision, lng2 double precision
+) returns double precision
+language sql immutable
+set search_path = public
+as $$
+  select 6371000 * 2 * asin(sqrt(
+    pow(sin(radians(lat2 - lat1) / 2), 2)
+    + cos(radians(lat1)) * cos(radians(lat2)) * pow(sin(radians(lng2 - lng1) / 2), 2)
+  ))
+$$;
 
 -- Équipe / partie du joueur courant (security definer → pas de récursion RLS).
 create or replace function public.my_team_id() returns uuid
@@ -948,6 +972,7 @@ declare
   v_result   jsonb;
   v_finished boolean := false;
   v_step_started timestamptz;
+  v_dist     double precision;
 begin
   -- Rejeu idempotent
   select * into v_existing from public.events where idem_key = p_idem_key;
@@ -999,6 +1024,15 @@ begin
     v_submitted := regexp_replace(trim(coalesce(p_payload->>'tag', '')), '^https?://[^/]+/t/', '');
     v_ok := (v_secret.nfc_tag_id is not null and v_submitted = v_secret.nfc_tag_id)
          or (v_secret.manual_code is not null and upper(v_submitted) = upper(v_secret.manual_code));
+  elsif v_step.type = 'gps' then
+    -- Balise GPS : le téléphone envoie sa position, le serveur vérifie le rayon
+    if v_secret.gps_lat is not null and v_secret.gps_lng is not null
+       and (p_payload->>'lat') is not null and (p_payload->>'lng') is not null then
+      v_dist := public.gps_distance_m(
+        (p_payload->>'lat')::double precision, (p_payload->>'lng')::double precision,
+        v_secret.gps_lat, v_secret.gps_lng);
+      v_ok := v_dist <= coalesce(v_secret.gps_radius_m, 30);
+    end if;
   elsif v_step.type = 'minigame' then
     if coalesce(array_length(v_secret.answers, 1), 0) > 0 then
       v_submitted := p_payload->>'answer';
@@ -1029,6 +1063,10 @@ begin
 
   if not v_ok then
     v_result := jsonb_build_object('ok', true, 'correct', false);
+    -- Balise GPS : renvoyer la distance restante guide l'équipe sur le terrain
+    if v_step.type = 'gps' and v_dist is not null then
+      v_result := v_result || jsonb_build_object('distance_m', round(v_dist));
+    end if;
     insert into public.events (game_id, team_id, type, payload, idem_key)
     values (v_game.id, v_team.id, 'wrong_answer',
             jsonb_build_object('step_id', p_step_id, 'kind', p_kind,

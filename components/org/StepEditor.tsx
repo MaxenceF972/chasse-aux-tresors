@@ -45,6 +45,11 @@ const TYPE_META: Record<StepType, { icon: string; label: string; help: string }>
     label: "Épreuve photo",
     help: "L'équipe envoie une photo depuis le terrain (ex : « toute l'équipe devant la statue ! ») — tu la valides en un clic depuis le dashboard live.",
   },
+  gps: {
+    icon: "📍",
+    label: "Balise GPS",
+    help: "Aucune puce à poser : l'équipe doit se rendre au bon endroit et appuyer sur « On est sur place ! » — le serveur vérifie la position. Idéal pour un point de vue, une clairière…",
+  },
 };
 
 export default function StepEditor({
@@ -75,6 +80,10 @@ export default function StepEditor({
     step?.content?.minigame?.config ?? MINIGAMES[step?.content?.minigame?.kind ?? "caesar"].defaultConfig
   );
   const [hints, setHints] = useState<Hint[]>(secrets?.hints ?? []);
+  const [gpsLat, setGpsLat] = useState<string>(secrets?.gps_lat != null ? String(secrets.gps_lat) : "");
+  const [gpsLng, setGpsLng] = useState<string>(secrets?.gps_lng != null ? String(secrets.gps_lng) : "");
+  const [gpsRadius, setGpsRadius] = useState<string>(String(secrets?.gps_radius_m ?? 30));
+  const [gpsLocating, setGpsLocating] = useState(false);
   const [points, setPoints] = useState<number>(step?.points ?? 100);
   const [timeLimitMin, setTimeLimitMin] = useState<string>(
     step?.time_limit_sec ? String(Math.round(step.time_limit_sec / 60)) : ""
@@ -105,6 +114,15 @@ export default function StepEditor({
       const words = (minigameConfig.words as string[]) || [];
       if (!words.length) {
         setError("Ajoute au moins un mot dans la config des anagrammes.");
+        return;
+      }
+    }
+    if (type === "gps") {
+      const lat = Number(gpsLat.replace(",", "."));
+      const lng = Number(gpsLng.replace(",", "."));
+      if (!gpsLat.trim() || !gpsLng.trim() || Number.isNaN(lat) || Number.isNaN(lng)
+          || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        setError("Renseigne des coordonnées GPS valides (latitude et longitude).");
         return;
       }
     }
@@ -146,6 +164,9 @@ export default function StepEditor({
         nfc_tag_id: type === "nfc" ? nfcTagId : null,
         manual_code: type === "nfc" ? manualCode : null,
         hints,
+        gps_lat: type === "gps" ? Number(gpsLat.replace(",", ".")) : null,
+        gps_lng: type === "gps" ? Number(gpsLng.replace(",", ".")) : null,
+        gps_radius_m: type === "gps" ? Math.max(10, Number(gpsRadius) || 30) : null,
       });
       if (secErr) throw new Error(secErr.message);
 
@@ -247,6 +268,78 @@ export default function StepEditor({
             la fontaine ! »). Les photos arrivent dans le dashboard live avec deux boutons :
             Valider / Refuser.
           </p>
+        )}
+
+        {type === "gps" && (
+          <div className="space-y-3 rounded-xl border-[3px] border-ink/20 p-3">
+            <Button
+              full
+              variant="gold"
+              disabled={gpsLocating}
+              onClick={() => {
+                if (!navigator.geolocation) {
+                  setError("Pas de GPS sur cet appareil — saisis les coordonnées à la main.");
+                  return;
+                }
+                setGpsLocating(true);
+                navigator.geolocation.getCurrentPosition(
+                  (pos) => {
+                    setGpsLat(pos.coords.latitude.toFixed(6));
+                    setGpsLng(pos.coords.longitude.toFixed(6));
+                    setGpsLocating(false);
+                  },
+                  () => {
+                    setError(
+                      "Position introuvable — autorise la localisation ou saisis les coordonnées à la main."
+                    );
+                    setGpsLocating(false);
+                  },
+                  { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+                );
+              }}
+            >
+              {gpsLocating ? "🛰️ POSITION EN COURS…" : "📍 UTILISER MA POSITION ACTUELLE"}
+            </Button>
+            <p className="text-xs font-bold text-ink/55 -mt-1">
+              Le plus simple : va sur place pendant la préparation et appuie ci-dessus. Sinon,
+              clic droit sur le lieu dans Google Maps → le premier élément copie « lat, lng ».
+            </p>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <Label>Latitude</Label>
+                <Input
+                  value={gpsLat}
+                  onChange={(e) => setGpsLat(e.target.value)}
+                  placeholder="14.616065"
+                  inputMode="decimal"
+                  className="font-mono"
+                />
+              </div>
+              <div className="flex-1">
+                <Label>Longitude</Label>
+                <Input
+                  value={gpsLng}
+                  onChange={(e) => setGpsLng(e.target.value)}
+                  placeholder="-61.058779"
+                  inputMode="decimal"
+                  className="font-mono"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Rayon de validation (mètres)</Label>
+              <Input
+                value={gpsRadius}
+                onChange={(e) => setGpsRadius(e.target.value.replace(/\D/g, ""))}
+                inputMode="numeric"
+                className="w-28"
+              />
+              <p className="text-xs font-bold text-ink/55 mt-1">
+                30 m est un bon réglage : le GPS d&apos;un téléphone est précis à 5-20 m dehors.
+                En dessous de 20 m, tu risques de bloquer des équipes pourtant sur place.
+              </p>
+            </div>
+          </div>
         )}
 
         {type === "minigame" && (

@@ -207,6 +207,21 @@ export default function PreviewPage() {
                 </div>
               )}
 
+              {step.type === "gps" && (
+                <div className="space-y-2">
+                  <p className="font-bold text-sm text-ink/60">
+                    Cible :{" "}
+                    <span className="font-mono">
+                      {secrets?.gps_lat != null ? `${secrets.gps_lat}, ${secrets.gps_lng}` : "—"}
+                    </span>{" "}
+                    (rayon {secrets?.gps_radius_m ?? 30} m)
+                  </p>
+                  <Button full size="lg" onClick={next}>
+                    📍 SIMULER L&apos;ARRIVÉE SUR PLACE
+                  </Button>
+                </div>
+              )}
+
               {step.type === "minigame" && step.content.minigame && (
                 <>
                   <Button full size="xl" onClick={() => setMinigameOpen(true)}>

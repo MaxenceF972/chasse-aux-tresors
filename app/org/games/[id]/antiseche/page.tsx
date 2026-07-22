@@ -16,6 +16,7 @@ const TYPE_LABEL: Record<StepType, string> = {
   text: "💬 Énigme",
   minigame: "🎮 Mini-jeu",
   photo: "📸 Photo",
+  gps: "📍 Balise GPS",
 };
 
 /**
@@ -124,6 +125,15 @@ export default function AntisechePage() {
                       <p className="text-ink/60 break-all">🔗 {tagUrl(secrets.nfc_tag_id)}</p>
                     )}
                   </>
+                )}
+                {step.type === "gps" && secrets?.gps_lat != null && (
+                  <p>
+                    📍 Cible GPS :{" "}
+                    <span className="font-mono bg-parchment px-1.5 py-0.5 rounded border border-ink/30">
+                      {secrets.gps_lat}, {secrets.gps_lng}
+                    </span>{" "}
+                    · rayon {secrets.gps_radius_m ?? 30} m
+                  </p>
                 )}
                 {minigame && (
                   <p>

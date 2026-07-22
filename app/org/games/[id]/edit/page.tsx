@@ -15,8 +15,8 @@ import Spinner from "@/components/ui/Spinner";
 import { showToast } from "@/components/ui/Toaster";
 import { useConfirm } from "@/components/ui/Confirm";
 
-const TYPE_ICON: Record<StepType, string> = { nfc: "🏷️", text: "💬", minigame: "🎮", photo: "📸" };
-const TYPE_LABEL: Record<StepType, string> = { nfc: "Balise", text: "Énigme", minigame: "Mini-jeu", photo: "Photo" };
+const TYPE_ICON: Record<StepType, string> = { nfc: "🏷️", text: "💬", minigame: "🎮", photo: "📸", gps: "📍" };
+const TYPE_LABEL: Record<StepType, string> = { nfc: "Balise", text: "Énigme", minigame: "Mini-jeu", photo: "Photo", gps: "Balise GPS" };
 
 export default function GameEditPage() {
   const { user, loading } = useOrgAuth();

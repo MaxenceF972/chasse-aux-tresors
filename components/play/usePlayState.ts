@@ -8,7 +8,7 @@ import { precacheUrls } from "@/lib/pwa";
 
 export type SubmitOutcome =
   | { status: "correct"; finished: boolean }
-  | { status: "wrong" }
+  | { status: "wrong"; distanceM?: number }
   | { status: "queued" }
   | { status: "error"; message: string };
 
@@ -206,7 +206,10 @@ export function usePlayState(expectedCode?: string) {
           }
           return { status: "error", message: result.error };
         }
-        return { status: "wrong" };
+        return {
+          status: "wrong",
+          distanceM: typeof result.distance_m === "number" ? result.distance_m : undefined,
+        };
       } catch (err) {
         if (isNetworkError(err)) return queueIt();
         return { status: "error", message: err instanceof Error ? err.message : "Erreur" };

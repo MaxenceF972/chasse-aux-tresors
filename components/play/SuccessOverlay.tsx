@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
 interface SuccessOverlayProps {
@@ -23,11 +23,16 @@ export default function SuccessOverlay({ show, finished, onDone }: SuccessOverla
     [show]
   );
 
+  // onDone change d'identité à chaque rendu du parent : passer par une ref
+  // évite que le minuteur reparte de zéro à chaque re-rendu (avec une étape
+  // chronométrée, il ne se déclenchait JAMAIS → overlay bloqué).
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
   useEffect(() => {
     if (!show) return;
-    const t = setTimeout(onDone, finished ? 2400 : 1900);
+    const t = setTimeout(() => onDoneRef.current(), finished ? 2400 : 1900);
     return () => clearTimeout(t);
-  }, [show, finished, onDone]);
+  }, [show, finished]);
 
   return (
     <AnimatePresence>
@@ -37,6 +42,7 @@ export default function SuccessOverlay({ show, finished, onDone }: SuccessOverla
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
+          onClick={() => onDoneRef.current()}
         >
           {/* Confettis */}
           {confetti.map((c, i) => (
@@ -76,6 +82,14 @@ export default function SuccessOverlay({ show, finished, onDone }: SuccessOverla
               Parcours terminé — direction le classement ! 🏆
             </motion.p>
           )}
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 1 }}
+            className="font-bold text-parchment/50 text-sm mt-6"
+          >
+            (toucher pour continuer)
+          </motion.p>
         </motion.div>
       )}
     </AnimatePresence>

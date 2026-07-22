@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 export type GameStatus = "lobby" | "running" | "paused" | "finished";
-export type StepType = "nfc" | "text" | "minigame" | "photo";
+export type StepType = "nfc" | "text" | "minigame" | "photo" | "gps";
 export type RouteStatus = "locked" | "current" | "done";
 export type MinigameKind =
   | "caesar"
@@ -91,6 +91,9 @@ export interface StepSecrets {
   nfc_tag_id: string | null;
   manual_code: string | null;
   hints: Hint[];
+  gps_lat: number | null;
+  gps_lng: number | null;
+  gps_radius_m: number | null;
 }
 
 export interface Team {
@@ -271,6 +274,8 @@ export interface ValidateResult {
   already?: boolean;
   finished?: boolean;
   error?: string;
+  /** Balise GPS : distance restante (m) quand la validation échoue */
+  distance_m?: number;
 }
 
-export type ValidateKind = "text" | "nfc" | "qr" | "manual" | "minigame";
+export type ValidateKind = "text" | "nfc" | "qr" | "manual" | "minigame" | "gps";
