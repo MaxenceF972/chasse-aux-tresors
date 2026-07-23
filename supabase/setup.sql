@@ -17,7 +17,7 @@ do $$ begin
 exception when duplicate_object then null; end $$;
 
 do $$ begin
-  create type public.step_type as enum ('nfc','text','minigame','photo');
+  create type public.step_type as enum ('nfc','text','minigame','photo','gps');
 exception when duplicate_object then null; end $$;
 
 -- Migration pour les bases créées avant l'épreuve photo

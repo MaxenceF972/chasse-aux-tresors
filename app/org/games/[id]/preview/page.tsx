@@ -177,6 +177,20 @@ export default function PreviewPage() {
                 />
               )}
 
+              {step.content.rdv && (
+                <a
+                  href={`https://maps.google.com/?q=${step.content.rdv.lat},${step.content.rdv.lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-2xl border-[3px] border-ink bg-gold px-4 py-3 shadow-[4px_4px_0_0_#111111]"
+                >
+                  <p className="font-display text-lg">📍 POINT DE RENDEZ-VOUS</p>
+                  <p className="font-bold text-ink/70 text-sm">
+                    Les joueurs voient cette carte — toucher ouvre l&apos;itinéraire Maps.
+                  </p>
+                </a>
+              )}
+
               {/* Validation simulée selon le type */}
               {step.type === "text" && (
                 <div className={wrong ? "animate-shake" : ""}>

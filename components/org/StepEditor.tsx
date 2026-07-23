@@ -12,6 +12,21 @@ import { Input, Label, TextArea } from "@/components/ui/Input";
 
 type Placement = "pool" | "common" | "final";
 
+/**
+ * Détecte un couple « lat, lng » collé d'un bloc (format Google Maps :
+ * « 14.616065, -61.058779 ») pour remplir les deux champs d'un coup.
+ * Un nombre seul à virgule française (« 14,616065 ») n'est PAS un couple.
+ */
+function splitCoords(raw: string): { lat: string; lng: string } | null {
+  if (!raw.includes(".")) return null;
+  const m = raw.trim().match(/^(-?\d{1,3}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+  return m ? { lat: m[1], lng: m[2] } : null;
+}
+
+function parseCoord(raw: string): number {
+  return Number(raw.trim().replace(",", "."));
+}
+
 interface StepEditorProps {
   gameId: string;
   /** null → création */
@@ -84,6 +99,14 @@ export default function StepEditor({
   const [gpsLng, setGpsLng] = useState<string>(secrets?.gps_lng != null ? String(secrets.gps_lng) : "");
   const [gpsRadius, setGpsRadius] = useState<string>(String(secrets?.gps_radius_m ?? 30));
   const [gpsLocating, setGpsLocating] = useState(false);
+  // Point de rendez-vous public (optionnel, affiché aux joueurs)
+  const [rdvLat, setRdvLat] = useState<string>(
+    step?.content?.rdv?.lat != null ? String(step.content.rdv.lat) : ""
+  );
+  const [rdvLng, setRdvLng] = useState<string>(
+    step?.content?.rdv?.lng != null ? String(step.content.rdv.lng) : ""
+  );
+  const [rdvLocating, setRdvLocating] = useState(false);
   const [points, setPoints] = useState<number>(step?.points ?? 100);
   const [timeLimitMin, setTimeLimitMin] = useState<string>(
     step?.time_limit_sec ? String(Math.round(step.time_limit_sec / 60)) : ""
@@ -118,11 +141,20 @@ export default function StepEditor({
       }
     }
     if (type === "gps") {
-      const lat = Number(gpsLat.replace(",", "."));
-      const lng = Number(gpsLng.replace(",", "."));
+      const lat = parseCoord(gpsLat);
+      const lng = parseCoord(gpsLng);
       if (!gpsLat.trim() || !gpsLng.trim() || Number.isNaN(lat) || Number.isNaN(lng)
           || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
         setError("Renseigne des coordonnées GPS valides (latitude et longitude).");
+        return;
+      }
+    }
+    const hasRdv = rdvLat.trim() !== "" || rdvLng.trim() !== "";
+    if (type !== "gps" && hasRdv) {
+      const lat = parseCoord(rdvLat);
+      const lng = parseCoord(rdvLng);
+      if (Number.isNaN(lat) || Number.isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        setError("Point de rendez-vous : coordonnées invalides (remplis latitude ET longitude, ou laisse les deux vides).");
         return;
       }
     }
@@ -136,6 +168,10 @@ export default function StepEditor({
         content: {
           body: body.trim() || undefined,
           minigame: type === "minigame" ? { kind: minigameKind, config: minigameConfig } : undefined,
+          rdv:
+            type !== "gps" && rdvLat.trim() && rdvLng.trim()
+              ? { lat: parseCoord(rdvLat), lng: parseCoord(rdvLng) }
+              : undefined,
         },
         media_urls: mediaUrls,
         is_common_checkpoint: placement === "common",
@@ -164,15 +200,22 @@ export default function StepEditor({
         nfc_tag_id: type === "nfc" ? nfcTagId : null,
         manual_code: type === "nfc" ? manualCode : null,
         hints,
-        gps_lat: type === "gps" ? Number(gpsLat.replace(",", ".")) : null,
-        gps_lng: type === "gps" ? Number(gpsLng.replace(",", ".")) : null,
+        gps_lat: type === "gps" ? parseCoord(gpsLat) : null,
+        gps_lng: type === "gps" ? parseCoord(gpsLng) : null,
         gps_radius_m: type === "gps" ? Math.max(10, Number(gpsRadius) || 30) : null,
       });
       if (secErr) throw new Error(secErr.message);
 
       onSaved();
     } catch (err) {
-      setError(frError(err, "Enregistrement impossible — réessaie"));
+      const raw = err instanceof Error ? err.message : "";
+      if (/invalid input value for enum|does not exist|schema cache/i.test(raw)) {
+        setError(
+          "⚠️ La base Supabase n'est pas à jour pour les balises GPS : ouvre le SQL Editor de Supabase, recolle TOUT le contenu de supabase/setup.sql, exécute-le, puis réessaie."
+        );
+      } else {
+        setError(frError(err, "Enregistrement impossible — réessaie"));
+      }
       setBusy(false);
     }
   }
@@ -302,16 +345,22 @@ export default function StepEditor({
             </Button>
             <p className="text-xs font-bold text-ink/55 -mt-1">
               Le plus simple : va sur place pendant la préparation et appuie ci-dessus. Sinon,
-              clic droit sur le lieu dans Google Maps → le premier élément copie « lat, lng ».
+              clic droit sur le lieu dans Google Maps, copie « 14.616065, -61.058779 » et
+              colle-le tel quel dans le champ Latitude : les deux champs se remplissent.
             </p>
             <div className="flex gap-2">
               <div className="flex-1">
                 <Label>Latitude</Label>
                 <Input
                   value={gpsLat}
-                  onChange={(e) => setGpsLat(e.target.value)}
+                  onChange={(e) => {
+                    const pair = splitCoords(e.target.value);
+                    if (pair) {
+                      setGpsLat(pair.lat);
+                      setGpsLng(pair.lng);
+                    } else setGpsLat(e.target.value);
+                  }}
                   placeholder="14.616065"
-                  inputMode="decimal"
                   className="font-mono"
                 />
               </div>
@@ -319,9 +368,14 @@ export default function StepEditor({
                 <Label>Longitude</Label>
                 <Input
                   value={gpsLng}
-                  onChange={(e) => setGpsLng(e.target.value)}
+                  onChange={(e) => {
+                    const pair = splitCoords(e.target.value);
+                    if (pair) {
+                      setGpsLat(pair.lat);
+                      setGpsLng(pair.lng);
+                    } else setGpsLng(e.target.value);
+                  }}
                   placeholder="-61.058779"
-                  inputMode="decimal"
                   className="font-mono"
                 />
               </div>
@@ -378,6 +432,87 @@ export default function StepEditor({
               onChange={setMinigameConfig}
               gameId={gameId}
             />
+          </div>
+        )}
+
+        {type !== "gps" && (
+          <div className="space-y-3 rounded-xl border-[3px] border-ink/20 p-3">
+            <Label>📍 Point de rendez-vous GPS (optionnel)</Label>
+            <p className="text-xs font-bold text-ink/55 -mt-1">
+              Affiché aux joueurs avec un bouton « Itinéraire » : « Rendez-vous à ce point et
+              cherchez-y ! ». La validation reste {type === "nfc" ? "la balise" : type === "photo" ? "la photo" : "l'épreuve"} —
+              le point GPS sert juste à les amener au bon endroit.
+            </p>
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <Label>Latitude</Label>
+                <Input
+                  value={rdvLat}
+                  onChange={(e) => {
+                    const pair = splitCoords(e.target.value);
+                    if (pair) {
+                      setRdvLat(pair.lat);
+                      setRdvLng(pair.lng);
+                    } else setRdvLat(e.target.value);
+                  }}
+                  placeholder="14.616065"
+                  className="font-mono"
+                />
+              </div>
+              <div className="flex-1">
+                <Label>Longitude</Label>
+                <Input
+                  value={rdvLng}
+                  onChange={(e) => {
+                    const pair = splitCoords(e.target.value);
+                    if (pair) {
+                      setRdvLat(pair.lat);
+                      setRdvLng(pair.lng);
+                    } else setRdvLng(e.target.value);
+                  }}
+                  placeholder="-61.058779"
+                  className="font-mono"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                size="sm"
+                variant="parchment"
+                disabled={rdvLocating}
+                onClick={() => {
+                  if (!navigator.geolocation) return;
+                  setRdvLocating(true);
+                  navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                      setRdvLat(pos.coords.latitude.toFixed(6));
+                      setRdvLng(pos.coords.longitude.toFixed(6));
+                      setRdvLocating(false);
+                    },
+                    () => setRdvLocating(false),
+                    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+                  );
+                }}
+              >
+                {rdvLocating ? "🛰️…" : "📍 Ma position"}
+              </Button>
+              {(rdvLat.trim() || rdvLng.trim()) && (
+                <Button
+                  size="sm"
+                  variant="parchment"
+                  onClick={() => {
+                    setRdvLat("");
+                    setRdvLng("");
+                  }}
+                >
+                  ✕ Effacer
+                </Button>
+              )}
+            </div>
+            <p className="text-xs font-bold text-ink/50">
+              Astuce : colle « lat, lng » copié depuis Google Maps directement dans le champ
+              Latitude, les deux se remplissent.
+            </p>
           </div>
         )}
 

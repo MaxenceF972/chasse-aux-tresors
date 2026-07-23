@@ -126,6 +126,14 @@ export default function AntisechePage() {
                     )}
                   </>
                 )}
+                {step.content.rdv && (
+                  <p>
+                    🧭 Rendez-vous :{" "}
+                    <span className="font-mono bg-parchment px-1.5 py-0.5 rounded border border-ink/30">
+                      {step.content.rdv.lat}, {step.content.rdv.lng}
+                    </span>
+                  </p>
+                )}
                 {step.type === "gps" && secrets?.gps_lat != null && (
                   <p>
                     📍 Cible GPS :{" "}

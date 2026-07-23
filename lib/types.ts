@@ -60,6 +60,8 @@ export interface Game {
 export interface StepContent {
   body?: string;
   minigame?: { kind: MinigameKind; config: Record<string, unknown> };
+  /** Point de rendez-vous GPS public : affiché aux joueurs (« rendez-vous ici ») */
+  rdv?: { lat: number; lng: number };
 }
 
 export interface Step {
