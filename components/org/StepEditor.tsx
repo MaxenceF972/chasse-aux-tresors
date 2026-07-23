@@ -6,6 +6,7 @@ import type { Hint, MinigameKind, Step, StepSecrets, StepType } from "@/lib/type
 import { newTagId, randomCode, tagUrl } from "@/lib/game/codes";
 import { MINIGAMES, MINIGAME_LIST } from "@/components/minigames/registry";
 import MediaUpload from "./MediaUpload";
+import MapPicker from "./MapPicker";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label, TextArea } from "@/components/ui/Input";
@@ -107,6 +108,8 @@ export default function StepEditor({
     step?.content?.rdv?.lng != null ? String(step.content.rdv.lng) : ""
   );
   const [rdvLocating, setRdvLocating] = useState(false);
+  const [gpsMapOpen, setGpsMapOpen] = useState(false);
+  const [rdvMapOpen, setRdvMapOpen] = useState(false);
   const [points, setPoints] = useState<number>(step?.points ?? 100);
   const [timeLimitMin, setTimeLimitMin] = useState<string>(
     step?.time_limit_sec ? String(Math.round(step.time_limit_sec / 60)) : ""
@@ -343,10 +346,23 @@ export default function StepEditor({
             >
               {gpsLocating ? "🛰️ POSITION EN COURS…" : "📍 UTILISER MA POSITION ACTUELLE"}
             </Button>
+            <Button full variant="parchment" onClick={() => setGpsMapOpen((o) => !o)}>
+              {gpsMapOpen ? "🗺️ FERMER LA CARTE" : "🗺️ CHOISIR SUR LA CARTE"}
+            </Button>
+            {gpsMapOpen && (
+              <MapPicker
+                lat={gpsLat.trim() && !Number.isNaN(parseCoord(gpsLat)) ? parseCoord(gpsLat) : null}
+                lng={gpsLng.trim() && !Number.isNaN(parseCoord(gpsLng)) ? parseCoord(gpsLng) : null}
+                onPick={(la, ln) => {
+                  setGpsLat(String(la));
+                  setGpsLng(String(ln));
+                }}
+              />
+            )}
             <p className="text-xs font-bold text-ink/55 -mt-1">
-              Le plus simple : va sur place pendant la préparation et appuie ci-dessus. Sinon,
-              clic droit sur le lieu dans Google Maps, copie « 14.616065, -61.058779 » et
-              colle-le tel quel dans le champ Latitude : les deux champs se remplissent.
+              Sur place : « utiliser ma position ». À distance : « choisir sur la carte »
+              (recherche + un clic), ou colle « 14.616065, -61.058779 » copié de Google Maps
+              dans le champ Latitude : les deux champs se remplissent.
             </p>
             <div className="flex gap-2">
               <div className="flex-1">
@@ -496,6 +512,9 @@ export default function StepEditor({
               >
                 {rdvLocating ? "🛰️…" : "📍 Ma position"}
               </Button>
+              <Button size="sm" variant="parchment" onClick={() => setRdvMapOpen((o) => !o)}>
+                {rdvMapOpen ? "🗺️ Fermer la carte" : "🗺️ Choisir sur la carte"}
+              </Button>
               {(rdvLat.trim() || rdvLng.trim()) && (
                 <Button
                   size="sm"
@@ -509,6 +528,16 @@ export default function StepEditor({
                 </Button>
               )}
             </div>
+            {rdvMapOpen && (
+              <MapPicker
+                lat={rdvLat.trim() && !Number.isNaN(parseCoord(rdvLat)) ? parseCoord(rdvLat) : null}
+                lng={rdvLng.trim() && !Number.isNaN(parseCoord(rdvLng)) ? parseCoord(rdvLng) : null}
+                onPick={(la, ln) => {
+                  setRdvLat(String(la));
+                  setRdvLng(String(ln));
+                }}
+              />
+            )}
             <p className="text-xs font-bold text-ink/50">
               Astuce : colle « lat, lng » copié depuis Google Maps directement dans le champ
               Latitude, les deux se remplissent.
