@@ -37,14 +37,14 @@ export const metadata: Metadata = {
     title: "TOYAH GAMES — Chasse au trésor",
     description:
       "Chasse au trésor en temps réel : crée ton parcours, cache tes balises, et que la meilleure équipe gagne !",
-    images: [{ url: "/og.png", width: 1200, height: 630, alt: "TOYAH TREASURE" }],
+    images: [{ url: "/og-v2.png", width: 1200, height: 630, alt: "TOYAH TREASURE" }],
   },
   twitter: {
     card: "summary_large_image",
     title: "TOYAH GAMES — Chasse au trésor",
     description:
       "Chasse au trésor en temps réel : crée ton parcours, cache tes balises, et que la meilleure équipe gagne !",
-    images: ["/og.png"],
+    images: ["/og-v2.png"],
   },
 };
 

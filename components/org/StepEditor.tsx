@@ -382,6 +382,8 @@ export default function StepEditor({
                     setGpsLat(pos.coords.latitude.toFixed(6));
                     setGpsLng(pos.coords.longitude.toFixed(6));
                     setGpsLocating(false);
+                    // Ouvre la carte : on VOIT où le point vient d'être posé
+                    setGpsMapOpen(true);
                   },
                   () => {
                     setError(
@@ -553,6 +555,8 @@ export default function StepEditor({
                       setRdvLat(pos.coords.latitude.toFixed(6));
                       setRdvLng(pos.coords.longitude.toFixed(6));
                       setRdvLocating(false);
+                      // Ouvre la carte : on VOIT où le point vient d'être posé
+                      setRdvMapOpen(true);
                     },
                     () => setRdvLocating(false),
                     { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }

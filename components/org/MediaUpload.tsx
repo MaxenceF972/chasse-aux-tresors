@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { uploadMedia, isAudioUrl, isVideoUrl } from "@/lib/game/media";
 import { frError } from "@/lib/supabase/client";
 import { Label } from "@/components/ui/Input";
+import VoiceRecorder from "./VoiceRecorder";
 
 interface MediaUploadProps {
   gameId: string;
@@ -79,6 +80,22 @@ export default function MediaUpload({ gameId, urls, onChange }: MediaUploadProps
         multiple
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}
+      />
+      <VoiceRecorder
+        disabled={busy}
+        onRecorded={async (file) => {
+          setBusy(true);
+          setError(null);
+          try {
+            const url = await uploadMedia(gameId, file);
+            onChange([...urls, url]);
+          } catch (err) {
+            setError(frError(err, "Envoi du vocal impossible — réessaie"));
+            throw err; // le recorder garde l'aperçu pour retenter
+          } finally {
+            setBusy(false);
+          }
+        }}
       />
       {error && <p className="text-crimson text-sm font-bold mt-1">{error}</p>}
     </div>

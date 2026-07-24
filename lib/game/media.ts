@@ -154,7 +154,7 @@ export function isVideoUrl(url: string): boolean {
 }
 
 export function isAudioUrl(url: string): boolean {
-  return /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)(\?|$)/i.test(url);
+  return /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac|weba)(\?|$)/i.test(url);
 }
 
 /** Upload de la photo d'une épreuve photo (joueur, compressée WebP). */

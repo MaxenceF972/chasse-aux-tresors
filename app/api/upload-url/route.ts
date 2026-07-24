@@ -6,7 +6,7 @@ export const runtime = "nodejs";
 const ALLOWED_EXT = new Set([
   "webp", "jpg", "jpeg", "png", "gif",
   "mp4", "webm", "mov", "m4v",
-  "mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac",
+  "mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac", "weba",
 ]);
 // Garde-fou anti-abus : plafond de photos d'épreuve par partie (les joueurs
 // anonymes ne doivent pas pouvoir remplir le Storage en boucle).
