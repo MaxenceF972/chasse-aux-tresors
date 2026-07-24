@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PlayState, PublicStep, ValidateKind } from "@/lib/types";
 import type { SubmitOutcome } from "./usePlayState";
 import { extractTagId } from "@/lib/game/codes";
+import { normalizeThresholds } from "@/lib/game/hotcold";
 import { uploadSubmissionPhoto } from "@/lib/game/media";
 import { frError, rpc } from "@/lib/supabase/client";
 import { sfx } from "@/lib/game/sounds";
@@ -341,7 +342,10 @@ function GpsValidation({
     <div className="space-y-3">
       <GpsHotCold
         stepId={step.id}
-        range={step.content.gps_hotcold_range}
+        thresholds={normalizeThresholds(
+          step.content.gps_hotcold_thresholds,
+          step.content.gps_hotcold_range
+        )}
         onPosition={(lat, lng) => {
           livePos.current = { lat, lng };
         }}

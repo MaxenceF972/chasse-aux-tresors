@@ -67,7 +67,9 @@ export interface StepContent {
   skip_penalty_points?: number; // mode points : points retirés
   /** Balise GPS : "compass" (boussole + distance live) ou "hotcold" (distance seule) */
   gps_guidance?: "compass" | "hotcold";
-  /** Chaud/froid : portée du thermomètre en m (au-delà = glacial ; défaut 100) */
+  /** Chaud/froid : 6 seuils en m (FROID→BRÛLANT, décroissants ; au-delà = glacial) */
+  gps_hotcold_thresholds?: number[];
+  /** Compat : ancienne portée unique (au-delà = glacial) — remplacée par les seuils */
   gps_hotcold_range?: number;
 }
 

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { frError, sb } from "@/lib/supabase/client";
 import type { Hint, MinigameKind, Step, StepSecrets, StepType } from "@/lib/types";
 import { newTagId, randomCode, tagUrl } from "@/lib/game/codes";
-import { HOTCOLD_DEFAULT_RANGE, hotColdRows, normalizeRange } from "@/lib/game/hotcold";
+import { HOTCOLD_DEFAULT_THRESHOLDS, HOTCOLD_TIERS, normalizeThresholds } from "@/lib/game/hotcold";
 import { MINIGAMES, MINIGAME_LIST } from "@/components/minigames/registry";
 import MediaUpload from "./MediaUpload";
 import MapPicker from "./MapPicker";
@@ -113,8 +113,9 @@ export default function StepEditor({
   const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold">(
     step?.content?.gps_guidance ?? "compass"
   );
-  const [gpsHotColdRange, setGpsHotColdRange] = useState<string>(
-    String(step?.content?.gps_hotcold_range ?? HOTCOLD_DEFAULT_RANGE)
+  // 6 seuils chaud/froid (FROID→BRÛLANT), édités palier par palier
+  const [gpsThresholds, setGpsThresholds] = useState<string[]>(() =>
+    normalizeThresholds(step?.content?.gps_hotcold_thresholds, step?.content?.gps_hotcold_range).map(String)
   );
   const [chainGroup, setChainGroup] = useState<string>(step?.chain_group ?? "");
   const [gpsLocating, setGpsLocating] = useState(false);
@@ -186,6 +187,19 @@ export default function StepEditor({
         setError("Renseigne des coordonnées GPS valides (latitude et longitude).");
         return;
       }
+      if (gpsGuidance === "hotcold") {
+        const th = gpsThresholds.map(Number);
+        if (th.some((n) => !Number.isFinite(n) || n < 1)) {
+          setError("Chaud/froid : chaque palier doit être un nombre de mètres (≥ 1).");
+          return;
+        }
+        for (let i = 1; i < th.length; i++) {
+          if (th[i] >= th[i - 1]) {
+            setError("Chaud/froid : les paliers doivent décroître de FROID (le plus loin) à BRÛLANT (le plus près).");
+            return;
+          }
+        }
+      }
     }
     const hasRdv = rdvLat.trim() !== "" || rdvLng.trim() !== "";
     if (type !== "gps" && hasRdv) {
@@ -213,8 +227,8 @@ export default function StepEditor({
               : undefined,
           photo_mode: type === "photo" ? photoMode : undefined,
           gps_guidance: type === "gps" ? gpsGuidance : undefined,
-          gps_hotcold_range:
-            type === "gps" && gpsGuidance === "hotcold" ? normalizeRange(gpsHotColdRange) : undefined,
+          gps_hotcold_thresholds:
+            type === "gps" && gpsGuidance === "hotcold" ? gpsThresholds.map(Number) : undefined,
           // Conserve la clé de l'AUTRE mode (au cas où la partie change de score)
           skip_penalty_sec:
             scoring === "points"
@@ -531,30 +545,45 @@ export default function StepEditor({
 
               {gpsGuidance === "hotcold" && (
                 <div className="mt-3 rounded-xl border-[3px] border-ink/20 p-3 space-y-2">
-                  <Label>Portée du thermomètre (mètres)</Label>
-                  <Input
-                    value={gpsHotColdRange}
-                    onChange={(e) => setGpsHotColdRange(e.target.value.replace(/\D/g, ""))}
-                    inputMode="numeric"
-                    className="w-28"
-                  />
+                  <div className="flex items-center justify-between gap-2">
+                    <Label className="!mb-0">Paliers du thermomètre (mètres)</Label>
+                    <button
+                      type="button"
+                      onClick={() => setGpsThresholds(HOTCOLD_DEFAULT_THRESHOLDS.map(String))}
+                      className="text-xs font-bold text-ink/60 underline shrink-0"
+                    >
+                      Réinitialiser
+                    </button>
+                  </div>
                   <p className="text-xs font-bold text-ink/55">
-                    Distance à laquelle le thermomètre commence à chauffer ; au-delà c&apos;est
-                    glacial. Garde une portée plus grande que le rayon de validation. Les paliers se
-                    répartissent ainsi :
+                    Distance max de chaque palier, du plus loin (froid) au plus près (brûlant). Les
+                    valeurs doivent décroître ; garde le plus grand supérieur au rayon de validation.
                   </p>
-                  <div className="rounded-lg border-2 border-ink/15 bg-white/60 divide-y divide-ink/10">
-                    {hotColdRows(normalizeRange(gpsHotColdRange)).map((r) => (
-                      <div
-                        key={r.label}
-                        className="flex items-center justify-between gap-2 px-2.5 py-1 text-sm font-bold"
-                      >
-                        <span className="truncate">
-                          {r.emoji} {r.label}
+                  <div className="space-y-1.5">
+                    {HOTCOLD_TIERS.slice(1).map((t, i) => (
+                      <div key={t.label} className="flex items-center gap-2">
+                        <span className="flex-1 font-bold text-sm">
+                          {t.emoji} {t.label}
                         </span>
-                        <span className="tabular-nums text-ink/55 shrink-0">{r.bound}</span>
+                        <span className="font-bold text-ink/45 text-sm">≤</span>
+                        <Input
+                          value={gpsThresholds[i] ?? ""}
+                          onChange={(e) => {
+                            const v = e.target.value.replace(/\D/g, "");
+                            setGpsThresholds((prev) => prev.map((x, j) => (j === i ? v : x)));
+                          }}
+                          inputMode="numeric"
+                          className="w-20 text-center"
+                        />
+                        <span className="font-bold text-ink/45 text-sm w-4">m</span>
                       </div>
                     ))}
+                    <div className="flex items-center gap-2 pt-1 text-ink/55">
+                      <span className="flex-1 font-bold text-sm">
+                        {HOTCOLD_TIERS[0].emoji} {HOTCOLD_TIERS[0].label}
+                      </span>
+                      <span className="font-bold text-sm">au-delà de {gpsThresholds[0] || "—"} m</span>
+                    </div>
                   </div>
                 </div>
               )}

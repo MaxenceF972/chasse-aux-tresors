@@ -5,12 +5,12 @@ import { motion } from "framer-motion";
 import { rpc } from "@/lib/supabase/client";
 import { haptics } from "@/lib/game/haptics";
 import { tone } from "@/lib/game/sounds";
-import { HOTCOLD_DEFAULT_RANGE, HOTCOLD_TIERS, heatIndex } from "@/lib/game/hotcold";
+import { HOTCOLD_DEFAULT_THRESHOLDS, HOTCOLD_TIERS, heatIndex } from "@/lib/game/hotcold";
 
 interface GpsHotColdProps {
   stepId: string;
-  /** Portée du thermomètre (m) — au-delà = glacial. Réglable par l'organisateur. */
-  range?: number;
+  /** 6 seuils (m) FROID→BRÛLANT réglés par l'organisateur ; au-delà = glacial. */
+  thresholds?: number[];
   /** Dernière position connue remontée au parent (pour la validation serveur) */
   onPosition: (lat: number, lng: number) => void;
   /** Appelé UNE fois à l'entrée dans le rayon (le composant re-arme à la sortie) */
@@ -46,11 +46,11 @@ function fmtDist(d: number): string {
  * serveur (sans révéler la cible) et indique de plus en plus fort à mesure que
  * l'équipe s'approche — palier coloré, jauge qui se remplit, tendance
  * chaud/froid, distance en clair et vibration/son à chaque palier gagné.
- * L'échelle (paliers) est proportionnelle à `range`, réglée par l'organisateur.
+ * Les seuils des paliers sont réglés (palier par palier) par l'organisateur.
  */
 export default function GpsHotCold({
   stepId,
-  range = HOTCOLD_DEFAULT_RANGE,
+  thresholds = HOTCOLD_DEFAULT_THRESHOLDS,
   onPosition,
   onWithin,
 }: GpsHotColdProps) {
@@ -67,8 +67,8 @@ export default function GpsHotCold({
   onPositionRef.current = onPosition;
   const onWithinRef = useRef(onWithin);
   onWithinRef.current = onWithin;
-  const rangeRef = useRef(range);
-  rangeRef.current = range;
+  const thresholdsRef = useRef(thresholds);
+  thresholdsRef.current = thresholds;
 
   const mountedRef = useRef(true);
   const pingingRef = useRef(false);
@@ -105,7 +105,7 @@ export default function GpsHotCold({
         prevDistRef.current = d;
 
         // Palier franchi vers le chaud → retour haptique + blip de plus en plus aigu
-        const idx = isWithin ? 7 : heatIndex(d, rangeRef.current);
+        const idx = isWithin ? 7 : heatIndex(d, thresholdsRef.current);
         if (idx > lastIdxRef.current && lastIdxRef.current >= 0) {
           haptics.tap();
           tone(320 + idx * 90, 0.09, "square", 0.08);
@@ -167,7 +167,7 @@ export default function GpsHotCold({
   }, [stepId]);
 
   const ready = dist != null && !geoErr;
-  const idx = dist == null ? 0 : heatIndex(dist, range);
+  const idx = dist == null ? 0 : heatIndex(dist, thresholds);
   const tier = HOTCOLD_TIERS[idx];
   // Plus c'est chaud, plus le cœur pulse vite (indicateur « de plus en plus fort »)
   const pulseDur = within ? 0.5 : 2.3 - idx * 0.28;
