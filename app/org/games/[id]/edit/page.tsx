@@ -29,6 +29,8 @@ export default function GameEditPage() {
   const [secretsMap, setSecretsMap] = useState<Record<string, StepSecrets>>({});
   const [editing, setEditing] = useState<{ step: Step | null; type: StepType } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   // Les secrets doivent être chargés AVANT d'éditer une étape existante :
   // ouvrir l'éditeur avec secrets=null écraserait réponses/indices et
   // régénérerait l'identifiant NFC (puces déjà écrites invalidées).
@@ -122,6 +124,22 @@ export default function GameEditPage() {
     if (error) showToast(`Réglage non enregistré : ${frError(error, "erreur")}`, "error");
   }
 
+  // Renommer la partie (autorisé à tout statut — c'est purement cosmétique).
+  async function renameGame() {
+    if (!game) return;
+    const name = nameDraft.trim();
+    if (!name) {
+      showToast("Le nom de la partie ne peut pas être vide.", "error");
+      return;
+    }
+    setEditingName(false);
+    if (name === game.name) return;
+    setGame({ ...game, name });
+    const { error } = await sb().from("games").update({ name }).eq("id", gameId);
+    if (error) showToast(`Renommage impossible : ${frError(error, "erreur")}`, "error");
+    else showToast("Nom de la partie mis à jour ✅", "success");
+  }
+
   if (loading || !user || !game) return <Spinner label="Chargement…" />;
 
   return (
@@ -130,8 +148,46 @@ export default function GameEditPage() {
         <Link href="/org/dashboard" className="font-bold text-parchment/60 underline">
           ← Mes parties
         </Link>
-        <div className="flex items-end justify-between gap-3 mt-2">
-          <h1 className="font-display text-3xl text-parchment leading-tight">{game.name}</h1>
+        <div className="flex items-center justify-between gap-2 mt-2">
+          {editingName ? (
+            <div className="flex-1 flex items-center gap-2">
+              <Input
+                autoFocus
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void renameGame();
+                  if (e.key === "Escape") setEditingName(false);
+                }}
+                maxLength={80}
+                className="text-xl"
+                aria-label="Nom de la partie"
+              />
+              <Button size="sm" variant="leaf" onClick={() => void renameGame()} aria-label="Enregistrer le nom">
+                ✅
+              </Button>
+              <Button size="sm" variant="parchment" onClick={() => setEditingName(false)} aria-label="Annuler">
+                ✕
+              </Button>
+            </div>
+          ) : (
+            <>
+              <h1 className="font-display text-3xl text-parchment leading-tight flex-1 min-w-0 break-words">
+                {game.name}
+              </h1>
+              <Button
+                size="sm"
+                variant="parchment"
+                onClick={() => {
+                  setNameDraft(game.name);
+                  setEditingName(true);
+                }}
+                aria-label="Renommer la partie"
+              >
+                ✏️
+              </Button>
+            </>
+          )}
         </div>
         <button
           className="mt-2 inline-flex items-center gap-2 bg-gold text-ink font-mono font-bold text-xl tracking-[0.3em] px-4 py-1.5 rounded-xl border-[3px] border-ink shadow-[3px_3px_0_0_#111111] active:translate-y-[2px]"
