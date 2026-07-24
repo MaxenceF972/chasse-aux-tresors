@@ -52,7 +52,7 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
       const pts = Number(e.payload.points ?? 0);
       const sec = Number(e.payload.seconds ?? 0);
       const amount = pts !== 0 ? `+${pts} pts` : `${sec > 0 ? "+" : "−"}${Math.abs(Math.round(sec / 60))} min`;
-      return `🎁 Bonus ${amount} pour « ${team} » — ${String(e.payload.reason ?? "")}`;
+      return `BONUS ${amount} pour « ${team} » — ${String(e.payload.reason ?? "")}`;
     }
     case "team_finished": return `🏆 « ${team} » a terminé le parcours !`;
     default: return `${e.type}`;
@@ -82,6 +82,8 @@ export default function LiveDashboardPage() {
   const [journalFilter, setJournalFilter] = useState<"all" | "sos" | "valid" | "warn" | "photo">("all");
   const [seenMsgId, setSeenMsgId] = useState(0);
   const [teamQuery, setTeamQuery] = useState("");
+  const [bonusTarget, setBonusTarget] = useState<{ teamId: string; teamName: string; reason: string } | null>(null);
+  const [bonusAmount, setBonusAmount] = useState("50");
   const sosRef = useRef<HTMLDivElement>(null);
   const photosRef = useRef<HTMLHeadingElement>(null);
   const { confirm, confirmDialog } = useConfirm();
@@ -370,24 +372,30 @@ export default function LiveDashboardPage() {
     void load();
   }
 
-  // Bonus organisateur : +points (mode points) ou temps rendu (mode chrono)
-  async function awardBonus(teamId: string, teamName: string, reason: string) {
+  // Bonus organisateur : +points (mode points) ou temps rendu (mode chrono),
+  // montant au choix via un petit dialog.
+  function awardBonus(teamId: string, teamName: string, reason: string) {
+    setBonusAmount(game?.settings.scoring === "points" ? "50" : "1");
+    setBonusTarget({ teamId, teamName, reason });
+  }
+
+  async function sendBonus() {
+    if (!bonusTarget) return;
     const isPoints = game?.settings.scoring === "points";
-    const label = isPoints ? "+50 points bonus" : "−1 minute de temps";
-    const ok = await confirm({
-      title: `🎁 Bonus pour « ${teamName} » ?`,
-      message: `${label} pour : ${reason}. (annulable en attribuant l'inverse via le classement)`,
-      confirmLabel: "Attribuer",
-    });
-    if (!ok) return;
+    const amount = Math.max(1, Math.round(Number(bonusAmount) || 0));
+    if (!amount) return;
     try {
       await rpc("org_award_bonus", {
-        p_team_id: teamId,
-        p_points: isPoints ? 50 : 0,
-        p_seconds: isPoints ? 0 : -60,
-        p_reason: reason,
+        p_team_id: bonusTarget.teamId,
+        p_points: isPoints ? amount : 0,
+        p_seconds: isPoints ? 0 : -amount * 60,
+        p_reason: bonusTarget.reason,
       });
-      showToast(`🎁 Bonus attribué à « ${teamName} » !`, "success");
+      showToast(
+        `Bonus ${isPoints ? `+${amount} pts` : `−${amount} min`} attribué à « ${bonusTarget.teamName} »`,
+        "success"
+      );
+      setBonusTarget(null);
       await load();
     } catch (err) {
       showToast(`Bonus impossible : ${frError(err, "erreur")}`, "error");
@@ -673,7 +681,7 @@ export default function LiveDashboardPage() {
                       className="shrink-0 text-[10px] font-bold bg-gold border border-ink rounded px-1"
                       title={`${rankMap.get(live.team.id)?.bonus_points} points bonus`}
                     >
-                      🎁 +{rankMap.get(live.team.id)?.bonus_points}
+                      BONUS +{rankMap.get(live.team.id)?.bonus_points}
                     </span>
                   )}
                   <span className="font-bold text-ink/60 text-sm tabular-nums shrink-0">
@@ -1023,6 +1031,47 @@ export default function LiveDashboardPage() {
         )}
       </Dialog>
 
+      {/* Dialog Bonus : montant au choix */}
+      <Dialog
+        open={!!bonusTarget}
+        onClose={() => setBonusTarget(null)}
+        title={`Bonus pour « ${bonusTarget?.teamName ?? ""} »`}
+      >
+        {bonusTarget && (
+          <div className="space-y-4">
+            <p className="font-bold text-ink/70 text-sm">Motif : {bonusTarget.reason}</p>
+            <div>
+              <Label>
+                {game.settings.scoring === "points" ? "Points bonus" : "Minutes rendues (chrono)"}
+              </Label>
+              <div className="flex gap-2 items-center">
+                <Input
+                  value={bonusAmount}
+                  onChange={(e) => setBonusAmount(e.target.value.replace(/\D/g, ""))}
+                  inputMode="numeric"
+                  className="w-24 text-center font-mono"
+                />
+                {(game.settings.scoring === "points" ? [25, 50, 100] : [1, 2, 5]).map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setBonusAmount(String(preset))}
+                    className={`h-11 px-3 rounded-lg border-2 border-ink font-bold text-sm ${
+                      Number(bonusAmount) === preset ? "bg-gold" : "bg-white"
+                    }`}
+                  >
+                    {game.settings.scoring === "points" ? `+${preset}` : `−${preset} min`}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Button full size="lg" onClick={sendBonus} disabled={!Number(bonusAmount)}>
+              ATTRIBUER LE BONUS
+            </Button>
+          </div>
+        )}
+      </Dialog>
+
       {/* Dialog Stats : records par épreuve + infos fun */}
       <Dialog open={statsOpen} onClose={() => setStatsOpen(false)} title="📈 Stats de la partie">
         {!funStats || funStats.bestByStep.size === 0 ? (
@@ -1032,8 +1081,9 @@ export default function LiveDashboardPage() {
         ) : (
           <div className="space-y-4">
             <p className="font-bold text-ink/55 text-xs">
-              🎁 attribue un bonus ({game.settings.scoring === "points" ? "+50 pts" : "−1 min"}) à
-              l&apos;équipe du record — parfait pour récompenser en direct !
+              « BONUS » récompense l&apos;équipe du record —{" "}
+              {game.settings.scoring === "points" ? "points" : "minutes rendues"} au montant de
+              ton choix.
             </p>
             {/* Infos fun */}
             <div className="space-y-2">
@@ -1052,7 +1102,7 @@ export default function LiveDashboardPage() {
                       awardBonus(funStats.firstFinisher!.id, funStats.firstFinisher!.name, "premier arrivé au trésor")
                     }
                   >
-                    🎁
+                    BONUS
                   </Button>
                 </div>
               )}
@@ -1079,7 +1129,7 @@ export default function LiveDashboardPage() {
                       )
                     }
                   >
-                    🎁
+                    BONUS
                   </Button>
                 </div>
               )}
@@ -1106,7 +1156,7 @@ export default function LiveDashboardPage() {
                       )
                     }
                   >
-                    🎁
+                    BONUS
                   </Button>
                 </div>
               )}
@@ -1145,13 +1195,13 @@ export default function LiveDashboardPage() {
                               {formatDuration(best.ms)}
                             </span>
                             <button
-                              className="w-8 h-8 rounded-lg border-2 border-ink bg-gold shrink-0"
+                              className="h-8 px-2 rounded-lg border-2 border-ink bg-gold shrink-0 text-[10px] font-bold"
                               aria-label={`Bonus pour ${team.name}`}
                               onClick={() =>
                                 awardBonus(team.id, team.name, `plus rapide sur « ${step.title} »`)
                               }
                             >
-                              🎁
+                              BONUS
                             </button>
                           </>
                         ) : (
