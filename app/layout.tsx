@@ -16,6 +16,7 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://toyah-games.app"),
   title: "TOYAH GAMES — Chasse au trésor",
   description:
     "Chasse au trésor en temps réel : crée ton parcours, cache tes balises, et que la meilleure équipe gagne !",
@@ -28,6 +29,22 @@ export const metadata: Metadata = {
   icons: {
     icon: "/icons/icon-192.png",
     apple: "/icons/icon-192.png",
+  },
+  // Aperçu des liens partagés (WhatsApp, iMessage, réseaux) : logo sur parchemin
+  openGraph: {
+    type: "website",
+    siteName: "TOYAH GAMES",
+    title: "TOYAH GAMES — Chasse au trésor",
+    description:
+      "Chasse au trésor en temps réel : crée ton parcours, cache tes balises, et que la meilleure équipe gagne !",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "TOYAH TREASURE" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "TOYAH GAMES — Chasse au trésor",
+    description:
+      "Chasse au trésor en temps réel : crée ton parcours, cache tes balises, et que la meilleure équipe gagne !",
+    images: ["/og.png"],
   },
 };
 
