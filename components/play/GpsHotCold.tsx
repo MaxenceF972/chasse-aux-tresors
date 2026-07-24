@@ -5,9 +5,12 @@ import { motion } from "framer-motion";
 import { rpc } from "@/lib/supabase/client";
 import { haptics } from "@/lib/game/haptics";
 import { tone } from "@/lib/game/sounds";
+import { HOTCOLD_DEFAULT_RANGE, HOTCOLD_TIERS, heatIndex } from "@/lib/game/hotcold";
 
 interface GpsHotColdProps {
   stepId: string;
+  /** Portée du thermomètre (m) — au-delà = glacial. Réglable par l'organisateur. */
+  range?: number;
   /** Dernière position connue remontée au parent (pour la validation serveur) */
   onPosition: (lat: number, lng: number) => void;
   /** Appelé UNE fois à l'entrée dans le rayon (le composant re-arme à la sortie) */
@@ -38,37 +41,19 @@ function fmtDist(d: number): string {
   return `${Math.round(d)} m`;
 }
 
-// Paliers thermiques, du plus froid au plus chaud : couleur + intitulé + emoji.
-const TIERS = [
-  { label: "GLACIAL", emoji: "🧊", color: "#1B4F72", grad: ["#7FB3D5", "#1B4F72"] },
-  { label: "FROID", emoji: "❄️", color: "#2471A3", grad: ["#85C1E9", "#21618C"] },
-  { label: "FRAIS", emoji: "🙂", color: "#17A589", grad: ["#A3E4D7", "#148F77"] },
-  { label: "TIÈDE", emoji: "🌤️", color: "#D4AC0D", grad: ["#F7DC6F", "#B7950B"] },
-  { label: "CHAUD", emoji: "🔥", color: "#CA6F1E", grad: ["#F5B041", "#AF601A"] },
-  { label: "TRÈS CHAUD", emoji: "🔥🔥", color: "#BA4A00", grad: ["#EB984E", "#9C3400"] },
-  { label: "BRÛLANT", emoji: "🔥🔥🔥", color: "#C0392B", grad: ["#EC7063", "#7B241C"] },
-] as const;
-
-// Palier (0 = glacial … 6 = brûlant) selon la distance restante. Échelle
-// calibrée sur 100 m : au-delà, c'est « glacial » (les balises sont posées à
-// moins de 100 m du point de départ de l'équipe).
-function heatIndex(dist: number): number {
-  if (dist <= 10) return 6;   // brûlant
-  if (dist <= 20) return 5;   // très chaud
-  if (dist <= 35) return 4;   // chaud
-  if (dist <= 50) return 3;   // tiède
-  if (dist <= 70) return 2;   // frais
-  if (dist <= 100) return 1;  // froid
-  return 0;                    // glacial (> 100 m)
-}
-
 /**
  * Thermomètre « chaud / froid » : suit la position en continu, interroge le
  * serveur (sans révéler la cible) et indique de plus en plus fort à mesure que
  * l'équipe s'approche — palier coloré, jauge qui se remplit, tendance
  * chaud/froid, distance en clair et vibration/son à chaque palier gagné.
+ * L'échelle (paliers) est proportionnelle à `range`, réglée par l'organisateur.
  */
-export default function GpsHotCold({ stepId, onPosition, onWithin }: GpsHotColdProps) {
+export default function GpsHotCold({
+  stepId,
+  range = HOTCOLD_DEFAULT_RANGE,
+  onPosition,
+  onWithin,
+}: GpsHotColdProps) {
   const [dist, setDist] = useState<number | null>(null);
   const [within, setWithin] = useState(false);
   const [trend, setTrend] = useState<"up" | "down" | null>(null);
@@ -82,6 +67,8 @@ export default function GpsHotCold({ stepId, onPosition, onWithin }: GpsHotColdP
   onPositionRef.current = onPosition;
   const onWithinRef = useRef(onWithin);
   onWithinRef.current = onWithin;
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
 
   const mountedRef = useRef(true);
   const pingingRef = useRef(false);
@@ -118,7 +105,7 @@ export default function GpsHotCold({ stepId, onPosition, onWithin }: GpsHotColdP
         prevDistRef.current = d;
 
         // Palier franchi vers le chaud → retour haptique + blip de plus en plus aigu
-        const idx = isWithin ? 7 : heatIndex(d);
+        const idx = isWithin ? 7 : heatIndex(d, rangeRef.current);
         if (idx > lastIdxRef.current && lastIdxRef.current >= 0) {
           haptics.tap();
           tone(320 + idx * 90, 0.09, "square", 0.08);
@@ -180,8 +167,8 @@ export default function GpsHotCold({ stepId, onPosition, onWithin }: GpsHotColdP
   }, [stepId]);
 
   const ready = dist != null && !geoErr;
-  const idx = dist == null ? 0 : heatIndex(dist);
-  const tier = TIERS[idx];
+  const idx = dist == null ? 0 : heatIndex(dist, range);
+  const tier = HOTCOLD_TIERS[idx];
   // Plus c'est chaud, plus le cœur pulse vite (indicateur « de plus en plus fort »)
   const pulseDur = within ? 0.5 : 2.3 - idx * 0.28;
 
@@ -213,7 +200,7 @@ export default function GpsHotCold({ stepId, onPosition, onWithin }: GpsHotColdP
 
       {/* Jauge segmentée : monte avec la chaleur */}
       <div className="flex items-end justify-center gap-1 mt-2 h-8" aria-hidden>
-        {TIERS.map((t, i) => (
+        {HOTCOLD_TIERS.map((t, i) => (
           <span
             key={t.label}
             className="w-4 rounded-sm border-2 border-ink transition-colors"

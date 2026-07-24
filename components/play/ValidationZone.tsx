@@ -341,6 +341,7 @@ function GpsValidation({
     <div className="space-y-3">
       <GpsHotCold
         stepId={step.id}
+        range={step.content.gps_hotcold_range}
         onPosition={(lat, lng) => {
           livePos.current = { lat, lng };
         }}

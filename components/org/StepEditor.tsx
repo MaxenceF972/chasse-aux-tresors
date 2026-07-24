@@ -4,6 +4,7 @@ import { useState } from "react";
 import { frError, sb } from "@/lib/supabase/client";
 import type { Hint, MinigameKind, Step, StepSecrets, StepType } from "@/lib/types";
 import { newTagId, randomCode, tagUrl } from "@/lib/game/codes";
+import { HOTCOLD_DEFAULT_RANGE, hotColdRows, normalizeRange } from "@/lib/game/hotcold";
 import { MINIGAMES, MINIGAME_LIST } from "@/components/minigames/registry";
 import MediaUpload from "./MediaUpload";
 import MapPicker from "./MapPicker";
@@ -112,6 +113,9 @@ export default function StepEditor({
   const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold">(
     step?.content?.gps_guidance ?? "compass"
   );
+  const [gpsHotColdRange, setGpsHotColdRange] = useState<string>(
+    String(step?.content?.gps_hotcold_range ?? HOTCOLD_DEFAULT_RANGE)
+  );
   const [chainGroup, setChainGroup] = useState<string>(step?.chain_group ?? "");
   const [gpsLocating, setGpsLocating] = useState(false);
   // Point de rendez-vous public (optionnel, affiché aux joueurs)
@@ -209,6 +213,8 @@ export default function StepEditor({
               : undefined,
           photo_mode: type === "photo" ? photoMode : undefined,
           gps_guidance: type === "gps" ? gpsGuidance : undefined,
+          gps_hotcold_range:
+            type === "gps" && gpsGuidance === "hotcold" ? normalizeRange(gpsHotColdRange) : undefined,
           // Conserve la clé de l'AUTRE mode (au cas où la partie change de score)
           skip_penalty_sec:
             scoring === "points"
@@ -522,6 +528,36 @@ export default function StepEditor({
                   </span>
                 </button>
               </div>
+
+              {gpsGuidance === "hotcold" && (
+                <div className="mt-3 rounded-xl border-[3px] border-ink/20 p-3 space-y-2">
+                  <Label>Portée du thermomètre (mètres)</Label>
+                  <Input
+                    value={gpsHotColdRange}
+                    onChange={(e) => setGpsHotColdRange(e.target.value.replace(/\D/g, ""))}
+                    inputMode="numeric"
+                    className="w-28"
+                  />
+                  <p className="text-xs font-bold text-ink/55">
+                    Distance à laquelle le thermomètre commence à chauffer ; au-delà c&apos;est
+                    glacial. Garde une portée plus grande que le rayon de validation. Les paliers se
+                    répartissent ainsi :
+                  </p>
+                  <div className="rounded-lg border-2 border-ink/15 bg-white/60 divide-y divide-ink/10">
+                    {hotColdRows(normalizeRange(gpsHotColdRange)).map((r) => (
+                      <div
+                        key={r.label}
+                        className="flex items-center justify-between gap-2 px-2.5 py-1 text-sm font-bold"
+                      >
+                        <span className="truncate">
+                          {r.emoji} {r.label}
+                        </span>
+                        <span className="tabular-nums text-ink/55 shrink-0">{r.bound}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}
