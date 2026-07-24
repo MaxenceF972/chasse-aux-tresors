@@ -62,6 +62,8 @@ export interface StepContent {
   minigame?: { kind: MinigameKind; config: Record<string, unknown> };
   /** Point de rendez-vous GPS public : affiché aux joueurs (« rendez-vous ici ») */
   rdv?: { lat: number; lng: number };
+  /** Épreuve photo : bonus (avance direct, jugée après) ou gate (bloquante, l'orga valide pour avancer) */
+  photo_mode?: "bonus" | "gate";
 }
 
 export interface Step {
@@ -268,6 +270,8 @@ export interface RankingData {
     elapsed_ms: number;
   };
   teams: RankedTeam[];
+  /** Photo gagnante (servie par get_ranking : la RLS submissions ne laisse pas les autres équipes la lire) */
+  winner_photo?: { url: string; team_id: string } | null;
 }
 
 export interface ValidateResult {

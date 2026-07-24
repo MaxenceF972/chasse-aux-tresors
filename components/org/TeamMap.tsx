@@ -89,19 +89,23 @@ export default function TeamMap({ players, teams }: TeamMapProps) {
     }
   }, [positioned, teams]);
 
-  if (!positioned.length) {
-    return (
-      <p className="font-bold text-parchment/50 text-sm">
-        📍 Aucune position partagée pour l&apos;instant — les joueurs doivent accepter le partage
-        de position sur leur écran de jeu.
-      </p>
-    );
-  }
-
+  // Le conteneur doit TOUJOURS être rendu : l'init Leaflet ne tourne qu'au
+  // montage — s'il n'existait pas tant qu'aucune position n'était partagée,
+  // la carte restait vide pour toute la partie.
   return (
-    <div
-      ref={containerRef}
-      className="h-80 rounded-2xl border-[3px] border-ink overflow-hidden z-0"
-    />
+    <div className="relative">
+      <div
+        ref={containerRef}
+        className="h-80 rounded-2xl border-[3px] border-ink overflow-hidden z-0"
+      />
+      {!positioned.length && (
+        <div className="absolute inset-0 z-[500] flex items-center justify-center rounded-2xl bg-ink/60 px-6 text-center">
+          <p className="font-bold text-parchment/90 text-sm">
+            📍 Aucune position partagée pour l&apos;instant — les joueurs doivent accepter le
+            partage de position sur leur écran de jeu.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

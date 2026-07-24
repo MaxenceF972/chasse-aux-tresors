@@ -87,8 +87,10 @@ export default function StepEditor({
     step?.is_final ? "final" : step?.is_common_checkpoint ? "common" : "pool"
   );
   const [answersText, setAnswersText] = useState((secrets?.answers ?? []).join("\n"));
-  const [nfcTagId, setNfcTagId] = useState(secrets?.nfc_tag_id ?? newTagId());
-  const [manualCode, setManualCode] = useState(secrets?.manual_code ?? randomCode(6));
+  // Ne générer un identifiant/code qu'à la CRÉATION : pour une étape
+  // existante sans secrets chargés, régénérer invaliderait les puces écrites.
+  const [nfcTagId, setNfcTagId] = useState(secrets?.nfc_tag_id ?? (step ? "" : newTagId()));
+  const [manualCode, setManualCode] = useState(secrets?.manual_code ?? (step ? "" : randomCode(6)));
   const [minigameKind, setMinigameKind] = useState<MinigameKind>(
     step?.content?.minigame?.kind ?? "caesar"
   );
@@ -110,6 +112,9 @@ export default function StepEditor({
   const [rdvLocating, setRdvLocating] = useState(false);
   const [gpsMapOpen, setGpsMapOpen] = useState(false);
   const [rdvMapOpen, setRdvMapOpen] = useState(false);
+  const [photoMode, setPhotoMode] = useState<"bonus" | "gate">(
+    step?.content?.photo_mode ?? "bonus"
+  );
   const [points, setPoints] = useState<number>(step?.points ?? 100);
   const [timeLimitMin, setTimeLimitMin] = useState<string>(
     step?.time_limit_sec ? String(Math.round(step.time_limit_sec / 60)) : ""
@@ -143,6 +148,10 @@ export default function StepEditor({
         return;
       }
     }
+    if (type === "nfc" && !nfcTagId.trim()) {
+      setError("Identifiant de balise manquant — ferme, recharge la page et rouvre l'étape.");
+      return;
+    }
     if (type === "gps") {
       const lat = parseCoord(gpsLat);
       const lng = parseCoord(gpsLng);
@@ -156,7 +165,8 @@ export default function StepEditor({
     if (type !== "gps" && hasRdv) {
       const lat = parseCoord(rdvLat);
       const lng = parseCoord(rdvLng);
-      if (Number.isNaN(lat) || Number.isNaN(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+      if (!rdvLat.trim() || !rdvLng.trim() || Number.isNaN(lat) || Number.isNaN(lng)
+          || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
         setError("Point de rendez-vous : coordonnées invalides (remplis latitude ET longitude, ou laisse les deux vides).");
         return;
       }
@@ -175,6 +185,7 @@ export default function StepEditor({
             type !== "gps" && rdvLat.trim() && rdvLng.trim()
               ? { lat: parseCoord(rdvLat), lng: parseCoord(rdvLng) }
               : undefined,
+          photo_mode: type === "photo" ? photoMode : undefined,
         },
         media_urls: mediaUrls,
         is_common_checkpoint: placement === "common",
@@ -309,11 +320,42 @@ export default function StepEditor({
         )}
 
         {type === "photo" && (
-          <p className="rounded-xl border-[3px] border-ink/20 p-3 font-bold text-sm text-ink/70">
-            📸 Décris dans l&apos;énoncé la photo attendue (« Toute l&apos;équipe qui saute devant
-            la fontaine ! »). Les photos arrivent dans le dashboard live avec deux boutons :
-            Valider / Refuser.
-          </p>
+          <div className="space-y-3 rounded-xl border-[3px] border-ink/20 p-3">
+            <p className="font-bold text-sm text-ink/70">
+              📸 Décris dans l&apos;énoncé la photo attendue (« Toute l&apos;équipe qui saute devant
+              la fontaine ! »). Les photos arrivent dans le dashboard live : Valider / Refuser.
+            </p>
+            <Label>Type d&apos;épreuve photo</Label>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setPhotoMode("bonus")}
+                className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                  photoMode === "bonus" ? "bg-gold" : "bg-white"
+                }`}
+              >
+                <span className="font-display">🎁 Photo bonus</span>
+                <span className="block text-xs font-bold text-ink/60">
+                  L&apos;équipe envoie la photo et continue tout de suite. Tu la juges quand tu
+                  veux : refusée = 0 point sur l&apos;étape (ou pénalité en mode chrono).
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPhotoMode("gate")}
+                className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                  photoMode === "gate" ? "bg-gold" : "bg-white"
+                }`}
+              >
+                <span className="font-display">🚧 Photo bloquante</span>
+                <span className="block text-xs font-bold text-ink/60">
+                  L&apos;équipe reste sur l&apos;étape jusqu&apos;à ce que TU valides sa photo
+                  (depuis le dashboard live). Refusée = elle doit en reprendre une. Sois
+                  réactif pendant la partie !
+                </span>
+              </button>
+            </div>
+          </div>
         )}
 
         {type === "gps" && (

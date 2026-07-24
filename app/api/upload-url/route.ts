@@ -3,7 +3,14 @@ import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
-const ALLOWED_EXT = new Set(["webp", "jpg", "jpeg", "png", "gif", "mp4", "webm", "mov", "m4v"]);
+const ALLOWED_EXT = new Set([
+  "webp", "jpg", "jpeg", "png", "gif",
+  "mp4", "webm", "mov", "m4v",
+  "mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac",
+]);
+// Garde-fou anti-abus : plafond de photos d'épreuve par partie (les joueurs
+// anonymes ne doivent pas pouvoir remplir le Storage en boucle).
+const MAX_SUBMISSIONS_PER_GAME = 400;
 
 function adminClient() {
   return createClient(
@@ -54,6 +61,16 @@ export async function POST(req: NextRequest) {
       if (!player) {
         return NextResponse.json({ error: "Tu ne participes pas à cette partie" }, { status: 403 });
       }
+      // Plafond global de photos par partie (anti-abus Storage)
+      const { data: existing } = await admin.storage
+        .from("media")
+        .list(gameId, { limit: MAX_SUBMISSIONS_PER_GAME + 1, search: "sub-" });
+      if ((existing?.length ?? 0) >= MAX_SUBMISSIONS_PER_GAME) {
+        return NextResponse.json(
+          { error: "Limite de photos atteinte pour cette partie" },
+          { status: 429 }
+        );
+      }
     } else {
       const { data: game } = await admin
         .from("games")
@@ -72,7 +89,7 @@ export async function POST(req: NextRequest) {
     await admin.storage.createBucket("media", {
       public: true,
       fileSizeLimit: 52428800,
-      allowedMimeTypes: ["image/*", "video/*"],
+      allowedMimeTypes: ["image/*", "video/*", "audio/*"],
     });
 
     const path =

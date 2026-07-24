@@ -7,7 +7,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { sb } from "@/lib/supabase/client";
 import type { Game, Step, StepSecrets } from "@/lib/types";
 import { normalizeAnswer } from "@/lib/game/normalize";
-import { isVideoUrl } from "@/lib/game/media";
+import { isAudioUrl, isVideoUrl } from "@/lib/game/media";
+import RdvMap from "@/components/play/RdvMap";
 import { renderRich } from "@/lib/game/rich";
 import { sfx } from "@/lib/game/sounds";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
@@ -162,7 +163,12 @@ export default function PreviewPage() {
               <h1 className="font-display text-3xl leading-tight">{step.title}</h1>
 
               {step.media_urls.map((url) =>
-                isVideoUrl(url) ? (
+                isAudioUrl(url) ? (
+                  <div key={url} className="rounded-2xl border-[3px] border-ink bg-white/70 p-3">
+                    <p className="font-display text-sm mb-2">🎵 MESSAGE AUDIO</p>
+                    <audio src={url} controls preload="metadata" className="w-full" />
+                  </div>
+                ) : isVideoUrl(url) ? (
                   <video key={url} src={url} controls playsInline className="w-full rounded-2xl border-[3px] border-ink" />
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -178,17 +184,13 @@ export default function PreviewPage() {
               )}
 
               {step.content.rdv && (
-                <a
-                  href={`https://maps.google.com/?q=${step.content.rdv.lat},${step.content.rdv.lng}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block rounded-2xl border-[3px] border-ink bg-gold px-4 py-3 shadow-[4px_4px_0_0_#111111]"
-                >
+                <div className="rounded-2xl border-[3px] border-ink bg-gold p-3 space-y-2">
                   <p className="font-display text-lg">📍 POINT DE RENDEZ-VOUS</p>
+                  <RdvMap lat={step.content.rdv.lat} lng={step.content.rdv.lng} />
                   <p className="font-bold text-ink/70 text-sm">
-                    Les joueurs voient cette carte — toucher ouvre l&apos;itinéraire Maps.
+                    Les joueurs voient cette carte directement dans l&apos;épreuve.
                   </p>
-                </a>
+                </div>
               )}
 
               {/* Validation simulée selon le type */}

@@ -396,7 +396,9 @@ export default function LiveDashboardPage() {
     });
     if (!ok) return;
     try {
-      await sb().from("players").delete().eq("id", player.id);
+      // supabase-js ne lève pas d'exception : l'erreur est dans la réponse
+      const { error } = await sb().from("players").delete().eq("id", player.id);
+      if (error) throw new Error(error.message);
       await load();
     } catch (err) {
       showToast(`Échec : ${frError(err, "erreur")}`, "error");

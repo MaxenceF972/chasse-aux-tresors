@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ensureAnonSession, rpc, sb } from "@/lib/supabase/client";
-import type { RankedTeam, RankingData, Submission } from "@/lib/types";
+import type { RankedTeam, RankingData } from "@/lib/types";
 import { clearPlayerSession, getPlayerSession } from "@/lib/game/session";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import { formatDuration } from "@/lib/game/format";
@@ -87,7 +87,7 @@ export default function FinalPage() {
   const params = useParams<{ code: string }>();
   const code = params.code?.toUpperCase() ?? "";
   const [data, setData] = useState<RankingData | null>(null);
-  const [winnerPhoto, setWinnerPhoto] = useState<Submission | null>(null);
+  const [winnerPhoto, setWinnerPhoto] = useState<{ url: string; team_id: string } | null>(null);
   const myTeamId = getPlayerSession()?.team_id;
 
   const load = useCallback(async () => {
@@ -95,14 +95,19 @@ export default function FinalPage() {
       const ranking = await rpc<RankingData>("get_ranking", { p_code: code });
       if (!ranking.error) {
         setData(ranking);
-        if (ranking.game?.id) {
+        if (ranking.winner_photo !== undefined) {
+          // Servie par get_ranking (visible par TOUTES les équipes)
+          setWinnerPhoto(ranking.winner_photo);
+        } else if (ranking.game?.id) {
+          // Repli tant que le SQL n'a pas été ré-appliqué (RLS : visible
+          // seulement par l'équipe gagnante et l'organisateur)
           const { data: win } = await sb()
             .from("submissions")
-            .select("*")
+            .select("url, team_id")
             .eq("game_id", ranking.game.id)
             .eq("is_winner", true)
             .maybeSingle();
-          setWinnerPhoto((win as Submission) ?? null);
+          setWinnerPhoto((win as { url: string; team_id: string } | null) ?? null);
         }
       }
     } catch {

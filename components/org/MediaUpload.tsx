@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { uploadMedia, isVideoUrl } from "@/lib/game/media";
+import { uploadMedia, isAudioUrl, isVideoUrl } from "@/lib/game/media";
 import { frError } from "@/lib/supabase/client";
 import { Label } from "@/components/ui/Input";
 
@@ -37,11 +37,16 @@ export default function MediaUpload({ gameId, urls, onChange }: MediaUploadProps
 
   return (
     <div>
-      <Label>Photos / vidéo</Label>
+      <Label>Photos / vidéo / audio</Label>
       <div className="flex flex-wrap gap-2">
         {urls.map((url) => (
           <div key={url} className="relative w-24 h-24">
-            {isVideoUrl(url) ? (
+            {isAudioUrl(url) ? (
+              <div className="w-full h-full rounded-lg border-[3px] border-ink bg-gold/30 flex flex-col items-center justify-center font-bold text-xs text-ink/70">
+                <span className="text-2xl">🎵</span>
+                Audio
+              </div>
+            ) : isVideoUrl(url) ? (
               <video src={url} className="w-full h-full object-cover rounded-lg border-[3px] border-ink" muted />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
@@ -70,7 +75,7 @@ export default function MediaUpload({ gameId, urls, onChange }: MediaUploadProps
       <input
         ref={inputRef}
         type="file"
-        accept="image/*,video/*"
+        accept="image/*,video/*,audio/*"
         multiple
         className="hidden"
         onChange={(e) => handleFiles(e.target.files)}

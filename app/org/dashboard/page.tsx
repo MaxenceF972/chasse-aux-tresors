@@ -145,9 +145,12 @@ export default function OrgDashboardPage() {
       }
       router.push(`/org/games/${game.id}/edit`);
     } catch (err) {
-      setError(frError(err, "Création impossible — réessaie"));
+      // Le dialog des modèles se ferme : un setError y serait invisible.
+      // Toast + rechargement (une partie partielle peut avoir été créée).
+      showToast(`Création depuis le modèle échouée : ${frError(err, "erreur")}`, "error");
       setBusy(false);
       setTemplatesOpen(false);
+      void load();
     }
   }
 

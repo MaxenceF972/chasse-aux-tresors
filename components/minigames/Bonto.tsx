@@ -125,7 +125,6 @@ function BontoGame({ config, seed, onComplete }: MiniGameProps) {
       if (!alive || cancelRef.current) return;
 
       setPhase("shuffle");
-      let coin = 0;
       for (const swap of swaps) {
         if (!alive || cancelRef.current) return;
         setPositions((prev) => {
@@ -135,14 +134,15 @@ function BontoGame({ config, seed, onComplete }: MiniGameProps) {
           [next[ia], next[ib]] = [next[ib], next[ia]];
           return next;
         });
-        // suit la pièce
-        if (coin === swap.a) coin = swap.b;
-        else if (coin === swap.b) coin = swap.a;
         sfx.tick();
         await sleep(speed);
       }
       if (!alive || cancelRef.current) return;
-      setCoinAt(coin);
+      // La pièce reste sous le gobelet où elle a été montrée (id 0) : c'est
+      // le GOBELET qui se déplace. L'ancien « suivi » la transférait de
+      // gobelet en gobelet → elle restait toujours à l'emplacement de gauche
+      // et suivre le mélange des yeux ne servait à rien.
+      setCoinAt(0);
       setPhase("pick");
     })();
     return () => {

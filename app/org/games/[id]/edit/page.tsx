@@ -29,6 +29,10 @@ export default function GameEditPage() {
   const [secretsMap, setSecretsMap] = useState<Record<string, StepSecrets>>({});
   const [editing, setEditing] = useState<{ step: Step | null; type: StepType } | null>(null);
   const [copied, setCopied] = useState(false);
+  // Les secrets doivent être chargés AVANT d'éditer une étape existante :
+  // ouvrir l'éditeur avec secrets=null écraserait réponses/indices et
+  // régénérerait l'identifiant NFC (puces déjà écrites invalidées).
+  const [secretsReady, setSecretsReady] = useState(false);
 
   const load = useCallback(async () => {
     const [gameRes, stepsRes] = await Promise.all([
@@ -39,13 +43,21 @@ export default function GameEditPage() {
     const stepRows = (stepsRes.data as Step[]) ?? [];
     setSteps(stepRows);
     if (stepRows.length) {
-      const { data: secs } = await sb()
+      const { data: secs, error: secErr } = await sb()
         .from("step_secrets")
         .select("*")
         .in("step_id", stepRows.map((s) => s.id));
+      if (secErr) {
+        setSecretsReady(false);
+        showToast("Chargement des secrets d'étapes impossible — recharge la page avant d'éditer.", "error");
+        return;
+      }
       const map: Record<string, StepSecrets> = {};
       for (const s of (secs as StepSecrets[]) ?? []) map[s.step_id] = s;
       setSecretsMap(map);
+      setSecretsReady(true);
+    } else {
+      setSecretsReady(true);
     }
   }, [gameId]);
 
@@ -351,7 +363,13 @@ export default function GameEditPage() {
                   size="sm"
                   variant="parchment"
                   disabled={!editable}
-                  onClick={() => setEditing({ step, type: step.type })}
+                  onClick={() => {
+                    if (!secretsReady) {
+                      showToast("Chargement des réponses en cours — réessaie dans une seconde.", "info");
+                      return;
+                    }
+                    setEditing({ step, type: step.type });
+                  }}
                 >
                   ✏️
                 </Button>

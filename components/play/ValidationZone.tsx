@@ -88,6 +88,7 @@ export default function ValidationZone({
           submission={submission}
           disabled={disabled || busy}
           onAdvanced={onAdvanced}
+          onRefetch={onRefetch}
         />
       )}
       {info && <p className="mt-3 font-bold text-sm text-ink/70 text-center">{info}</p>}
@@ -337,15 +338,19 @@ function GpsValidation({
 function PhotoValidation({
   step,
   gameId,
+  submission,
   disabled,
   onAdvanced,
+  onRefetch,
 }: {
   step: PublicStep;
   gameId: string;
   submission: NonNullable<PlayState["current"]>["submission"];
   disabled: boolean;
   onAdvanced: (finished: boolean) => void;
+  onRefetch: () => Promise<void>;
 }) {
+  const isGate = step.content.photo_mode === "gate";
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<{ file: File; url: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -379,14 +384,20 @@ function PhotoValidation({
     setError(null);
     try {
       const url = await uploadSubmissionPhoto(gameId, pending.file);
-      const res = await rpc<{ ok: boolean; finished?: boolean; error?: string }>("submit_photo", {
-        p_step_id: step.id,
-        p_url: url,
-      });
+      const res = await rpc<{ ok: boolean; finished?: boolean; pending?: boolean; error?: string }>(
+        "submit_photo",
+        { p_step_id: step.id, p_url: url }
+      );
       if (!res.ok) throw new Error(res.error ?? "Envoi refusé");
       setPending(null);
-      // Photo envoyée → on avance tout de suite ; l'organisateur jugera plus tard
-      onAdvanced(!!res.finished);
+      if (res.pending) {
+        // Photo bloquante : on attend le verdict du maître du jeu
+        showToast("📨 Photo envoyée au maître du jeu — en attente de sa validation !", "info");
+        await onRefetch();
+      } else {
+        // Photo bonus : on avance tout de suite ; l'organisateur jugera plus tard
+        onAdvanced(!!res.finished);
+      }
     } catch (err) {
       setError(frError(err, "Envoi impossible — réessaie"));
     } finally {
@@ -394,8 +405,26 @@ function PhotoValidation({
     }
   }
 
+  const waitingReview = isGate && !pending && submission?.status === "pending";
+  const wasRejected = isGate && !pending && submission?.status === "rejected";
+
   return (
     <div className="space-y-3">
+      {waitingReview && (
+        <div className="rounded-xl border-[3px] border-ink bg-white/70 px-4 py-4 text-center">
+          <div className="text-3xl mb-1 animate-pulse">⏳</div>
+          <p className="font-display text-lg leading-tight">PHOTO CHEZ LE MAÎTRE DU JEU</p>
+          <p className="font-bold text-ink/60 text-sm mt-1">
+            Dès qu&apos;il la valide, vous passez à la suite — vous pouvez aussi en renvoyer une
+            meilleure en attendant.
+          </p>
+        </div>
+      )}
+      {wasRejected && (
+        <p className="text-center font-bold text-crimson text-sm rounded-xl border-2 border-crimson/40 bg-crimson/5 px-3 py-2">
+          ❌ Photo refusée par le maître du jeu — reprenez-en une pour continuer !
+        </p>
+      )}
       {pending ? (
         <>
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -413,14 +442,15 @@ function PhotoValidation({
             </Button>
           </div>
           <p className="text-center font-bold text-ink/55 text-sm">
-            Vérifiez la photo avant d&apos;envoyer — une fois partie, le maître du jeu la jugera
-            (refusée = 0 point sur l&apos;étape 😬).
+            {isGate
+              ? "Vérifiez la photo avant d'envoyer — le maître du jeu doit la valider pour que vous passiez à la suite."
+              : "Vérifiez la photo avant d'envoyer — une fois partie, le maître du jeu la jugera (refusée = 0 point sur l'étape 😬)."}
           </p>
         </>
       ) : (
         <>
           <Button full size="xl" disabled={disabled || busy} onClick={() => inputRef.current?.click()}>
-            📸 PRENDRE LA PHOTO
+            {waitingReview || wasRejected ? "📸 REPRENDRE UNE PHOTO" : "📸 PRENDRE LA PHOTO"}
           </Button>
           <p className="text-center font-bold text-ink/55 text-sm">
             Vous verrez un aperçu avant l&apos;envoi — possible de la reprendre autant de fois que

@@ -6,7 +6,8 @@ import { AnimatePresence, motion } from "framer-motion";
 import { usePlayState } from "@/components/play/usePlayState";
 import { useWakeLock } from "@/lib/hooks/useWakeLock";
 import { useGeoShare } from "@/lib/hooks/useGeoShare";
-import { isVideoUrl } from "@/lib/game/media";
+import { isAudioUrl, isVideoUrl } from "@/lib/game/media";
+import RdvMap from "@/components/play/RdvMap";
 import { renderRich } from "@/lib/game/rich";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
@@ -341,7 +342,15 @@ export default function GameScreen() {
               {current.step.media_urls.length > 0 && (
                 <div className="space-y-3">
                   {current.step.media_urls.map((url) =>
-                    isVideoUrl(url) ? (
+                    isAudioUrl(url) ? (
+                      <div
+                        key={url}
+                        className="rounded-2xl border-[3px] border-ink bg-white/70 shadow-[4px_4px_0_0_#111111] p-3"
+                      >
+                        <p className="font-display text-sm mb-2">🎵 MESSAGE AUDIO — écoutez bien !</p>
+                        <audio src={url} controls preload="metadata" className="w-full" />
+                      </div>
+                    ) : isVideoUrl(url) ? (
                       <video
                         key={url}
                         src={url}
@@ -371,20 +380,25 @@ export default function GameScreen() {
                 />
               )}
 
-              {/* Point de rendez-vous GPS (guidage, pas la validation) */}
+              {/* Point de rendez-vous GPS : carte intégrée (guidage, pas la validation) */}
               {current.step.content.rdv && (
-                <a
-                  href={`https://maps.google.com/?q=${current.step.content.rdv.lat},${current.step.content.rdv.lng}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="block rounded-2xl border-[3px] border-ink bg-gold px-4 py-3 shadow-[4px_4px_0_0_#111111] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#111111]"
-                >
+                <div className="rounded-2xl border-[3px] border-ink bg-gold p-3 shadow-[4px_4px_0_0_#111111] space-y-2">
                   <p className="font-display text-lg">📍 POINT DE RENDEZ-VOUS</p>
-                  <p className="font-bold text-ink/70 text-sm">
-                    L&apos;épreuve se joue à cet endroit précis — touche ici pour ouvrir
-                    l&apos;itinéraire dans Maps, puis cherchez sur place !
-                  </p>
-                </a>
+                  <RdvMap lat={current.step.content.rdv.lat} lng={current.step.content.rdv.lng} />
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-bold text-ink/70 text-sm">
+                      L&apos;épreuve se joue à cet endroit — cherchez sur place !
+                    </p>
+                    <a
+                      href={`https://maps.google.com/?q=${current.step.content.rdv.lat},${current.step.content.rdv.lng}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 font-bold text-sm underline text-ink/70 py-1"
+                    >
+                      🧭 Itinéraire
+                    </a>
+                  </div>
+                </div>
               )}
 
               {/* Validation */}

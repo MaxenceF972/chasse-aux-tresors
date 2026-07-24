@@ -354,6 +354,11 @@ drop policy if exists players_delete_owner on public.players;
 create policy players_delete_owner on public.players for delete to authenticated
   using (public.is_game_owner(game_id));
 
+-- Aucune écriture directe de players côté client (tout passe par des RPC
+-- security definer) : sans ce revoke, un joueur pourrait changer son
+-- team_id/game_id sans connaître le code équipe.
+revoke update on public.players from authenticated, anon;
+
 -- team_routes : lecture par toute la partie (classement live), écriture via RPC only
 drop policy if exists routes_select on public.team_routes;
 create policy routes_select on public.team_routes for select to authenticated
@@ -632,8 +637,10 @@ begin
             v_step.points, v_step.time_limit_sec)
     returning id into v_new_step_id;
 
-    insert into public.step_secrets (step_id, answers, nfc_tag_id, manual_code, hints)
-    select v_new_step_id, s.answers, s.nfc_tag_id, s.manual_code, s.hints
+    insert into public.step_secrets (step_id, answers, nfc_tag_id, manual_code, hints,
+                                     gps_lat, gps_lng, gps_radius_m)
+    select v_new_step_id, s.answers, s.nfc_tag_id, s.manual_code, s.hints,
+           s.gps_lat, s.gps_lng, s.gps_radius_m
     from public.step_secrets s where s.step_id = v_step.id;
   end loop;
 
@@ -1266,8 +1273,14 @@ begin
   values (v_game.id, v_team.id, 'photo_submitted',
           jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title, 'url', p_url));
 
-  -- Photo prise → l'équipe avance immédiatement ; l'organisateur jugera
-  -- la photo en fin de partie (refusée = 0 point sur l'étape).
+  -- Mode « photo bloquante » : l'équipe reste sur l'étape tant que
+  -- l'organisateur n'a pas approuvé la photo (org_review_photo avance alors).
+  if coalesce(v_step.content->>'photo_mode', 'bonus') = 'gate' then
+    return jsonb_build_object('ok', true, 'pending', true);
+  end if;
+
+  -- Mode bonus (défaut) : l'équipe avance immédiatement ; l'organisateur
+  -- jugera la photo plus tard (refusée = 0 point sur l'étape).
   update public.team_routes set status = 'done', validated_at = now()
   where id = v_route.id;
 
@@ -1303,20 +1316,51 @@ language plpgsql volatile security definer
 set search_path = public
 as $$
 declare
-  v_sub  public.submissions%rowtype;
-  v_game public.games%rowtype;
+  v_sub   public.submissions%rowtype;
+  v_game  public.games%rowtype;
+  v_step  public.steps%rowtype;
+  v_route public.team_routes%rowtype;
+  v_next  public.team_routes%rowtype;
 begin
   select * into v_sub from public.submissions where id = p_submission_id for update;
   if not found or not public.is_game_owner(v_sub.game_id) then raise exception 'INTERDIT'; end if;
   select * into v_game from public.games where id = v_sub.game_id;
+  select * into v_step from public.steps where id = v_sub.step_id;
 
   if p_approve then
     update public.submissions set status = 'approved', decided_at = now() where id = p_submission_id;
     insert into public.events (game_id, team_id, type, payload)
     values (v_sub.game_id, v_sub.team_id, 'photo_approved', jsonb_build_object('step_id', v_sub.step_id));
+
+    -- Photo bloquante : l'approbation fait avancer l'équipe qui attendait
+    if coalesce(v_step.content->>'photo_mode', 'bonus') = 'gate' then
+      select * into v_route from public.team_routes
+      where team_id = v_sub.team_id and step_id = v_sub.step_id and status = 'current'
+      for update;
+      if found then
+        update public.team_routes set status = 'done', validated_at = now() where id = v_route.id;
+        select * into v_next from public.team_routes
+        where team_id = v_sub.team_id and status = 'locked' order by position limit 1;
+        if found then
+          update public.team_routes set status = 'current' where id = v_next.id;
+        else
+          update public.teams
+          set finished_at = now(), final_time_ms = public.game_elapsed_ms(v_game)
+          where id = v_sub.team_id and finished_at is null;
+          insert into public.events (game_id, team_id, type)
+          values (v_sub.game_id, v_sub.team_id, 'team_finished');
+        end if;
+        insert into public.events (game_id, team_id, type, payload)
+        values (v_sub.game_id, v_sub.team_id, 'step_validated',
+                jsonb_build_object('step_id', v_sub.step_id, 'kind', 'photo',
+                                   'step_title', v_step.title, 'position', v_route.position));
+      end if;
+    end if;
   else
-    -- ne pénalise le chrono qu'au premier refus de cette photo
-    if v_sub.status <> 'rejected' and coalesce(v_game.settings->>'scoring', 'time') = 'time' then
+    -- ne pénalise le chrono qu'au premier refus, et jamais en mode bloquant
+    -- (l'équipe doit déjà reprendre une photo, c'est sa pénalité)
+    if v_sub.status <> 'rejected' and coalesce(v_game.settings->>'scoring', 'time') = 'time'
+       and coalesce(v_step.content->>'photo_mode', 'bonus') <> 'gate' then
       update public.teams
       set penalty_seconds = penalty_seconds + coalesce((v_game.settings->>'photo_penalty_sec')::int, 180)
       where id = v_sub.team_id;
@@ -1440,7 +1484,15 @@ begin
                                'status', v_game.status, 'started_at', v_game.started_at,
                                'finished_at', v_game.finished_at, 'scoring', v_scoring,
                                'elapsed_ms', public.game_elapsed_ms(v_game)),
-    'teams', v_teams
+    'teams', v_teams,
+    -- Servie ici (security definer) car la RLS de submissions ne permet pas
+    -- aux autres équipes de lire la photo gagnante en direct.
+    'winner_photo', (
+      select jsonb_build_object('url', sub.url, 'team_id', sub.team_id)
+      from public.submissions sub
+      where sub.game_id = v_game.id and sub.is_winner
+      limit 1
+    )
   );
 end $$;
 
@@ -1817,9 +1869,9 @@ end $$;
 -- bien l'organisateur de la partie). La lecture se fait via les URLs publiques.
 -- ----------------------------------------------------------------------------
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('media', 'media', true, 52428800, array['image/*', 'video/*'])
+values ('media', 'media', true, 52428800, array['image/*', 'video/*', 'audio/*'])
 on conflict (id) do update
-  set public = true, file_size_limit = 52428800, allowed_mime_types = array['image/*', 'video/*'];
+  set public = true, file_size_limit = 52428800, allowed_mime_types = array['image/*', 'video/*', 'audio/*'];
 
 -- ----------------------------------------------------------------------------
 -- Realtime : publication des tables suivies en live

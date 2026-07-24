@@ -8,6 +8,7 @@ import { sb } from "@/lib/supabase/client";
 import { tagUrl } from "@/lib/game/codes";
 import type { Game, Step, StepSecrets } from "@/lib/types";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
+import { showToast } from "@/components/ui/Toaster";
 import Button from "@/components/ui/Button";
 import Spinner from "@/components/ui/Spinner";
 
@@ -45,10 +46,15 @@ export default function BalisesPage() {
       setBalises([]);
       return;
     }
-    const { data: secs } = await sb()
+    const { data: secs, error: secErr } = await sb()
       .from("step_secrets")
       .select("*")
       .in("step_id", steps.map((s) => s.id));
+    if (secErr) {
+      // Sans les secrets, on afficherait à tort « aucune balise »
+      showToast("Chargement des balises impossible — recharge la page.", "error");
+      return;
+    }
     const secMap = new Map(((secs as StepSecrets[]) ?? []).map((s) => [s.step_id, s]));
     const out: Balise[] = [];
     for (const step of steps) {

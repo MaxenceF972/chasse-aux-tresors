@@ -158,7 +158,7 @@ export default function TagScanPage() {
           Mode test : cette balise est bien reconnue et pointe vers l&apos;étape{" "}
           <span className="text-gold">« {testTitle} »</span>. Aucune validation enregistrée.
         </p>
-        <Link href={gameCode ? `/org/games` : "/org/dashboard"} className="contents">
+        <Link href="/org/dashboard" className="contents">
           <Button size="xl" variant="gold">✅ CONTINUER LES TESTS</Button>
         </Link>
       </main>

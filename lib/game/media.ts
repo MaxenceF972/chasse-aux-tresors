@@ -1,6 +1,7 @@
 import { sb } from "@/lib/supabase/client";
 
 const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
 
 /** Compression côté client : redimensionne à 1600px max et convertit en WebP. */
 export async function compressImage(file: File, maxDim = 1600, quality = 0.82): Promise<Blob> {
@@ -118,8 +119,12 @@ export async function uploadMedia(gameId: string, file: File): Promise<string> {
         "Vidéo trop lourde (max 50 Mo) — coupe-la ou compresse-la depuis la galerie du téléphone"
       );
     }
+  } else if (file.type.startsWith("audio/")) {
+    if (file.size > MAX_AUDIO_BYTES) {
+      throw new Error("Fichier audio trop lourd (max 20 Mo)");
+    }
   } else {
-    throw new Error("Format non supporté (image ou vidéo uniquement)");
+    throw new Error("Format non supporté (image, vidéo ou audio uniquement)");
   }
 
   const { data: sess } = await sb().auth.getSession();
@@ -146,6 +151,10 @@ export async function uploadMedia(gameId: string, file: File): Promise<string> {
 
 export function isVideoUrl(url: string): boolean {
   return /\.(mp4|webm|mov|m4v)(\?|$)/i.test(url);
+}
+
+export function isAudioUrl(url: string): boolean {
+  return /\.(mp3|m4a|aac|ogg|oga|opus|wav|flac)(\?|$)/i.test(url);
 }
 
 /** Upload de la photo d'une épreuve photo (joueur, compressée WebP). */

@@ -77,7 +77,13 @@ export default function PhotosPage() {
 
   async function setWinner(sub: Submission) {
     try {
-      await rpc("org_set_photo_winner", { p_submission_id: sub.id });
+      const res = await rpc<{ ok: boolean; winner: boolean }>("org_set_photo_winner", {
+        p_submission_id: sub.id,
+      });
+      showToast(
+        res.winner ? "🏅 Photo gagnante désignée !" : "Photo gagnante désélectionnée",
+        res.winner ? "success" : "info"
+      );
       await load();
     } catch (err) {
       showToast(`Échec : ${frError(err, "erreur")}`, "error");
@@ -130,6 +136,9 @@ export default function PhotosPage() {
   if (loading || !user || !game) return <Spinner label="Chargement de la galerie…" />;
 
   const pendingCount = submissions.filter((s) => s.status === "pending").length;
+  // La lightbox suit la liste rechargée : sinon badge et bouton 🏅 restent
+  // figés après un jugement (et un 2e clic 🏅 désélectionnerait la gagnante).
+  const lightboxSub = lightbox ? (submissions.find((s) => s.id === lightbox.id) ?? lightbox) : null;
 
   return (
     <main className="min-h-dvh px-5 py-6 max-w-3xl mx-auto pb-16">
@@ -242,31 +251,31 @@ export default function PhotosPage() {
       )}
 
       {/* Plein écran */}
-      <Dialog open={!!lightbox} onClose={() => setLightbox(null)} title={lightbox ? stepMap.get(lightbox.step_id)?.title ?? "Photo" : ""}>
-        {lightbox && (
+      <Dialog open={!!lightboxSub} onClose={() => setLightbox(null)} title={lightboxSub ? stepMap.get(lightboxSub.step_id)?.title ?? "Photo" : ""}>
+        {lightboxSub && (
           <div className="space-y-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={lightbox.url}
+              src={lightboxSub.url}
               alt=""
               className="w-full rounded-xl border-[3px] border-ink bg-ink"
             />
             <p className="font-bold text-ink/70 text-sm">
-              {teamMap.get(lightbox.team_id)?.name} — {STATUS_BADGE[lightbox.status].label}
+              {teamMap.get(lightboxSub.team_id)?.name} — {STATUS_BADGE[lightboxSub.status].label}
             </p>
             <div className="flex gap-2">
-              <Button className="flex-1" variant="leaf" onClick={() => { review(lightbox, true); setLightbox(null); }}>
+              <Button className="flex-1" variant="leaf" onClick={() => { review(lightboxSub, true); setLightbox(null); }}>
                 ✅ Valider
               </Button>
-              <Button className="flex-1" variant="crimson" onClick={() => { review(lightbox, false); setLightbox(null); }}>
+              <Button className="flex-1" variant="crimson" onClick={() => { review(lightboxSub, false); setLightbox(null); }}>
                 ❌ Refuser
               </Button>
             </div>
             <div className="flex gap-2">
-              <Button className="flex-1" variant={lightbox.is_winner ? "gold" : "parchment"} onClick={() => setWinner(lightbox)}>
-                🏅 {lightbox.is_winner ? "Meilleure photo ✓" : "Meilleure photo"}
+              <Button className="flex-1" variant={lightboxSub.is_winner ? "gold" : "parchment"} onClick={() => setWinner(lightboxSub)}>
+                🏅 {lightboxSub.is_winner ? "Meilleure photo ✓" : "Meilleure photo"}
               </Button>
-              <Button className="flex-1" variant="parchment" onClick={() => downloadOne(lightbox)}>
+              <Button className="flex-1" variant="parchment" onClick={() => downloadOne(lightboxSub)}>
                 ⬇️ Télécharger
               </Button>
             </div>
