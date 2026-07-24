@@ -20,8 +20,6 @@ interface ValidationZoneProps {
   gameId: string;
   submission: NonNullable<PlayState["current"]>["submission"];
   disabled: boolean;
-  /** Libellé de la pénalité de skip ("50 points" ou "3 minutes") */
-  skipPenaltyLabel: string;
   onSubmit: (kind: ValidateKind, payload: Record<string, unknown>) => Promise<SubmitOutcome>;
   onRefetch: () => Promise<void>;
   /** Photo envoyée → l'équipe avance (déclenche l'animation de succès) */
@@ -35,7 +33,6 @@ export default function ValidationZone({
   gameId,
   submission,
   disabled,
-  skipPenaltyLabel,
   onSubmit,
   onRefetch,
   onAdvanced,
@@ -72,14 +69,7 @@ export default function ValidationZone({
       {step.type === "nfc" && <NfcValidation disabled={disabled || busy} onRun={run} />}
       {step.type === "gps" && <GpsValidation disabled={disabled || busy} onRun={run} />}
       {step.type === "minigame" && (
-        <MinigameValidation
-          step={step}
-          teamId={teamId}
-          disabled={disabled || busy}
-          skipPenaltyLabel={skipPenaltyLabel}
-          onRun={run}
-          onRefetch={onRefetch}
-        />
+        <MinigameValidation step={step} teamId={teamId} disabled={disabled || busy} onRun={run} />
       )}
       {step.type === "photo" && (
         <PhotoValidation
@@ -477,43 +467,17 @@ function MinigameValidation({
   step,
   teamId,
   disabled,
-  skipPenaltyLabel,
   onRun,
-  onRefetch,
 }: {
   step: PublicStep;
   teamId: string;
   disabled: boolean;
-  skipPenaltyLabel: string;
   onRun: (kind: ValidateKind, payload: Record<string, unknown>) => Promise<SubmitOutcome>;
-  onRefetch: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  const [skipConfirm, setSkipConfirm] = useState(false);
-  const [skipBusy, setSkipBusy] = useState(false);
 
   if (!step.content.minigame) {
     return <p className="font-bold text-crimson">Mini-jeu mal configuré.</p>;
-  }
-
-  async function doSkip() {
-    setSkipBusy(true);
-    try {
-      const res = await rpc<{ ok: boolean; error?: string }>("skip_minigame", {
-        p_step_id: step.id,
-      });
-      if (res.ok) {
-        sfx.pop();
-        setSkipConfirm(false);
-        await onRefetch();
-      } else {
-        showToast(res.error ?? "Impossible de passer le mini-jeu — réessaie", "error");
-      }
-    } catch {
-      showToast("Connexion instable — impossible de passer le mini-jeu, réessaie", "error");
-    } finally {
-      setSkipBusy(false);
-    }
   }
 
   return (
@@ -521,34 +485,6 @@ function MinigameValidation({
       <Button full size="xl" onClick={() => setOpen(true)} disabled={disabled}>
         🎮 LANCER LE MINI-JEU
       </Button>
-      <button
-        className="w-full text-center font-bold text-ink/55 underline py-1.5"
-        disabled={disabled}
-        onClick={() => setSkipConfirm(true)}
-      >
-        Trop dur ? Passer ce mini-jeu (pénalité : {skipPenaltyLabel})
-      </button>
-
-      <Dialog open={skipConfirm} onClose={() => setSkipConfirm(false)} title="⏭️ Passer le mini-jeu ?">
-        <div className="space-y-4">
-          <p className="font-bold text-ink/75">
-            Êtes-vous sûrs de vouloir passer ce mini-jeu ? Pénalité :{" "}
-            <span className="text-crimson">{skipPenaltyLabel}</span>.
-          </p>
-          <p className="font-bold text-ink/55 text-sm">
-            💡 Vous pourrez le retenter plus tard depuis « Mini-jeux à rattraper » — le réussir
-            annulera la pénalité !
-          </p>
-          <div className="flex gap-2">
-            <Button className="flex-1" variant="parchment" onClick={() => setSkipConfirm(false)}>
-              On continue !
-            </Button>
-            <Button className="flex-1" variant="crimson" disabled={skipBusy} onClick={doSkip}>
-              {skipBusy ? "…" : "⏭️ PASSER"}
-            </Button>
-          </div>
-        </div>
-      </Dialog>
 
       {open && (
         <MinigameModal

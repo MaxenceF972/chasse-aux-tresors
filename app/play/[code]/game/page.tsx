@@ -106,9 +106,17 @@ export default function GameScreen() {
   const teamElapsedMs = team.final_time_ms ?? game.elapsed_ms;
   const chronoTicking = game.status === "running" && !team.finished_at;
   const isPoints = game.settings.scoring === "points";
-  const skipPenaltyLabel = isPoints
-    ? `−${game.settings.skip_penalty_points ?? 50} points`
-    : `+${Math.round((game.settings.skip_penalty_sec ?? 180) / 60)} min`;
+  // Pénalité de skip de l'étape en cours : propre à l'étape ou défaut de la partie
+  const currentSkipLabel = (() => {
+    const c = current?.step.content;
+    if (isPoints) {
+      const pts = c?.skip_penalty_points ?? game.settings.skip_penalty_points ?? 50;
+      return `−${pts} points`;
+    }
+    const sec = c?.skip_penalty_sec ?? game.settings.skip_penalty_sec ?? 180;
+    return `+${Math.max(1, Math.round(sec / 60))} min`;
+  })();
+  const currentIsMinigame = current?.step.type === "minigame";
 
   // Timer d'étape : temps restant (null si pas de limite)
   const timerLeftSec =
@@ -126,6 +134,35 @@ export default function GameScreen() {
     }).catch(() => ({ ok: false }));
     if (res.ok) {
       showToast("Temps écoulé — étape passée (0 point)", "info");
+      await refetch();
+    } else {
+      showToast("Impossible de passer l'étape — vérifie ta connexion et réessaie", "error");
+    }
+  }
+
+  // Passer l'étape volontairement (bloqué) → pénalité de l'étape
+  async function handleSkipStep() {
+    if (!current) return;
+    const isMg = current.step.type === "minigame";
+    const ok = await confirmDlg({
+      title: "🚪 Passer cette étape ?",
+      message: isMg
+        ? `Vous êtes bloqués ? Vous passez avec ${currentSkipLabel} de pénalité — mais vous pourrez retenter ce mini-jeu plus tard pour l'annuler.`
+        : `Vous êtes bloqués ? Vous passez à la suite et perdez ${currentSkipLabel}. C'est définitif pour cette étape.`,
+      confirmLabel: "Passer",
+      danger: true,
+    });
+    if (!ok) return;
+    const res = await rpc<{ ok: boolean; finished?: boolean; error?: string }>("skip_step", {
+      p_step_id: current.step.id,
+    }).catch(() => ({ ok: false, finished: false }));
+    if (res.ok) {
+      sfx.pop();
+      showToast(`Étape passée (${currentSkipLabel})`, "info");
+      if (res.finished) {
+        setSuccess({ finished: true });
+        sfx.fanfare();
+      }
       await refetch();
     } else {
       showToast("Impossible de passer l'étape — vérifie ta connexion et réessaie", "error");
@@ -413,7 +450,6 @@ export default function GameScreen() {
                 gameId={game.id}
                 submission={current.submission}
                 disabled={game.status !== "running"}
-                skipPenaltyLabel={skipPenaltyLabel}
                 onSubmit={handleSubmit}
                 onRefetch={refetch}
                 onAdvanced={(wasFinished) => {
@@ -427,6 +463,17 @@ export default function GameScreen() {
 
               {/* Indices */}
               <HintPanel hints={current.hints} onUnlock={unlockHint} />
+
+              {/* Passer l'étape (bloqué) — pénalité propre à l'étape */}
+              {game.status === "running" && (
+                <button
+                  className="w-full text-center font-bold text-crimson/80 underline py-1.5"
+                  onClick={handleSkipStep}
+                >
+                  🚪 Bloqués ? Passer cette étape (pénalité : {currentSkipLabel}
+                  {currentIsMinigame ? ", rattrapable" : ""})
+                </button>
+              )}
 
               <button
                 className="w-full text-center font-bold text-ink/50 underline py-1"
@@ -442,8 +489,7 @@ export default function GameScreen() {
         {!finished && skippedMinigames.length > 0 && (
           <div className="mt-6 rounded-xl border-[3px] border-dashed border-crimson/50 p-3">
             <p className="font-display text-sm text-crimson mb-2">
-              🎮 MINI-JEUX À RATTRAPER ({skipPenaltyLabel.replace("−", "").replace("+", "")} de
-              pénalité chacun — les réussir l&apos;annule !)
+              🎮 MINI-JEUX À RATTRAPER — les réussir annule leur pénalité de skip !
             </p>
             <div className="flex flex-wrap gap-2">
               {skippedMinigames.map((skippedStep) => (

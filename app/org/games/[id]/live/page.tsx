@@ -44,6 +44,7 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
     case "photo_approved": return `👍 Photo de « ${team} » validée`;
     case "photo_winner": return `🏅 Photo gagnante désignée pour « ${team} »`;
     case "minigame_skipped": return `⏭️ « ${team} » a passé « ${String(e.payload.step_title ?? "?")} » (pénalité)`;
+    case "step_skipped": return `⏭️ « ${team} » a passé « ${String(e.payload.step_title ?? "?")} » (bloqué, pénalité)`;
     case "minigame_redeemed": return `💪 « ${team} » a rattrapé « ${String(e.payload.step_title ?? "?")} »`;
     case "step_timeout": return `⌛ « ${team} » — temps écoulé sur « ${String(e.payload.step_title ?? "?")} »`;
     case "step_neutralized": return `🛠️ Étape « ${String(e.payload.step_title ?? "?")} » neutralisée (${String(e.payload.teams_affected ?? 0)} équipes)`;
@@ -879,7 +880,7 @@ export default function LiveDashboardPage() {
           const FILTER_TYPES: Record<string, string[]> = {
             sos: ["team_message"],
             valid: ["step_validated", "team_finished", "manual_validate", "step_neutralized", "minigame_redeemed"],
-            warn: ["wrong_answer", "minigame_skipped", "step_timeout", "hint_unlocked", "game_paused"],
+            warn: ["wrong_answer", "minigame_skipped", "step_skipped", "step_timeout", "hint_unlocked", "game_paused"],
             photo: ["photo_submitted", "photo_approved", "photo_rejected", "photo_winner"],
           };
           const shown =

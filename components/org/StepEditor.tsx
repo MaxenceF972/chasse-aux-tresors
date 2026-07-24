@@ -37,6 +37,8 @@ interface StepEditorProps {
   nextOrderHint: number;
   hasOtherFinal: boolean;
   hasOtherStart: boolean;
+  /** Mode de score de la partie : décide si la pénalité de skip est en min ou en points */
+  scoring: "time" | "points";
   onSaved: () => void;
   onClose: () => void;
 }
@@ -77,6 +79,7 @@ export default function StepEditor({
   nextOrderHint,
   hasOtherFinal,
   hasOtherStart,
+  scoring,
   onSaved,
   onClose,
 }: StepEditorProps) {
@@ -124,6 +127,12 @@ export default function StepEditor({
   const [timeLimitMin, setTimeLimitMin] = useState<string>(
     step?.time_limit_sec ? String(Math.round(step.time_limit_sec / 60)) : ""
   );
+  // Pénalité de skip par étape : minutes (chrono) ou points (points), vide = défaut global
+  const [skipPenalty, setSkipPenalty] = useState<string>(() => {
+    const c = step?.content;
+    if (scoring === "points") return c?.skip_penalty_points != null ? String(c.skip_penalty_points) : "";
+    return c?.skip_penalty_sec != null ? String(Math.round(c.skip_penalty_sec / 60)) : "";
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -195,6 +204,19 @@ export default function StepEditor({
               ? { lat: parseCoord(rdvLat), lng: parseCoord(rdvLng) }
               : undefined,
           photo_mode: type === "photo" ? photoMode : undefined,
+          // Conserve la clé de l'AUTRE mode (au cas où la partie change de score)
+          skip_penalty_sec:
+            scoring === "points"
+              ? step?.content?.skip_penalty_sec
+              : skipPenalty.trim()
+                ? Math.max(1, Number(skipPenalty)) * 60
+                : undefined,
+          skip_penalty_points:
+            scoring === "points"
+              ? skipPenalty.trim()
+                ? Math.max(0, Number(skipPenalty))
+                : undefined
+              : step?.content?.skip_penalty_points,
         },
         media_urls: mediaUrls,
         is_common_checkpoint: placement === "common",
@@ -714,6 +736,27 @@ export default function StepEditor({
             />
             <p className="text-xs font-bold text-ink/50 mt-1">Vide = illimité. Écoulé = 0 point.</p>
           </div>
+        </div>
+
+        {/* Pénalité si l'équipe passe cette étape */}
+        <div>
+          <Label>
+            🚪 Pénalité si l&apos;équipe passe cette étape{" "}
+            {scoring === "points" ? "(points perdus)" : "(minutes ajoutées)"}
+          </Label>
+          <Input
+            type="number"
+            min={0}
+            inputMode="numeric"
+            value={skipPenalty}
+            onChange={(e) => setSkipPenalty(e.target.value)}
+            placeholder={scoring === "points" ? "défaut de la partie" : "défaut de la partie"}
+          />
+          <p className="text-xs font-bold text-ink/50 mt-1">
+            Un bouton « Bloqué ? Passer l&apos;étape » apparaît chez les joueurs. Vide = on
+            utilise la pénalité globale de la partie. Mets une grosse valeur pour décourager
+            l&apos;abandon d&apos;une épreuve clé.
+          </p>
         </div>
 
         {/* Placement dans le parcours */}

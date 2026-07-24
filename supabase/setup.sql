@@ -967,12 +967,14 @@ begin
                                'final_time_ms', v_team.final_time_ms),
     'progress', jsonb_build_object('done', v_done, 'total', v_total),
     'current', v_current,
+    -- Seuls les MINI-JEUX passés sont rattrapables (une balise/photo passée
+    -- est définitive) → on ne liste que ceux-là dans « à rattraper ».
     'skipped_minigames', coalesce((
       select jsonb_agg(jsonb_build_object('id', s.id, 'title', s.title, 'content', s.content)
                        order by tr.position)
       from public.team_routes tr
       join public.steps s on s.id = tr.step_id
-      where tr.team_id = v_team.id and tr.skipped
+      where tr.team_id = v_team.id and tr.skipped and s.type = 'minigame'
     ), '[]'::jsonb),
     'finished', (v_total > 0 and v_done = v_total)
   );
@@ -1519,8 +1521,12 @@ begin
           join public.steps s on s.id = tr.step_id
           where tr.team_id = t.id and tr.status = 'done'
         ), 0)
-        - (select count(*) from public.team_routes tr where tr.team_id = t.id and tr.skipped)
-          * coalesce((v_game.settings->>'skip_penalty_points')::int, 50)
+        - (select coalesce(sum(
+             coalesce((s.content->>'skip_penalty_points')::int,
+                      (v_game.settings->>'skip_penalty_points')::int, 50)), 0)
+           from public.team_routes tr
+           join public.steps s on s.id = tr.step_id
+           where tr.team_id = t.id and tr.skipped)
         - floor(t.penalty_seconds / 60.0) * 10
         + t.bonus_points,
       'bonus_points', t.bonus_points,
@@ -1631,9 +1637,11 @@ begin
   return jsonb_build_object('ok', true, 'text', v_hint->>'text', 'penalty_sec', v_penalty);
 end $$;
 
--- Passe un mini-jeu (avec pénalité) : l'équipe avance, l'étape est marquée
--- « skipped » (0 point + pénalité tant qu'elle n'est pas rattrapée).
-create or replace function public.skip_minigame(p_step_id uuid)
+-- Passe l'étape en cours (bloqué sur le terrain) : l'équipe avance et subit
+-- la pénalité de skip PROPRE À L'ÉTAPE (content.skip_penalty_sec/points) ou,
+-- à défaut, le réglage global de la partie. Fonctionne pour TOUS les types.
+-- Les mini-jeux passés restent rattrapables (redeem_minigame).
+create or replace function public.skip_step(p_step_id uuid)
 returns jsonb
 language plpgsql volatile security definer
 set search_path = public
@@ -1646,6 +1654,7 @@ declare
   v_step   public.steps%rowtype;
   v_next   public.team_routes%rowtype;
   v_finished boolean := false;
+  v_pen    int;
 begin
   select * into v_player from public.players where auth_uid = auth.uid();
   if not found then return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT'); end if;
@@ -1660,19 +1669,17 @@ begin
   if not found then return jsonb_build_object('ok', false, 'error', 'ETAPE_INVALIDE'); end if;
 
   select * into v_step from public.steps where id = p_step_id;
-  if v_step.type <> 'minigame' then
-    return jsonb_build_object('ok', false, 'error', 'ETAPE_PAS_MINIJEU');
-  end if;
 
   update public.team_routes set status = 'done', validated_at = now(), skipped = true
   where id = v_route.id;
 
-  -- Mode chrono : la pénalité est du temps. Mode points : soustraite au classement.
+  -- Mode chrono : pénalité de temps appliquée tout de suite (par étape ou globale).
   if coalesce(v_game.settings->>'scoring', 'time') = 'time' then
-    update public.teams
-    set penalty_seconds = penalty_seconds + coalesce((v_game.settings->>'skip_penalty_sec')::int, 180)
-    where id = v_team.id;
+    v_pen := coalesce((v_step.content->>'skip_penalty_sec')::int,
+                      (v_game.settings->>'skip_penalty_sec')::int, 180);
+    update public.teams set penalty_seconds = penalty_seconds + v_pen where id = v_team.id;
   end if;
+  -- Mode points : la pénalité est soustraite dans get_ranking (par étape).
 
   select * into v_next from public.team_routes
   where team_id = v_team.id and status = 'locked' order by position limit 1;
@@ -1688,10 +1695,20 @@ begin
   end if;
 
   insert into public.events (game_id, team_id, type, payload)
-  values (v_game.id, v_team.id, 'minigame_skipped',
-          jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title));
+  values (v_game.id, v_team.id, 'step_skipped',
+          jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title, 'step_type', v_step.type));
 
   return jsonb_build_object('ok', true, 'finished', v_finished);
+end $$;
+
+-- Compat : ancien nom, délègue à skip_step.
+create or replace function public.skip_minigame(p_step_id uuid)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public
+as $$
+begin
+  return public.skip_step(p_step_id);
 end $$;
 
 -- Rattrape un mini-jeu passé : succès = la pénalité saute et les points reviennent.
@@ -1706,6 +1723,7 @@ declare
   v_team   public.teams%rowtype;
   v_game   public.games%rowtype;
   v_route  public.team_routes%rowtype;
+  v_step   public.steps%rowtype;
   v_secret public.step_secrets%rowtype;
   v_ok     boolean := false;
   v_result jsonb;
@@ -1727,6 +1745,7 @@ begin
   where team_id = v_team.id and step_id = p_step_id and skipped for update;
   if not found then return jsonb_build_object('ok', false, 'error', 'PAS_EN_RATTRAPAGE'); end if;
 
+  select * into v_step from public.steps where id = p_step_id;
   select * into v_secret from public.step_secrets where step_id = p_step_id;
   if coalesce(array_length(v_secret.answers, 1), 0) > 0 then
     v_ok := exists (
@@ -1748,11 +1767,11 @@ begin
 
   update public.team_routes set skipped = false where id = v_route.id;
   if coalesce(v_game.settings->>'scoring', 'time') = 'time' then
-    -- On retire exactement la pénalité ajoutée au skip — PAS de plancher à 0 :
-    -- une pénalité négative est un bonus temps de l'organisateur, l'écraser
-    -- volerait son bonus à l'équipe.
+    -- On retire exactement la pénalité de skip appliquée (par étape ou globale)
+    -- — PAS de plancher à 0 : une pénalité négative est un bonus temps légitime.
     update public.teams
-    set penalty_seconds = penalty_seconds - coalesce((v_game.settings->>'skip_penalty_sec')::int, 180)
+    set penalty_seconds = penalty_seconds - coalesce((v_step.content->>'skip_penalty_sec')::int,
+                                                     (v_game.settings->>'skip_penalty_sec')::int, 180)
     where id = v_team.id;
   end if;
   insert into public.minigame_results (game_id, team_id, step_id, score, duration_ms)
@@ -1914,7 +1933,7 @@ begin
     'get_lobby(text)', 'create_team(text,text,text,text[])', 'join_team(text,uuid,text)',
     'join_by_team_code(text,text,text)', 'get_play_state()', 'get_next_media()', 'get_ranking(text)',
     'validate_step(uuid,uuid,text,jsonb)', 'validate_tag(uuid,text)', 'unlock_hint(uuid,int)',
-    'skip_minigame(uuid)', 'redeem_minigame(uuid,uuid,jsonb)', 'skip_step_timeout(uuid)',
+    'skip_minigame(uuid)', 'skip_step(uuid)', 'redeem_minigame(uuid,uuid,jsonb)', 'skip_step_timeout(uuid)',
     'send_team_message(text)',
     'report_position(double precision,double precision)', 'submit_photo(uuid,text)',
     'save_push_subscription(jsonb)'

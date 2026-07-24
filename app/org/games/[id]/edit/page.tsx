@@ -428,6 +428,7 @@ export default function GameEditPage() {
           nextOrderHint={(steps.length ? Math.max(...steps.map((s) => s.order_hint)) : 0) + 10}
           hasOtherFinal={steps.some((s) => s.is_final && s.id !== editing.step?.id)}
           hasOtherStart={steps.some((s) => s.is_start && s.id !== editing.step?.id)}
+          scoring={game.settings.scoring === "points" ? "points" : "time"}
           onSaved={() => {
             setEditing(null);
             void load();
