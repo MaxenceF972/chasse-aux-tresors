@@ -28,12 +28,7 @@ export default function BalisesPage() {
   const [balises, setBalises] = useState<Balise[] | null>(null);
   const [nfcStatus, setNfcStatus] = useState<Record<string, string>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [isLocalhost, setIsLocalhost] = useState(false);
   const nfcSupported = typeof window !== "undefined" && "NDEFReader" in window;
-
-  useEffect(() => {
-    setIsLocalhost(window.location.hostname === "localhost");
-  }, []);
 
   const load = useCallback(async () => {
     const [gameRes, stepsRes] = await Promise.all([
@@ -134,12 +129,10 @@ export default function BalisesPage() {
           validation s&apos;ouvre toute seule — iPhone comme Android. Écris les puces ci-dessous
           (Chrome Android requis pour l&apos;écriture uniquement) ou imprime la page.
         </p>
-        {isLocalhost && (
-          <p className="font-bold text-crimson mt-2 text-sm">
-            ⚠️ Tu es sur localhost : les URLs encodées pointeraient vers ton PC. Écris les puces
-            et imprime les QR depuis le site déployé (toyah-games.vercel.app).
-          </p>
-        )}
+        <p className="font-bold text-ink/50 mt-2 text-sm">
+          🔗 Les liens gravés pointent toujours vers <span className="font-mono">toyah-games.app</span>,
+          quel que soit l&apos;endroit d&apos;où tu écris les puces.
+        </p>
         {!nfcSupported && (
           <p className="font-bold text-crimson mt-2 text-sm">
             ⚠️ Web NFC indisponible sur ce navigateur — utilise Chrome sur Android pour écrire les

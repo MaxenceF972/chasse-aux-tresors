@@ -13,13 +13,20 @@ export function newTagId(): string {
 }
 
 /**
+ * Domaine canonique gravé sur les puces NFC et les QR : épinglé en dur pour
+ * que les liens soient identiques quel que soit l'hôte depuis lequel
+ * l'organisateur les écrit (toyah-games.app, *.vercel.app, localhost…).
+ * Une puce est définitive : ne changer ce domaine que si l'ancien reste servi.
+ */
+const CANONICAL_ORIGIN = process.env.NEXT_PUBLIC_APP_URL ?? "https://toyah-games.app";
+
+/**
  * URL écrite sur la puce NFC et encodée dans le QR : poser le téléphone sur la
  * balise (ou scanner le QR avec l'appareil photo) ouvre directement la
  * validation — iPhone comme Android, sans app ni navigateur particulier.
  */
 export function tagUrl(tagId: string, origin?: string): string {
-  const base = origin ?? (typeof window !== "undefined" ? window.location.origin : "");
-  return `${base}/t/${tagId}`;
+  return `${origin ?? CANONICAL_ORIGIN}/t/${tagId}`;
 }
 
 /** Extrait l'identifiant de balise d'une URL /t/… ou renvoie la valeur brute. */
