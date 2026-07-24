@@ -72,6 +72,9 @@ export default function GpsHotCold({ stepId, onPosition, onWithin }: GpsHotColdP
   const [trend, setTrend] = useState<"up" | "down" | null>(null);
   const [acc, setAcc] = useState<number | null>(null);
   const [geoErr, setGeoErr] = useState<string | null>(null);
+  // RPC gps_ping injoignable (SQL pas encore ré-appliqué, ou réseau coupé) :
+  // on invite alors à valider manuellement, ce qui fonctionne sans elle.
+  const [softErr, setSoftErr] = useState(false);
 
   const onPositionRef = useRef(onPosition);
   onPositionRef.current = onPosition;
@@ -99,6 +102,7 @@ export default function GpsHotCold({ stepId, onPosition, onWithin }: GpsHotColdP
         const d = res.distance_m;
         setDist(d);
         setGeoErr(null);
+        setSoftErr(false);
 
         const isWithin = !!res.within;
         setWithin(isWithin);
@@ -128,6 +132,9 @@ export default function GpsHotCold({ stepId, onPosition, onWithin }: GpsHotColdP
         } else {
           wasWithinRef.current = false;
         }
+      } catch {
+        // gps_ping absente ou réseau : on bascule sur l'invite manuelle
+        if (mountedRef.current) setSoftErr(true);
       } finally {
         pingingRef.current = false;
       }
@@ -232,7 +239,11 @@ export default function GpsHotCold({ stepId, onPosition, onWithin }: GpsHotColdP
           {acc != null && acc > 30 ? " · signal GPS faible" : ""}
         </p>
       ) : (
-        <p className="font-bold text-ink/60 text-sm mt-2">Acquisition du signal GPS…</p>
+        <p className="font-bold text-ink/60 text-sm mt-2">
+          {softErr
+            ? "Thermomètre indisponible — appuie sur « Valider ma position »."
+            : "Acquisition du signal GPS…"}
+        </p>
       )}
 
       {geoErr && <p className="text-crimson font-bold text-sm mt-2">{geoErr}</p>}
