@@ -19,14 +19,17 @@ jobs:
           cache: npm
 
       - name: Installer les dépendances
+        # npm install (pas npm ci) : le lock généré sous Windows omet la
+        # fermeture des optionnelles WASM (@emnapi, bug npm cross-plateforme)
+        # et fait échouer la validation stricte de npm ci sous Linux. Vercel
+        # utilise aussi npm install. Le lock pilote toujours les versions.
         run: |
-          npm ci --no-audit --no-fund 2>&1 | tee install.log
+          npm install --no-audit --no-fund 2>&1 | tee install.log
           status=${PIPESTATUS[0]}
           if [ "$status" != "0" ]; then
-            # Publie le DÉBUT de l'erreur en annotation (diagnostic lisible sans auth)
-            echo "::error title=npm-ci-code::$(grep -m1 'npm error code' install.log || echo 'code introuvable')"
-            echo "::error title=npm-ci-debut::$(grep 'npm error' install.log | head -10 | tr '\n' ' ' | cut -c1-900)"
-            echo "::error title=env::node=$(node -v) npm=$(npm -v) lock=$(test -f package-lock.json && echo present || echo ABSENT)"
+            # Publie le début de l'erreur en annotation (lisible sans auth)
+            echo "::error title=npm-code::$(grep -m1 'npm error code' install.log || echo 'code introuvable')"
+            echo "::error title=npm-debut::$(grep 'npm error' install.log | head -10 | tr '\n' ' ' | cut -c1-900)"
             exit 1
           fi
 
