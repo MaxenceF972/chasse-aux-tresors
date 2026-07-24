@@ -63,12 +63,14 @@ create table if not exists public.steps (
   order_hint           int not null default 0,
   points               int not null default 100,   -- points gagnés (mode points)
   time_limit_sec       int,                        -- limite de temps optionnelle
+  chain_group          text,                       -- étapes liées : même groupe = jouées à la suite
   created_at           timestamptz not null default now()
 );
 
 alter table public.steps add column if not exists points int not null default 100;
 alter table public.steps add column if not exists time_limit_sec int;
 alter table public.steps add column if not exists is_start boolean not null default false;
+alter table public.steps add column if not exists chain_group text;
 
 -- Secrets d'étape : réponses, identifiants de balise, indices.
 -- JAMAIS lisibles par les joueurs (vérifiés uniquement en RPC).
@@ -429,15 +431,18 @@ as $$
 declare
   v_game    public.games%rowtype;
   v_teams   uuid[];
-  v_pool    uuid[];
+  v_blocks  jsonb;   -- blocs du pool (chaînes) : [[stepA1, stepA2], [stepB], …]
+  v_slots   jsonb;   -- séquence ordonnée : {common:id} (fixe) ou {mobile:true}
   v_finals  uuid[];
   v_starts  uuid[];
-  v_slot    record;
+  v_slot    jsonb;
+  v_blk     jsonb;
   v_t       int;
-  v_n       int;
+  v_b       int;
   v_k       int;
   v_offset  int;
-  v_pool_i  int;
+  v_m       int;
+  v_j       int;
   v_pos     int;
   v_step_id uuid;
   v_total_steps int;
@@ -462,16 +467,44 @@ begin
     raise exception 'AUCUNE_ETAPE';
   end if;
 
-  -- Ordre canonique du pool, mélangé UNE fois : chaque équipe le parcourt
-  -- avec un décalage distinct → jamais deux équipes sur la même énigme au même index.
-  select coalesce(array_agg(id order by random()), '{}') into v_pool
-  from public.steps
-  where game_id = p_game_id and not is_common_checkpoint and not is_final and not is_start;
-  v_n := coalesce(array_length(v_pool, 1), 0);
+  -- Pool découpé en BLOCS : les étapes d'un même chain_group forment un bloc
+  -- ordonné et indivisible ; une étape sans groupe = un bloc à elle seule.
+  -- Le round-robin décale les BLOCS (pas les étapes) → un groupe reste soudé
+  -- et joué dans l'ordre, tout en tombant à un endroit distinct par équipe.
+  select coalesce(jsonb_agg(steps order by sort_key, gkey), '[]'::jsonb) into v_blocks
+  from (
+    select min(order_hint) as sort_key,
+           coalesce(nullif(trim(chain_group), ''), '__solo_' || id::text) as gkey,
+           jsonb_agg(id::text order by order_hint, created_at) as steps
+    from public.steps
+    where game_id = p_game_id and not is_common_checkpoint and not is_final and not is_start
+    group by coalesce(nullif(trim(chain_group), ''), '__solo_' || id::text)
+  ) q;
+  v_b := jsonb_array_length(v_blocks);
 
-  if v_n > 0 and v_t > v_n then
+  if v_b > 0 and v_t > v_b then
     raise exception 'POOL_TROP_PETIT';
   end if;
+
+  -- Séquence des emplacements (paliers communs fixes + un marqueur mobile par
+  -- bloc), ordonnée par order_hint. Les marqueurs mobiles sont dans le même
+  -- ordre que v_blocks → le m-ième marqueur correspond au m-ième bloc.
+  select coalesce(jsonb_agg(slot order by sort_key, kind), '[]'::jsonb) into v_slots
+  from (
+    select order_hint::numeric as sort_key, 0 as kind,
+           jsonb_build_object('common', id::text) as slot
+    from public.steps
+    where game_id = p_game_id and is_common_checkpoint and not is_final and not is_start
+    union all
+    select sort_key, 1 as kind, jsonb_build_object('mobile', true) as slot
+    from (
+      select min(order_hint) as sort_key,
+             coalesce(nullif(trim(chain_group), ''), '__solo_' || id::text) as gkey
+      from public.steps
+      where game_id = p_game_id and not is_common_checkpoint and not is_final and not is_start
+      group by coalesce(nullif(trim(chain_group), ''), '__solo_' || id::text)
+    ) b
+  ) s;
 
   select coalesce(array_agg(id order by order_hint, created_at), '{}') into v_finals
   from public.steps where game_id = p_game_id and is_final;
@@ -484,9 +517,9 @@ begin
   delete from public.team_routes where game_id = p_game_id;
 
   for v_k in 1..v_t loop
-    v_offset := case when v_n > 0 then ((v_k - 1) * greatest(1, v_n / v_t)) % v_n else 0 end;
+    v_offset := case when v_b > 0 then ((v_k - 1) * greatest(1, v_b / v_t)) % v_b else 0 end;
     v_pos := 0;
-    v_pool_i := 0;
+    v_m := 0;
 
     -- L'épreuve de départ ouvre le parcours de chaque équipe
     if array_length(v_starts, 1) is not null then
@@ -498,22 +531,26 @@ begin
       end loop;
     end if;
 
-    for v_slot in
-      select id, is_common_checkpoint
-      from public.steps
-      where game_id = p_game_id and not is_final and not is_start
-      order by order_hint, created_at
-    loop
-      if v_slot.is_common_checkpoint then
-        v_step_id := v_slot.id;  -- palier commun : position fixe pour tous
+    for v_slot in select value from jsonb_array_elements(v_slots) loop
+      if v_slot->>'common' is not null then
+        -- Palier commun : position fixe pour tous
+        v_step_id := (v_slot->>'common')::uuid;
+        insert into public.team_routes (game_id, team_id, step_id, position, status)
+        values (p_game_id, v_teams[v_k], v_step_id, v_pos,
+                case when v_pos = 0 then 'current' else 'locked' end::public.route_status);
+        v_pos := v_pos + 1;
       else
-        v_step_id := v_pool[((v_pool_i + v_offset) % v_n) + 1];
-        v_pool_i := v_pool_i + 1;
+        -- Emplacement mobile : le bloc (décalé) est inséré en entier, dans l'ordre
+        v_blk := v_blocks -> ((v_m + v_offset) % v_b);
+        for v_j in 0 .. jsonb_array_length(v_blk) - 1 loop
+          v_step_id := (v_blk->>v_j)::uuid;
+          insert into public.team_routes (game_id, team_id, step_id, position, status)
+          values (p_game_id, v_teams[v_k], v_step_id, v_pos,
+                  case when v_pos = 0 then 'current' else 'locked' end::public.route_status);
+          v_pos := v_pos + 1;
+        end loop;
+        v_m := v_m + 1;
       end if;
-      insert into public.team_routes (game_id, team_id, step_id, position, status)
-      values (p_game_id, v_teams[v_k], v_step_id, v_pos,
-              case when v_pos = 0 then 'current' else 'locked' end::public.route_status);
-      v_pos := v_pos + 1;
     end loop;
 
     -- Le sprint final : identique pour tous, toujours en dernier,
@@ -649,10 +686,10 @@ begin
   loop
     insert into public.steps (game_id, type, title, content, media_urls,
                               is_common_checkpoint, is_final, is_start, order_hint,
-                              points, time_limit_sec)
+                              points, time_limit_sec, chain_group)
     values (v_new.id, v_step.type, v_step.title, v_step.content, v_step.media_urls,
             v_step.is_common_checkpoint, v_step.is_final, v_step.is_start, v_step.order_hint,
-            v_step.points, v_step.time_limit_sec)
+            v_step.points, v_step.time_limit_sec, v_step.chain_group)
     returning id into v_new_step_id;
 
     insert into public.step_secrets (step_id, answers, nfc_tag_id, manual_code, hints,

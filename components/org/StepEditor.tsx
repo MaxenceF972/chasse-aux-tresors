@@ -112,6 +112,7 @@ export default function StepEditor({
   const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold">(
     step?.content?.gps_guidance ?? "compass"
   );
+  const [chainGroup, setChainGroup] = useState<string>(step?.chain_group ?? "");
   const [gpsLocating, setGpsLocating] = useState(false);
   // Point de rendez-vous public (optionnel, affiché aux joueurs)
   const [rdvLat, setRdvLat] = useState<string>(
@@ -228,6 +229,8 @@ export default function StepEditor({
         is_start: placement === "start",
         points: Math.max(0, points || 0),
         time_limit_sec: timeLimitMin.trim() ? Math.max(1, Number(timeLimitMin)) * 60 : null,
+        // Groupe d'enchaînement : uniquement pour le pool
+        chain_group: placement === "pool" && chainGroup ? chainGroup : null,
       };
 
       let stepId = step?.id;
@@ -822,6 +825,32 @@ export default function StepEditor({
             ))}
           </div>
         </div>
+
+        {/* Enchaînement d'étapes (pool uniquement) */}
+        {placement === "pool" && (
+          <div>
+            <Label>🔗 Enchaîner avec d&apos;autres étapes (optionnel)</Label>
+            <div className="flex flex-wrap gap-2">
+              {(["", "A", "B", "C", "D", "E", "F"] as const).map((g) => (
+                <button
+                  key={g || "none"}
+                  type="button"
+                  onClick={() => setChainGroup(g)}
+                  className={`h-10 px-3 rounded-lg border-2 border-ink font-bold text-sm ${
+                    chainGroup === g ? "bg-gold text-ink" : "bg-white text-ink/60"
+                  }`}
+                >
+                  {g === "" ? "Aucun" : `Groupe ${g}`}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs font-bold text-ink/50 mt-1">
+              Les étapes d&apos;un même groupe se jouent <strong>à la suite, dans l&apos;ordre de
+              la liste</strong> (range-les avec les flèches ↑↓). Le groupe entier tombe à un
+              endroit au hasard du parcours, mais reste soudé.
+            </p>
+          </div>
+        )}
 
         {error && <p className="text-crimson font-bold">{error}</p>}
 

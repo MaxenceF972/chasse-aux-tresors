@@ -81,6 +81,8 @@ export interface Step {
   /** Épreuve de départ : toujours la première du parcours, identique pour tous */
   is_start: boolean;
   order_hint: number;
+  /** Groupe d'enchaînement : les étapes du pool partageant ce nom se suivent (bloc) */
+  chain_group?: string | null;
   /** Points gagnés en validant l'étape (classement aux points) */
   points: number;
   /** Limite de temps optionnelle (secondes) — expiration = passage à 0 point */

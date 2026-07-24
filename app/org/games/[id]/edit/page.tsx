@@ -66,10 +66,15 @@ export default function GameEditPage() {
   }, [user, load]);
 
   const editable = game?.status === "lobby";
-  const poolCount = useMemo(
-    () => steps.filter((s) => !s.is_common_checkpoint && !s.is_final && !s.is_start).length,
-    [steps]
-  );
+  // Nombre de BLOCS du pool (un groupe lié = 1 bloc) : c'est ce qui doit être
+  // ≥ nombre d'équipes pour l'anti-collision.
+  const poolCount = useMemo(() => {
+    const keys = new Set<string>();
+    steps
+      .filter((s) => !s.is_common_checkpoint && !s.is_final && !s.is_start)
+      .forEach((s) => keys.add(s.chain_group?.trim() ? `g:${s.chain_group.trim()}` : `s:${s.id}`));
+    return keys.size;
+  }, [steps]);
   const hasFinal = useMemo(() => steps.some((s) => s.is_final), [steps]);
 
   async function move(index: number, dir: -1 | 1) {
@@ -293,7 +298,7 @@ export default function GameEditPage() {
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-display text-2xl text-parchment">Parcours</h2>
         <span className="font-bold text-parchment/50 text-sm">
-          {steps.length} étape{steps.length > 1 ? "s" : ""} · pool {poolCount}
+          {steps.length} étape{steps.length > 1 ? "s" : ""} · {poolCount} bloc{poolCount > 1 ? "s" : ""} au pool
         </span>
       </div>
 
@@ -348,6 +353,11 @@ export default function GameEditPage() {
                   ) : (
                     <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-parchment-dark border-2 border-ink">
                       🎲 Pool
+                    </span>
+                  )}
+                  {step.chain_group && (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-gold border-2 border-ink">
+                      🔗 Groupe {step.chain_group}
                     </span>
                   )}
                   {step.type === "minigame" && step.content.minigame && (
