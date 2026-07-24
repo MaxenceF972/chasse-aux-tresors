@@ -1356,6 +1356,15 @@ begin
   select * into v_step from public.steps where id = v_sub.step_id;
 
   if p_approve then
+    -- L'orga corrige un refus : on retire la pénalité appliquée au refus
+    -- (symétrique du bloc de refus ci-dessous — sans plancher, les pénalités
+    -- négatives étant des bonus temps légitimes).
+    if v_sub.status = 'rejected' and coalesce(v_game.settings->>'scoring', 'time') = 'time'
+       and coalesce(v_step.content->>'photo_mode', 'bonus') <> 'gate' then
+      update public.teams
+      set penalty_seconds = penalty_seconds - coalesce((v_game.settings->>'photo_penalty_sec')::int, 180)
+      where id = v_sub.team_id;
+    end if;
     update public.submissions set status = 'approved', decided_at = now() where id = p_submission_id;
     insert into public.events (game_id, team_id, type, payload)
     values (v_sub.game_id, v_sub.team_id, 'photo_approved', jsonb_build_object('step_id', v_sub.step_id));
@@ -1470,7 +1479,9 @@ begin
       'done', (select count(*) from public.team_routes tr where tr.team_id = t.id and tr.status = 'done'),
       'total', (select count(*) from public.team_routes tr where tr.team_id = t.id),
       'time_ms', case when t.finished_at is not null
-                      then coalesce(t.final_time_ms, 0) + t.penalty_seconds * 1000
+                      -- plancher à 0 : un gros bonus temps ne doit pas produire
+                      -- un temps de course négatif à l'affichage
+                      then greatest(0, coalesce(t.final_time_ms, 0) + t.penalty_seconds * 1000)
                       else null end,
       -- Points : la somme des points d'étape gagnés (photo refusée = 0,
       -- mini-jeu passé = 0, timeout = 0) moins les pénalités de skip et d'indices.
@@ -1719,8 +1730,11 @@ begin
 
   update public.team_routes set skipped = false where id = v_route.id;
   if coalesce(v_game.settings->>'scoring', 'time') = 'time' then
+    -- On retire exactement la pénalité ajoutée au skip — PAS de plancher à 0 :
+    -- une pénalité négative est un bonus temps de l'organisateur, l'écraser
+    -- volerait son bonus à l'équipe.
     update public.teams
-    set penalty_seconds = greatest(0, penalty_seconds - coalesce((v_game.settings->>'skip_penalty_sec')::int, 180))
+    set penalty_seconds = penalty_seconds - coalesce((v_game.settings->>'skip_penalty_sec')::int, 180)
     where id = v_team.id;
   end if;
   insert into public.minigame_results (game_id, team_id, step_id, score, duration_ms)

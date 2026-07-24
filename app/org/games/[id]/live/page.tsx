@@ -283,7 +283,8 @@ export default function LiveDashboardPage() {
     if (status === "finished") {
       const ok = await confirm({
         title: "🏁 Terminer la partie ?",
-        message: "La partie se termine immédiatement pour toutes les équipes. Le classement est figé.",
+        message:
+          "La partie se termine immédiatement pour toutes les équipes. Le classement est figé (seuls les bonus que tu attribuerais ensuite peuvent encore le modifier).",
         confirmLabel: "Terminer",
         danger: true,
       });
@@ -375,6 +376,19 @@ export default function LiveDashboardPage() {
   // Bonus organisateur : +points (mode points) ou temps rendu (mode chrono),
   // montant au choix via un petit dialog.
   function awardBonus(teamId: string, teamName: string, reason: string) {
+    // Mode chrono : le bonus s'applique au temps final — pour une équipe qui
+    // n'a pas fini une partie déjà terminée, il n'aurait aucun effet.
+    if (
+      game?.settings.scoring !== "points" &&
+      game?.status === "finished" &&
+      !teams.find((t) => t.id === teamId)?.finished_at
+    ) {
+      showToast(
+        `Sans effet : « ${teamName} » n'a pas terminé le parcours (mode chrono). Passe la partie en mode points ou récompense-la à l'oral !`,
+        "info"
+      );
+      return;
+    }
     setBonusAmount(game?.settings.scoring === "points" ? "50" : "1");
     setBonusTarget({ teamId, teamName, reason });
   }
@@ -728,8 +742,11 @@ export default function LiveDashboardPage() {
                       <>
                         🏆 Terminé en{" "}
                         {formatDuration(
-                          rankMap.get(live.team.id)?.time_ms ??
-                            (live.team.final_time_ms ?? 0) + live.team.penalty_seconds * 1000
+                          Math.max(
+                            0,
+                            rankMap.get(live.team.id)?.time_ms ??
+                              (live.team.final_time_ms ?? 0) + live.team.penalty_seconds * 1000
+                          )
                         )}
                         {live.team.penalty_seconds > 0 &&
                           ` (dont ${Math.round(live.team.penalty_seconds / 60)} min de pénalité)`}

@@ -85,9 +85,9 @@ export default function RdvMap({ lat, lng }: RdvMapProps) {
   }
 
   return (
-    <div className="relative">
+    <div className="relative isolate">
       <div ref={containerRef} className="h-56 rounded-xl border-[3px] border-ink overflow-hidden z-0" />
-      <div className="absolute top-2 right-2 z-[1000] flex rounded-lg border-2 border-ink overflow-hidden shadow-[2px_2px_0_0_#111111]">
+      <div className="absolute top-2 right-2 z-20 flex rounded-lg border-2 border-ink overflow-hidden shadow-[2px_2px_0_0_#111111]">
         <button
           type="button"
           onClick={() => switchView("plan")}

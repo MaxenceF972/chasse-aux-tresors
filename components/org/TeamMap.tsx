@@ -115,13 +115,16 @@ export default function TeamMap({ players, teams }: TeamMapProps) {
   // montage — s'il n'existait pas tant qu'aucune position n'était partagée,
   // la carte restait vide pour toute la partie.
   return (
-    <div className="relative">
+    // `isolate` : les overlays internes (z-10/z-20) restent confinés ici —
+    // sans ça ils passeraient au-dessus des dialogs (z-50) et de la barre
+    // collante (z-40) de la page.
+    <div className="relative isolate">
       <div
         ref={containerRef}
         className="h-80 rounded-2xl border-[3px] border-ink overflow-hidden z-0"
       />
       {/* Bascule satellite / plan */}
-      <div className="absolute top-2 right-2 z-[600] flex rounded-lg border-2 border-ink overflow-hidden shadow-[2px_2px_0_0_#111111]">
+      <div className="absolute top-2 right-2 z-20 flex rounded-lg border-2 border-ink overflow-hidden shadow-[2px_2px_0_0_#111111]">
         <button
           type="button"
           onClick={() => switchView("sat")}
@@ -138,7 +141,7 @@ export default function TeamMap({ players, teams }: TeamMapProps) {
         </button>
       </div>
       {!positioned.length && (
-        <div className="absolute inset-0 z-[500] flex items-center justify-center rounded-2xl bg-ink/60 px-6 text-center">
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-ink/60 px-6 text-center">
           <p className="font-bold text-parchment/90 text-sm">
             📍 Aucune position partagée pour l&apos;instant — les joueurs doivent accepter le
             partage de position sur leur écran de jeu.
