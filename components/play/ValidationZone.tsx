@@ -9,6 +9,7 @@ import { frError, rpc } from "@/lib/supabase/client";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import { showToast } from "@/components/ui/Toaster";
+import GpsCompass from "./GpsCompass";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
@@ -67,7 +68,7 @@ export default function ValidationZone({
     <div className={wrong ? "animate-shake" : ""}>
       {step.type === "text" && <TextAnswer disabled={disabled || busy} onRun={run} />}
       {step.type === "nfc" && <NfcValidation disabled={disabled || busy} onRun={run} />}
-      {step.type === "gps" && <GpsValidation disabled={disabled || busy} onRun={run} />}
+      {step.type === "gps" && <GpsValidation step={step} disabled={disabled || busy} onRun={run} />}
       {step.type === "minigame" && (
         <MinigameValidation step={step} teamId={teamId} disabled={disabled || busy} onRun={run} />
       )}
@@ -259,15 +260,79 @@ function NfcValidation({
 // --- Balise GPS ---------------------------------------------------------------
 
 function GpsValidation({
+  step,
   disabled,
   onRun,
 }: {
+  step: PublicStep;
   disabled: boolean;
   onRun: (kind: ValidateKind, payload: Record<string, unknown>) => Promise<SubmitOutcome>;
 }) {
+  const target = step.gps_target ?? null;
   const [checking, setChecking] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  const livePos = useRef<{ lat: number; lng: number } | null>(null);
+  const [liveDist, setLiveDist] = useState<number | null>(null);
+  const autoTried = useRef(false);
 
+  async function submitPos(lat: number, lng: number) {
+    setChecking(true);
+    setStatus(null);
+    const outcome = await onRun("gps", { lat, lng });
+    if (outcome.status === "wrong") {
+      setStatus(
+        outcome.distanceM != null
+          ? `🧭 Pas encore ! Vous êtes à environ ${
+              outcome.distanceM >= 1000
+                ? `${(outcome.distanceM / 1000).toFixed(1)} km`
+                : `${Math.round(outcome.distanceM)} m`
+            } du lieu.`
+          : "🧭 Pas encore au bon endroit — continuez à avancer !"
+      );
+    }
+    setChecking(false);
+  }
+
+  // Mode boussole : la cible est fournie → guidage live + validation auto à l'arrivée
+  if (target) {
+    const within = liveDist != null && liveDist <= target.radius;
+    return (
+      <div className="space-y-3">
+        <GpsCompass
+          target={target}
+          onUpdate={(lat, lng, d) => {
+            livePos.current = { lat, lng };
+            setLiveDist(d);
+            if (d <= target.radius && !autoTried.current && !checking) {
+              autoTried.current = true;
+              void submitPos(lat, lng);
+            }
+            if (d > target.radius) autoTried.current = false;
+          }}
+        />
+        <Button
+          full
+          size="xl"
+          variant={within ? "leaf" : "gold"}
+          disabled={disabled || checking || !livePos.current}
+          onClick={() => livePos.current && submitPos(livePos.current.lat, livePos.current.lng)}
+        >
+          {checking
+            ? "🛰️ VÉRIFICATION…"
+            : within
+              ? "🎯 VALIDER — VOUS Y ÊTES !"
+              : "📍 VALIDER MA POSITION"}
+        </Button>
+        {status && (
+          <p className="text-center font-bold text-ink/75 text-sm rounded-xl border-2 border-ink/20 bg-white/60 px-3 py-2">
+            {status}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // Mode chaud/froid : cible cachée, on tente et le serveur renvoie la distance
   function check() {
     if (!navigator.geolocation) {
       setStatus("📵 Pas de GPS sur ce téléphone — contacte le maître du jeu.");
@@ -276,24 +341,7 @@ function GpsValidation({
     setChecking(true);
     setStatus(null);
     navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const outcome = await onRun("gps", {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
-        if (outcome.status === "wrong") {
-          setStatus(
-            outcome.distanceM != null
-              ? `🧭 Pas encore ! Vous êtes à environ ${
-                  outcome.distanceM >= 1000
-                    ? `${(outcome.distanceM / 1000).toFixed(1)} km`
-                    : `${Math.round(outcome.distanceM)} m`
-                } du lieu mystère.`
-              : "🧭 Pas encore au bon endroit — continuez à chercher !"
-          );
-        }
-        setChecking(false);
-      },
+      (pos) => void submitPos(pos.coords.latitude, pos.coords.longitude),
       (err) => {
         setChecking(false);
         setStatus(

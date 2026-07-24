@@ -65,6 +65,8 @@ export interface StepContent {
   /** Pénalité si l'équipe passe cette étape (surcharge le réglage global de la partie) */
   skip_penalty_sec?: number;   // mode chrono : minutes ajoutées ×60
   skip_penalty_points?: number; // mode points : points retirés
+  /** Balise GPS : "compass" (boussole + distance live) ou "hotcold" (distance seule) */
+  gps_guidance?: "compass" | "hotcold";
 }
 
 export interface Step {
@@ -210,6 +212,8 @@ export interface PublicStep {
   is_start?: boolean;
   points: number;
   time_limit_sec: number | null;
+  /** Balise GPS en mode boussole : cible révélée pour l'étape courante uniquement */
+  gps_target?: { lat: number; lng: number; radius: number } | null;
 }
 
 export interface PlayState {

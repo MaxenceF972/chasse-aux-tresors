@@ -941,7 +941,16 @@ begin
         'content', v_step.content, 'media_urls', to_jsonb(v_step.media_urls),
         'is_final', v_step.is_final, 'is_common', v_step.is_common_checkpoint,
         'is_start', v_step.is_start,
-        'points', v_step.points, 'time_limit_sec', v_step.time_limit_sec
+        'points', v_step.points, 'time_limit_sec', v_step.time_limit_sec,
+        -- Balise GPS en mode boussole : on révèle la cible de l'étape EN COURS
+        -- uniquement (il faut de toute façon s'y rendre physiquement).
+        'gps_target', case
+          when v_step.type = 'gps'
+               and coalesce(v_step.content->>'gps_guidance', 'compass') <> 'hotcold'
+               and v_secret.gps_lat is not null and v_secret.gps_lng is not null
+          then jsonb_build_object('lat', v_secret.gps_lat, 'lng', v_secret.gps_lng,
+                                  'radius', coalesce(v_secret.gps_radius_m, 30))
+          else null end
       ),
       'position', v_route.position,
       'started_at', v_started,

@@ -109,6 +109,9 @@ export default function StepEditor({
   const [gpsLat, setGpsLat] = useState<string>(secrets?.gps_lat != null ? String(secrets.gps_lat) : "");
   const [gpsLng, setGpsLng] = useState<string>(secrets?.gps_lng != null ? String(secrets.gps_lng) : "");
   const [gpsRadius, setGpsRadius] = useState<string>(String(secrets?.gps_radius_m ?? 30));
+  const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold">(
+    step?.content?.gps_guidance ?? "compass"
+  );
   const [gpsLocating, setGpsLocating] = useState(false);
   // Point de rendez-vous public (optionnel, affiché aux joueurs)
   const [rdvLat, setRdvLat] = useState<string>(
@@ -204,6 +207,7 @@ export default function StepEditor({
               ? { lat: parseCoord(rdvLat), lng: parseCoord(rdvLng) }
               : undefined,
           photo_mode: type === "photo" ? photoMode : undefined,
+          gps_guidance: type === "gps" ? gpsGuidance : undefined,
           // Conserve la clé de l'AUTRE mode (au cas où la partie change de score)
           skip_penalty_sec:
             scoring === "points"
@@ -484,6 +488,37 @@ export default function StepEditor({
                 30 m est un bon réglage : le GPS d&apos;un téléphone est précis à 5-20 m dehors.
                 En dessous de 20 m, tu risques de bloquer des équipes pourtant sur place.
               </p>
+            </div>
+            <div>
+              <Label>Guidage des joueurs</Label>
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setGpsGuidance("compass")}
+                  className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                    gpsGuidance === "compass" ? "bg-gold" : "bg-white"
+                  }`}
+                >
+                  <span className="font-display">🧭 Boussole + distance</span>
+                  <span className="block text-xs font-bold text-ink/60">
+                    Une flèche pointe vers le point et la distance s&apos;affiche en direct — comme
+                    une chasse au trésor géante. Validation automatique à l&apos;arrivée.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGpsGuidance("hotcold")}
+                  className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                    gpsGuidance === "hotcold" ? "bg-gold" : "bg-white"
+                  }`}
+                >
+                  <span className="font-display">🔥 Chaud / froid</span>
+                  <span className="block text-xs font-bold text-ink/60">
+                    Pas de flèche : l&apos;équipe appuie sur « On est sur place ! » et n&apos;a que
+                    la distance restante. Plus mystérieux, plus de recherche.
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         )}
