@@ -1,7 +1,8 @@
 /**
  * Sons courts synthétisés (Web Audio) — zéro asset, zéro chargement.
  * Les navigateurs exigent un geste utilisateur avant de jouer du son :
- * tous les appels partent d'un handler de clic/scan, c'est le cas ici.
+ * tous les appels partent (directement ou après un await) d'un geste, et le
+ * contexte est amorcé dès le premier contact tactile.
  */
 
 import { isMuted } from "./prefs";
@@ -19,9 +20,9 @@ function makeCtx(): AudioContext | null {
 }
 
 /**
- * Réveille le contexte audio. Au retour d'arrière-plan, iOS met le contexte en
- * état "interrupted" (et parfois "suspended") : sans réveil explicite, plus
- * aucun son de l'app. On resume, et on recrée si le contexte est mort.
+ * Réveille un contexte EXISTANT (événement HORS geste : visibilitychange). On
+ * n'en crée jamais ici : sans geste utilisateur, iOS le créerait bloqué en
+ * "suspended" sans pouvoir le reprendre.
  */
 function wake() {
   if (!ctx) return;
@@ -32,20 +33,31 @@ function wake() {
   if (ctx.state !== "running") void ctx.resume().catch(() => {});
 }
 
+/**
+ * Sur GESTE utilisateur : on peut créer le contexte et le (re)démarrer. L'amorcer
+ * dès le 1er tap le rend « running » AVANT le 1er son — or ce son est souvent
+ * joué après un await (succès d'une validation), donc détaché du geste. Sans cet
+ * amorçage, ce premier son (et ceux qui suivent un retour d'arrière-plan)
+ * partaient sur un contexte encore suspendu et étaient perdus « par moments ».
+ */
+function prime() {
+  if (!ctx || ctx.state === "closed") ctx = makeCtx();
+  if (ctx && ctx.state !== "running") void ctx.resume().catch(() => {});
+}
+
 if (typeof window !== "undefined") {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") wake();
   });
-  // Un geste après le retour d'arrière-plan relance le contexte (exigence iOS)
-  window.addEventListener("pointerdown", wake, { capture: true, passive: true });
+  // Le tout premier contact amorce l'audio (capture = avant tout autre handler).
+  window.addEventListener("pointerdown", prime, { capture: true, passive: true });
+  window.addEventListener("touchstart", prime, { capture: true, passive: true });
 }
 
 function audio(): AudioContext | null {
   if (typeof window === "undefined" || isMuted()) return null;
   try {
     if (!ctx || ctx.state === "closed") ctx = makeCtx();
-    // "suspended" (Chrome) ET "interrupted" (iOS) → on relance
-    if (ctx && ctx.state !== "running") void ctx.resume().catch(() => {});
     return ctx;
   } catch {
     return null;
@@ -61,16 +73,28 @@ export function tone(
 ) {
   const ac = audio();
   if (!ac) return;
-  const t0 = ac.currentTime + delay;
-  const osc = ac.createOscillator();
-  const gain = ac.createGain();
-  osc.type = type;
-  osc.frequency.value = freq;
-  gain.gain.setValueAtTime(volume, t0);
-  gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
-  osc.connect(gain).connect(ac.destination);
-  osc.start(t0);
-  osc.stop(t0 + duration + 0.05);
+
+  const emit = () => {
+    // Reprise échouée (ex. iOS sans geste) : on saute proprement plutôt que de
+    // programmer sur une horloge figée (note fantôme).
+    if (ac.state !== "running") return;
+    const t0 = ac.currentTime + delay;
+    const osc = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(volume, t0);
+    gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+    osc.connect(gain).connect(ac.destination);
+    osc.start(t0);
+    osc.stop(t0 + duration + 0.05);
+  };
+
+  // Contexte suspendu/interrompu (retour d'arrière-plan, coupure iOS) : la
+  // reprise est ASYNCHRONE. Programmer la note pendant que l'horloge est encore
+  // figée la fait sauter → on attend que le contexte tourne vraiment.
+  if (ac.state === "running") emit();
+  else ac.resume().then(emit).catch(() => {});
 }
 
 export const sfx = {
