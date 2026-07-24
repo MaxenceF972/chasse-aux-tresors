@@ -48,6 +48,12 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
     case "step_timeout": return `⌛ « ${team} » — temps écoulé sur « ${String(e.payload.step_title ?? "?")} »`;
     case "step_neutralized": return `🛠️ Étape « ${String(e.payload.step_title ?? "?")} » neutralisée (${String(e.payload.teams_affected ?? 0)} équipes)`;
     case "team_message": return `🆘 « ${team} » : ${String(e.payload.message ?? "")}`;
+    case "bonus_awarded": {
+      const pts = Number(e.payload.points ?? 0);
+      const sec = Number(e.payload.seconds ?? 0);
+      const amount = pts !== 0 ? `+${pts} pts` : `${sec > 0 ? "+" : "−"}${Math.abs(Math.round(sec / 60))} min`;
+      return `🎁 Bonus ${amount} pour « ${team} » — ${String(e.payload.reason ?? "")}`;
+    }
     case "team_finished": return `🏆 « ${team} » a terminé le parcours !`;
     default: return `${e.type}`;
   }
@@ -75,6 +81,9 @@ export default function LiveDashboardPage() {
   const [statsOpen, setStatsOpen] = useState(false);
   const [journalFilter, setJournalFilter] = useState<"all" | "sos" | "valid" | "warn" | "photo">("all");
   const [seenMsgId, setSeenMsgId] = useState(0);
+  const [teamQuery, setTeamQuery] = useState("");
+  const sosRef = useRef<HTMLDivElement>(null);
+  const photosRef = useRef<HTMLHeadingElement>(null);
   const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
@@ -84,7 +93,7 @@ export default function LiveDashboardPage() {
       sb().from("players").select("*").eq("game_id", gameId),
       sb().from("steps").select("*").eq("game_id", gameId),
       sb().from("team_routes").select("*").eq("game_id", gameId),
-      sb().from("events").select("*").eq("game_id", gameId).order("id", { ascending: false }).limit(120),
+      sb().from("events").select("*").eq("game_id", gameId).order("id", { ascending: false }).limit(250),
       sb().from("submissions").select("*").eq("game_id", gameId).eq("status", "pending").order("created_at"),
     ]);
     if (g.data) {
@@ -218,6 +227,7 @@ export default function LiveDashboardPage() {
     for (const r of routes) byTeam.set(r.team_id, [...(byTeam.get(r.team_id) ?? []), r]);
     const bestByStep = new Map<string, { teamId: string; ms: number }>();
     let flash: { teamId: string; stepId: string; ms: number } | null = null;
+    const perTeam = new Map<string, { totalMs: number; count: number }>();
     for (const [teamId, rs] of byTeam) {
       let prev = start;
       for (const r of rs.slice().sort((a, b) => a.position - b.position)) {
@@ -229,16 +239,27 @@ export default function LiveDashboardPage() {
         const best = bestByStep.get(r.step_id);
         if (!best || ms < best.ms) bestByStep.set(r.step_id, { teamId, ms });
         if (!flash || ms < flash.ms) flash = { teamId, stepId: r.step_id, ms };
+        const agg = perTeam.get(teamId) ?? { totalMs: 0, count: 0 };
+        agg.totalMs += ms;
+        agg.count += 1;
+        perTeam.set(teamId, agg);
       }
     }
     let hardest: { stepId: string; ms: number } | null = null;
     for (const [stepId, best] of bestByStep) {
       if (!hardest || best.ms > hardest.ms) hardest = { stepId, ms: best.ms };
     }
+    // Équipe la plus régulière : meilleur temps moyen par étape réussie (≥ 2)
+    let bestAvg: { teamId: string; ms: number } | null = null;
+    for (const [teamId, agg] of perTeam) {
+      if (agg.count < 2) continue;
+      const avg = agg.totalMs / agg.count;
+      if (!bestAvg || avg < bestAvg.ms) bestAvg = { teamId, ms: avg };
+    }
     const firstFinisher = teams
       .filter((t) => t.finished_at)
       .sort((a, b) => (a.finished_at! < b.finished_at! ? -1 : 1))[0];
-    return { bestByStep, flash, hardest, firstFinisher };
+    return { bestByStep, flash, hardest, firstFinisher, bestAvg };
   }, [routes, teams, game?.started_at]);
 
   async function doStart() {
@@ -349,6 +370,30 @@ export default function LiveDashboardPage() {
     void load();
   }
 
+  // Bonus organisateur : +points (mode points) ou temps rendu (mode chrono)
+  async function awardBonus(teamId: string, teamName: string, reason: string) {
+    const isPoints = game?.settings.scoring === "points";
+    const label = isPoints ? "+50 points bonus" : "−1 minute de temps";
+    const ok = await confirm({
+      title: `🎁 Bonus pour « ${teamName} » ?`,
+      message: `${label} pour : ${reason}. (annulable en attribuant l'inverse via le classement)`,
+      confirmLabel: "Attribuer",
+    });
+    if (!ok) return;
+    try {
+      await rpc("org_award_bonus", {
+        p_team_id: teamId,
+        p_points: isPoints ? 50 : 0,
+        p_seconds: isPoints ? 0 : -60,
+        p_reason: reason,
+      });
+      showToast(`🎁 Bonus attribué à « ${teamName} » !`, "success");
+      await load();
+    } catch (err) {
+      showToast(`Bonus impossible : ${frError(err, "erreur")}`, "error");
+    }
+  }
+
   async function renameTeam(team: Team, name: string) {
     if (!name.trim() || name.trim() === team.name) return;
     try {
@@ -408,6 +453,22 @@ export default function LiveDashboardPage() {
   if (loading || !user || !game) return <Spinner label="Chargement…" />;
 
   const poolCount = steps.filter((s) => !s.is_common_checkpoint && !s.is_final).length;
+  // Vue d'ensemble pour les grosses chasses (20-30 équipes) : compteurs dans
+  // la barre d'actions collante, recherche dans le classement.
+  const finishedCount = teams.filter((t) => t.finished_at).length;
+  const stuckCount =
+    game.status === "running"
+      ? ranking.filter(
+          (l) =>
+            !l.team.finished_at &&
+            l.current?.since &&
+            Date.now() - new Date(l.current.since).getTime() >= 10 * 60000
+        ).length
+      : 0;
+  const rankIndex = new Map(ranking.map((l, i) => [l.team.id, i]));
+  const shownRanking = teamQuery.trim()
+    ? ranking.filter((l) => l.team.name.toLowerCase().includes(teamQuery.trim().toLowerCase()))
+    : ranking;
 
   return (
     <main className="min-h-dvh px-5 py-6 max-w-3xl mx-auto pb-24">
@@ -446,8 +507,31 @@ export default function LiveDashboardPage() {
         </div>
       </header>
 
-      {/* Actions globales */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      {/* Actions globales : barre collante avec compteurs d'état (grosses chasses) */}
+      <div className="sticky top-0 z-40 -mx-5 px-5 py-2.5 mb-4 bg-ink/95 backdrop-blur-sm border-b-2 border-parchment/10">
+        {game.status !== "lobby" && (
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 font-bold text-xs text-parchment/70">
+            <span>🏁 {finishedCount}/{teams.length} arrivées</span>
+            {stuckCount > 0 && <span className="text-crimson">⚠️ {stuckCount} bloquée{stuckCount > 1 ? "s" : ""}</span>}
+            {unreadCount > 0 && (
+              <button
+                className="text-gold underline"
+                onClick={() => sosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              >
+                🆘 {unreadCount} message{unreadCount > 1 ? "s" : ""} non lu{unreadCount > 1 ? "s" : ""}
+              </button>
+            )}
+            {submissions.length > 0 && (
+              <button
+                className="text-gold underline"
+                onClick={() => photosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+              >
+                📸 {submissions.length} photo{submissions.length > 1 ? "s" : ""} à juger
+              </button>
+            )}
+          </div>
+        )}
+        <div className="flex flex-wrap gap-2">
         {game.status === "lobby" && (
           <Button size="lg" disabled={busy} onClick={doStart}>
             {busy ? "⏳ LANCEMENT…" : "🚀 LANCER LA PARTIE"}
@@ -483,6 +567,7 @@ export default function LiveDashboardPage() {
             <Button variant="gold">🖼️ Galerie photos</Button>
           </Link>
         )}
+        </div>
       </div>
 
       {error && (
@@ -556,25 +641,48 @@ export default function LiveDashboardPage() {
             🔴 : passée avec pénalité · grise : temps écoulé · blanche : à venir. Touche une case
             pour voir le nom de l&apos;étape.
           </p>
-          <div className="space-y-3 mb-8 max-h-[30rem] overflow-y-auto overscroll-contain pr-1">
-            {ranking.map((live, i) => (
-              <Card key={live.team.id} className="p-4">
-                <div className="flex items-center gap-3 mb-2">
-                  <span className="font-display text-2xl w-8">
+          {teams.length > 6 && (
+            <div className="mb-3">
+              <Input
+                value={teamQuery}
+                onChange={(e) => setTeamQuery(e.target.value)}
+                placeholder="🔎 Chercher une équipe…"
+                className="h-11"
+              />
+            </div>
+          )}
+          <div className="space-y-2 mb-8 max-h-[30rem] overflow-y-auto overscroll-contain pr-1">
+            {shownRanking.length === 0 && (
+              <p className="font-bold text-parchment/50 text-sm">Aucune équipe ne correspond.</p>
+            )}
+            {shownRanking.map((live) => {
+              const i = rankIndex.get(live.team.id) ?? 0;
+              return (
+              <Card key={live.team.id} className="p-3">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="font-display text-lg w-7 shrink-0">
                     {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`}
                   </span>
                   <span
-                    className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
+                    className="w-3.5 h-3.5 rounded-full border-2 border-ink shrink-0"
                     style={{ backgroundColor: live.team.color }}
                   />
-                  <span className="font-display text-lg flex-1 truncate">{live.team.name}</span>
-                  <span className="font-bold text-ink/60 tabular-nums">
+                  <span className="font-display flex-1 truncate">{live.team.name}</span>
+                  {(rankMap.get(live.team.id)?.bonus_points ?? 0) > 0 && (
+                    <span
+                      className="shrink-0 text-[10px] font-bold bg-gold border border-ink rounded px-1"
+                      title={`${rankMap.get(live.team.id)?.bonus_points} points bonus`}
+                    >
+                      🎁 +{rankMap.get(live.team.id)?.bonus_points}
+                    </span>
+                  )}
+                  <span className="font-bold text-ink/60 text-sm tabular-nums shrink-0">
                     {live.done}/{live.total}
                   </span>
                 </div>
 
                 {/* Avancement étape par étape (une case = une étape) */}
-                <div className="flex gap-[3px] mb-2">
+                <div className="flex gap-[3px] mb-1.5">
                   {routes
                     .filter((r) => r.team_id === live.team.id)
                     .sort((a, b) => a.position - b.position)
@@ -599,7 +707,7 @@ export default function LiveDashboardPage() {
                         <div
                           key={r.id}
                           title={label}
-                          className={`h-3.5 flex-1 rounded-sm border border-ink ${cls}`}
+                          className={`h-2.5 flex-1 rounded-sm border border-ink ${cls}`}
                           style={bg ? { backgroundColor: bg } : undefined}
                         />
                       );
@@ -661,7 +769,8 @@ export default function LiveDashboardPage() {
                   )}
                 </div>
               </Card>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -669,7 +778,7 @@ export default function LiveDashboardPage() {
       {/* Messages des équipes : panneau dédié pour ne jamais rater un SOS */}
       {teamMessages.length > 0 && (
         <>
-          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+          <div ref={sosRef} className="flex items-center justify-between gap-3 mb-3 flex-wrap scroll-mt-24">
             <h2 className="font-display text-2xl text-gold">
               🆘 Messages des équipes
               {unreadCount > 0 && (
@@ -778,7 +887,7 @@ export default function LiveDashboardPage() {
       {/* Photos à valider */}
       {submissions.length > 0 && (
         <>
-          <h2 className="font-display text-2xl text-gold mb-3 mt-8 animate-pulse">
+          <h2 ref={photosRef} className="font-display text-2xl text-gold mb-3 mt-8 animate-pulse scroll-mt-24">
             📸 Photos à valider ({submissions.length})
           </h2>
           <div className="space-y-4 mb-8">
@@ -922,27 +1031,84 @@ export default function LiveDashboardPage() {
           </p>
         ) : (
           <div className="space-y-4">
+            <p className="font-bold text-ink/55 text-xs">
+              🎁 attribue un bonus ({game.settings.scoring === "points" ? "+50 pts" : "−1 min"}) à
+              l&apos;équipe du record — parfait pour récompenser en direct !
+            </p>
             {/* Infos fun */}
             <div className="space-y-2">
               {funStats.firstFinisher && (
-                <p className="font-bold text-sm rounded-xl border-2 border-ink/20 px-3 py-2">
-                  🏁 Premier arrivé au trésor :{" "}
-                  <span style={{ color: funStats.firstFinisher.color }} className="font-display">
-                    {funStats.firstFinisher.name}
+                <div className="flex items-center gap-2 font-bold text-sm rounded-xl border-2 border-ink/20 px-3 py-2">
+                  <span className="flex-1 min-w-0">
+                    🏁 Premier arrivé au trésor :{" "}
+                    <span style={{ color: funStats.firstFinisher.color }} className="font-display">
+                      {funStats.firstFinisher.name}
+                    </span>
                   </span>
-                </p>
+                  <Button
+                    size="sm"
+                    variant="gold"
+                    onClick={() =>
+                      awardBonus(funStats.firstFinisher!.id, funStats.firstFinisher!.name, "premier arrivé au trésor")
+                    }
+                  >
+                    🎁
+                  </Button>
+                </div>
               )}
               {funStats.flash && (
-                <p className="font-bold text-sm rounded-xl border-2 border-ink/20 px-3 py-2">
-                  ⚡ Étape éclair : « {stepMap.get(funStats.flash.stepId)?.title ?? "?"} » par{" "}
-                  <span
-                    style={{ color: teamMap.get(funStats.flash.teamId)?.color }}
-                    className="font-display"
+                <div className="flex items-center gap-2 font-bold text-sm rounded-xl border-2 border-ink/20 px-3 py-2">
+                  <span className="flex-1 min-w-0">
+                    ⚡ Étape éclair : « {stepMap.get(funStats.flash.stepId)?.title ?? "?"} » par{" "}
+                    <span
+                      style={{ color: teamMap.get(funStats.flash.teamId)?.color }}
+                      className="font-display"
+                    >
+                      {teamMap.get(funStats.flash.teamId)?.name ?? "?"}
+                    </span>{" "}
+                    en {formatDuration(funStats.flash.ms)} !
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="gold"
+                    onClick={() =>
+                      awardBonus(
+                        funStats.flash!.teamId,
+                        teamMap.get(funStats.flash!.teamId)?.name ?? "?",
+                        "étape éclair de la partie"
+                      )
+                    }
                   >
-                    {teamMap.get(funStats.flash.teamId)?.name ?? "?"}
-                  </span>{" "}
-                  en {formatDuration(funStats.flash.ms)} !
-                </p>
+                    🎁
+                  </Button>
+                </div>
+              )}
+              {funStats.bestAvg && (
+                <div className="flex items-center gap-2 font-bold text-sm rounded-xl border-2 border-ink/20 px-3 py-2">
+                  <span className="flex-1 min-w-0">
+                    🎯 La plus régulière :{" "}
+                    <span
+                      style={{ color: teamMap.get(funStats.bestAvg.teamId)?.color }}
+                      className="font-display"
+                    >
+                      {teamMap.get(funStats.bestAvg.teamId)?.name ?? "?"}
+                    </span>{" "}
+                    — {formatDuration(funStats.bestAvg.ms)} de moyenne par étape
+                  </span>
+                  <Button
+                    size="sm"
+                    variant="gold"
+                    onClick={() =>
+                      awardBonus(
+                        funStats.bestAvg!.teamId,
+                        teamMap.get(funStats.bestAvg!.teamId)?.name ?? "?",
+                        "équipe la plus régulière"
+                      )
+                    }
+                  >
+                    🎁
+                  </Button>
+                </div>
               )}
               {funStats.hardest && funStats.bestByStep.size > 1 && (
                 <p className="font-bold text-sm rounded-xl border-2 border-ink/20 px-3 py-2">
@@ -974,10 +1140,19 @@ export default function LiveDashboardPage() {
                               className="w-3 h-3 rounded-full border border-ink shrink-0"
                               style={{ backgroundColor: team.color }}
                             />
-                            <span className="font-display truncate max-w-[7rem]">{team.name}</span>
+                            <span className="font-display truncate max-w-[6rem]">{team.name}</span>
                             <span className="tabular-nums text-ink/60">
                               {formatDuration(best.ms)}
                             </span>
+                            <button
+                              className="w-8 h-8 rounded-lg border-2 border-ink bg-gold shrink-0"
+                              aria-label={`Bonus pour ${team.name}`}
+                              onClick={() =>
+                                awardBonus(team.id, team.name, `plus rapide sur « ${step.title} »`)
+                              }
+                            >
+                              🎁
+                            </button>
                           </>
                         ) : (
                           <span className="text-ink/40">—</span>

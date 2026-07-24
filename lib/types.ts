@@ -255,6 +255,8 @@ export interface RankedTeam {
   time_ms: number | null;
   points: number;
   fastest_step_ms: number | null;
+  /** Bonus attribués par l'organisateur (absent tant que le SQL n'est pas ré-appliqué) */
+  bonus_points?: number;
 }
 
 export interface RankingData {

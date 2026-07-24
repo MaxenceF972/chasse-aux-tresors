@@ -101,6 +101,7 @@ create table if not exists public.teams (
 -- Migrations pour les bases déjà créées
 alter table public.teams add column if not exists roster text[] not null default '{}';
 alter table public.teams add column if not exists final_time_ms bigint;  -- temps effectif figé à l'arrivée
+alter table public.teams add column if not exists bonus_points int not null default 0;  -- bonus attribués par l'organisateur
 
 create table if not exists public.players (
   id         uuid primary key default gen_random_uuid(),
@@ -645,6 +646,33 @@ begin
   end loop;
 
   return v_new;
+end $$;
+
+-- Bonus attribué par l'organisateur (records, fair-play…) : points en mode
+-- points, secondes (négatives = temps rendu) en mode chrono.
+create or replace function public.org_award_bonus(
+  p_team_id uuid, p_points int, p_seconds int, p_reason text
+)
+returns void
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_team public.teams%rowtype;
+begin
+  select * into v_team from public.teams where id = p_team_id;
+  if not found or not public.is_game_owner(v_team.game_id) then
+    raise exception 'INTERDIT';
+  end if;
+  update public.teams
+  set bonus_points   = bonus_points + coalesce(p_points, 0),
+      penalty_seconds = penalty_seconds + coalesce(p_seconds, 0)
+  where id = p_team_id;
+  insert into public.events (game_id, team_id, type, payload)
+  values (v_team.game_id, p_team_id, 'bonus_awarded',
+          jsonb_build_object('points', coalesce(p_points, 0),
+                             'seconds', coalesce(p_seconds, 0),
+                             'reason', coalesce(trim(p_reason), '')));
 end $$;
 
 -- Envoie un message/indice à une équipe (toast temps réel côté joueur).
@@ -1464,7 +1492,9 @@ begin
         ), 0)
         - (select count(*) from public.team_routes tr where tr.team_id = t.id and tr.skipped)
           * coalesce((v_game.settings->>'skip_penalty_points')::int, 50)
-        - floor(t.penalty_seconds / 60.0) * 10,
+        - floor(t.penalty_seconds / 60.0) * 10
+        + t.bonus_points,
+      'bonus_points', t.bonus_points,
       'fastest_step_ms', (
         select min((extract(epoch from (x.validated_at - x.prev_ts)) * 1000)::bigint)
         from (
@@ -1848,6 +1878,7 @@ begin
     'org_set_status(uuid,text)', 'org_force_validate(uuid,uuid)', 'org_send_hint(uuid,text)',
     'org_rename_team(uuid,text)', 'org_delete_team(uuid)', 'org_review_photo(uuid,boolean)',
     'org_set_photo_winner(uuid)', 'org_neutralize_step(uuid,uuid)',
+    'org_award_bonus(uuid,int,int,text)',
     'get_lobby(text)', 'create_team(text,text,text,text[])', 'join_team(text,uuid,text)',
     'join_by_team_code(text,text,text)', 'get_play_state()', 'get_next_media()', 'get_ranking(text)',
     'validate_step(uuid,uuid,text,jsonb)', 'validate_tag(uuid,text)', 'unlock_hint(uuid,int)',
