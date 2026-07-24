@@ -232,7 +232,7 @@ export default function StepEditor({
       const raw = err instanceof Error ? err.message : "";
       if (/invalid input value for enum|does not exist|schema cache/i.test(raw)) {
         setError(
-          "⚠️ La base Supabase n'est pas à jour pour les balises GPS : ouvre le SQL Editor de Supabase, recolle TOUT le contenu de supabase/setup.sql, exécute-le, puis réessaie."
+          `⚠️ La base Supabase ne connaît pas encore un champ requis par cette version de l'app. Recolle TOUT le contenu de supabase/setup.sql (version du jour) dans le SQL Editor, exécute-le, attends 10 secondes, puis réessaie. Détail technique : ${raw}`
         );
       } else {
         setError(frError(err, "Enregistrement impossible — réessaie"));

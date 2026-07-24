@@ -1963,6 +1963,13 @@ do $$ begin
   alter publication supabase_realtime add table public.submissions;
 exception when duplicate_object then null; end $$;
 
+-- ----------------------------------------------------------------------------
+-- Recharge le cache de schéma de l'API (PostgREST) : sans ça, les nouvelles
+-- colonnes/fonctions peuvent rester invisibles pour l'app plusieurs minutes
+-- après l'exécution du script (« … in the schema cache »).
+-- ----------------------------------------------------------------------------
+notify pgrst, 'reload schema';
+
 -- ============================================================================
 -- FIN — Pense aussi à activer "Allow anonymous sign-ins"
 -- (Dashboard → Authentication → Sign In / Up) pour les joueurs.
