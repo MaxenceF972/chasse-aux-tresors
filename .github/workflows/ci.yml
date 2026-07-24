@@ -19,7 +19,15 @@ jobs:
           cache: npm
 
       - name: Installer les dépendances
-        run: npm ci
+        run: |
+          npm ci --no-audit --no-fund 2>&1 | tee install.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" != "0" ]; then
+            # Publie la fin du log en annotation (diagnostic lisible sans auth)
+            msg=$(tail -c 900 install.log | tr '\n' ' ')
+            echo "::error title=npm-ci::$msg"
+            exit 1
+          fi
 
       - name: Tests unitaires (algos critiques)
         run: npm test
