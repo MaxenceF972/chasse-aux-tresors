@@ -7,7 +7,7 @@
 
 // 6 seuils éditables en mètres, du plus FROID (le plus loin) au plus BRÛLANT
 // (le plus près) — correspondent à HOTCOLD_TIERS[1..6].
-export const HOTCOLD_DEFAULT_THRESHOLDS = [100, 70, 50, 35, 20, 10];
+export const HOTCOLD_DEFAULT_THRESHOLDS = [60, 54, 30, 18, 10, 5];
 
 export interface HotColdTier {
   label: string;

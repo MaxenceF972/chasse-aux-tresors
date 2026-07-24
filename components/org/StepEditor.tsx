@@ -109,7 +109,7 @@ export default function StepEditor({
   const [hints, setHints] = useState<Hint[]>(secrets?.hints ?? []);
   const [gpsLat, setGpsLat] = useState<string>(secrets?.gps_lat != null ? String(secrets.gps_lat) : "");
   const [gpsLng, setGpsLng] = useState<string>(secrets?.gps_lng != null ? String(secrets.gps_lng) : "");
-  const [gpsRadius, setGpsRadius] = useState<string>(String(secrets?.gps_radius_m ?? 30));
+  const [gpsRadius, setGpsRadius] = useState<string>(String(secrets?.gps_radius_m ?? 2));
   const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold">(
     step?.content?.gps_guidance ?? "compass"
   );
@@ -275,7 +275,7 @@ export default function StepEditor({
         hints,
         gps_lat: type === "gps" ? parseCoord(gpsLat) : null,
         gps_lng: type === "gps" ? parseCoord(gpsLng) : null,
-        gps_radius_m: type === "gps" ? Math.max(10, Number(gpsRadius) || 30) : null,
+        gps_radius_m: type === "gps" ? Math.max(1, Number(gpsRadius) || 2) : null,
       });
       if (secErr) throw new Error(secErr.message);
 
@@ -508,8 +508,9 @@ export default function StepEditor({
                 className="w-28"
               />
               <p className="text-xs font-bold text-ink/55 mt-1">
-                30 m est un bon réglage : le GPS d&apos;un téléphone est précis à 5-20 m dehors.
-                En dessous de 20 m, tu risques de bloquer des équipes pourtant sur place.
+                Réglé à 2 m par défaut (très serré). Le GPS d&apos;un téléphone est précis à 5-20 m
+                dehors : si des équipes n&apos;arrivent pas à valider alors qu&apos;elles sont sur
+                place, monte à 10-30 m.
               </p>
             </div>
             <div>
