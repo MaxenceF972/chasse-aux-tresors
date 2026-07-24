@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import type { Player, Team } from "@/lib/types";
@@ -12,14 +12,17 @@ interface TeamMapProps {
 
 /**
  * Carte de suivi des équipes (positions partagées avec consentement).
- * Leaflet + tuiles OpenStreetMap, marqueurs aux couleurs des équipes.
+ * Satellite par défaut (on voit le terrain réel), bascule Plan disponible.
  */
 export default function TeamMap({ players, teams }: TeamMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
   const leafletRef = useRef<typeof L | null>(null);
+  const satLayerRef = useRef<L.TileLayer | null>(null);
+  const planLayerRef = useRef<L.TileLayer | null>(null);
   const fittedRef = useRef(false);
+  const [view, setView] = useState<"sat" | "plan">("sat");
 
   const positioned = players.filter((p) => p.last_lat != null && p.last_lng != null);
 
@@ -32,13 +35,17 @@ export default function TeamMap({ players, teams }: TeamMapProps) {
       const map = leaflet.map(containerRef.current, {
         zoomControl: true,
         attributionControl: true,
+        maxZoom: 19,
       });
-      leaflet
-        .tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          maxZoom: 19,
-          attribution: "© OpenStreetMap",
-        })
-        .addTo(map);
+      satLayerRef.current = leaflet.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        { maxZoom: 19, attribution: "© Esri, Maxar" }
+      );
+      planLayerRef.current = leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "© OpenStreetMap",
+      });
+      satLayerRef.current.addTo(map);
       map.setView([46.6, 2.4], 5); // France par défaut, recentré dès la 1re position
       layerRef.current = leaflet.layerGroup().addTo(map);
       mapRef.current = map;
@@ -50,6 +57,21 @@ export default function TeamMap({ players, teams }: TeamMapProps) {
       fittedRef.current = false;
     };
   }, []);
+
+  function switchView(next: "sat" | "plan") {
+    setView(next);
+    const map = mapRef.current;
+    const sat = satLayerRef.current;
+    const plan = planLayerRef.current;
+    if (!map || !sat || !plan) return;
+    if (next === "sat") {
+      map.removeLayer(plan);
+      sat.addTo(map);
+    } else {
+      map.removeLayer(sat);
+      plan.addTo(map);
+    }
+  }
 
   // Met à jour les marqueurs à chaque rafraîchissement des positions
   useEffect(() => {
@@ -98,6 +120,23 @@ export default function TeamMap({ players, teams }: TeamMapProps) {
         ref={containerRef}
         className="h-80 rounded-2xl border-[3px] border-ink overflow-hidden z-0"
       />
+      {/* Bascule satellite / plan */}
+      <div className="absolute top-2 right-2 z-[600] flex rounded-lg border-2 border-ink overflow-hidden shadow-[2px_2px_0_0_#111111]">
+        <button
+          type="button"
+          onClick={() => switchView("sat")}
+          className={`px-2.5 h-9 text-xs font-bold ${view === "sat" ? "bg-gold text-ink" : "bg-white text-ink/60"}`}
+        >
+          🛰️ Satellite
+        </button>
+        <button
+          type="button"
+          onClick={() => switchView("plan")}
+          className={`px-2.5 h-9 text-xs font-bold border-l-2 border-ink ${view === "plan" ? "bg-gold text-ink" : "bg-white text-ink/60"}`}
+        >
+          🗺️ Plan
+        </button>
+      </div>
       {!positioned.length && (
         <div className="absolute inset-0 z-[500] flex items-center justify-center rounded-2xl bg-ink/60 px-6 text-center">
           <p className="font-bold text-parchment/90 text-sm">
