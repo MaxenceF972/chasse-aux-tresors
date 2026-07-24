@@ -1,9 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { caesarShift } from "@/components/minigames/Caesar";
-import { encodeMorse, decodeMorse } from "@/components/minigames/Morse";
 import { feedback } from "@/components/minigames/Mastermind";
-import { generatePuzzle, countSolutions } from "@/components/minigames/LogicPuzzle";
 import { genMaze, type Cell } from "@/components/minigames/Maze";
 import { LEVELS, parseLevel } from "@/components/minigames/Sokoban";
 import { rngFromSeed } from "@/lib/game/prng";
@@ -17,14 +15,6 @@ test("césar : chiffrer puis déchiffrer restitue le message", () => {
   }
 });
 
-// --- Morse ------------------------------------------------------------------
-
-test("morse : encoder puis décoder restitue le message", () => {
-  for (const msg of ["SOS", "CHERCHEZ LE PUITS", "RDV 21 H"]) {
-    assert.equal(decodeMorse(encodeMorse(msg)), msg);
-  }
-});
-
 // --- Mastermind ---------------------------------------------------------------
 
 test("mastermind : pions noirs/blancs corrects (doublons inclus)", () => {
@@ -34,23 +24,6 @@ test("mastermind : pions noirs/blancs corrects (doublons inclus)", () => {
   assert.deepEqual(feedback([0, 0, 1, 1], [0, 1, 0, 0]), { black: 1, white: 2 });
   assert.deepEqual(feedback([0, 0, 0, 0], [0, 0, 1, 1]), { black: 2, white: 0 });
   assert.deepEqual(feedback([1, 2, 3, 4], [5, 5, 5, 5]), { black: 0, white: 0 });
-});
-
-// --- Logigramme ---------------------------------------------------------------
-
-test("logigramme : solution unique garantie, vérité cohérente (10 seeds)", () => {
-  for (let i = 0; i < 10; i++) {
-    for (const hard of [false, true]) {
-      const puzzle = generatePuzzle(`team-${i}:step-logic`, hard);
-      assert.equal(countSolutions(puzzle.clues, 2), 1, `seed ${i} hard=${hard} non unique`);
-      assert.ok(
-        puzzle.clues.every((clue) => clue.test(puzzle.truth)),
-        `seed ${i} hard=${hard} : un indice contredit la vérité`
-      );
-      assert.ok(puzzle.thief >= 0 && puzzle.thief < 4);
-      assert.ok(puzzle.clues.length >= 4 && puzzle.clues.length <= 25);
-    }
-  }
 });
 
 // --- Labyrinthe ---------------------------------------------------------------

@@ -93,11 +93,14 @@ export default function StepEditor({
   // existante sans secrets chargés, régénérer invaliderait les puces écrites.
   const [nfcTagId, setNfcTagId] = useState(secrets?.nfc_tag_id ?? (step ? "" : newTagId()));
   const [manualCode, setManualCode] = useState(secrets?.manual_code ?? (step ? "" : randomCode(6)));
-  const [minigameKind, setMinigameKind] = useState<MinigameKind>(
-    step?.content?.minigame?.kind ?? "caesar"
-  );
+  // Un jeu retiré de la banque (ex : morse) peut encore exister sur une vieille
+  // étape : on retombe sur "caesar" au lieu de planter.
+  const storedKind = step?.content?.minigame?.kind;
+  const safeKind: MinigameKind = storedKind && MINIGAMES[storedKind] ? storedKind : "caesar";
+  const [minigameKind, setMinigameKind] = useState<MinigameKind>(safeKind);
   const [minigameConfig, setMinigameConfig] = useState<Record<string, unknown>>(
-    step?.content?.minigame?.config ?? MINIGAMES[step?.content?.minigame?.kind ?? "caesar"].defaultConfig
+    (storedKind && MINIGAMES[storedKind] ? step?.content?.minigame?.config : undefined) ??
+      MINIGAMES[safeKind].defaultConfig
   );
   const [hints, setHints] = useState<Hint[]>(secrets?.hints ?? []);
   const [gpsLat, setGpsLat] = useState<string>(secrets?.gps_lat != null ? String(secrets.gps_lat) : "");

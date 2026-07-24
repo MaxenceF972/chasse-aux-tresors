@@ -5,7 +5,6 @@
  */
 import type { Hint, MinigameKind, StepType } from "@/lib/types";
 import { caesarShift } from "@/components/minigames/Caesar";
-import { encodeMorse } from "@/components/minigames/Morse";
 
 export interface TemplateStep {
   type: StepType;
@@ -125,9 +124,9 @@ export const GAME_TEMPLATES: GameTemplate[] = [
       },
       {
         type: "minigame",
-        title: "Transmission radio",
-        minigame: { kind: "morse", config: { pattern: encodeMorse("BUDGET VALIDE"), unit_ms: 140, show_chart: true } },
-        answers: ["budget valide"],
+        title: "Le coffre de la compta",
+        minigame: { kind: "lock", config: { code: "1984", hint: "L'année de création de la boîte… ou presque." } },
+        answers: ["1984"],
       },
       {
         type: "nfc",

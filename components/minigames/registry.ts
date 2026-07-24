@@ -6,7 +6,6 @@ import { simonDef } from "./Simon";
 import { anagramsDef } from "./Anagrams";
 import { lockDef } from "./Lock";
 import { memoryDef } from "./Memory";
-import { morseDef } from "./Morse";
 import { mastermindDef } from "./Mastermind";
 import { mazeDef } from "./Maze";
 import { lanternsDef } from "./Lanterns";
@@ -15,7 +14,6 @@ import { flashcodeDef } from "./FlashCode";
 import { cascadeDef } from "./Cascade";
 import { chimpDef } from "./ChimpMemory";
 import { balanceDef } from "./Balance";
-import { logicDef } from "./LogicPuzzle";
 import { nonogramDef } from "./Nonogram";
 import { sokobanDef } from "./Sokoban";
 import { cryptoDef } from "./Crypto";
@@ -32,7 +30,6 @@ export const MINIGAMES: Record<MinigameKind, MiniGameDef> = {
   anagrams: anagramsDef,
   lock: lockDef,
   memory: memoryDef,
-  morse: morseDef,
   mastermind: mastermindDef,
   maze: mazeDef,
   lanterns: lanternsDef,
@@ -41,7 +38,6 @@ export const MINIGAMES: Record<MinigameKind, MiniGameDef> = {
   cascade: cascadeDef,
   chimp: chimpDef,
   balance: balanceDef,
-  logic: logicDef,
   nonogram: nonogramDef,
   sokoban: sokobanDef,
   crypto: cryptoDef,
