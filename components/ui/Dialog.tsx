@@ -9,9 +9,11 @@ interface DialogProps {
   children: ReactNode;
   title?: string;
   fullScreen?: boolean;
+  /** Passe au-dessus d'un autre dialog déjà ouvert (ex : Bonus par-dessus Stats) */
+  elevated?: boolean;
 }
 
-export default function Dialog({ open, onClose, children, title, fullScreen }: DialogProps) {
+export default function Dialog({ open, onClose, children, title, fullScreen, elevated }: DialogProps) {
   // Verrouille le scroll de la page derrière le dialog
   useEffect(() => {
     if (!open) return;
@@ -26,7 +28,9 @@ export default function Dialog({ open, onClose, children, title, fullScreen }: D
     <AnimatePresence>
       {open && (
         <motion.div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center"
+          className={`fixed inset-0 flex items-end sm:items-center justify-center ${
+            elevated ? "z-[60]" : "z-50"
+          }`}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}

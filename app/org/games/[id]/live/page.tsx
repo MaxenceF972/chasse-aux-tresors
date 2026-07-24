@@ -1049,11 +1049,12 @@ export default function LiveDashboardPage() {
         )}
       </Dialog>
 
-      {/* Dialog Bonus : montant au choix */}
+      {/* Dialog Bonus : montant au choix — élevé pour passer au-dessus de Stats */}
       <Dialog
         open={!!bonusTarget}
         onClose={() => setBonusTarget(null)}
         title={`Bonus pour « ${bonusTarget?.teamName ?? ""} »`}
+        elevated
       >
         {bonusTarget && (
           <div className="space-y-4">

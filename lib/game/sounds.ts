@@ -8,11 +8,44 @@ import { isMuted } from "./prefs";
 
 let ctx: AudioContext | null = null;
 
+function makeCtx(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    return AC ? new AC() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Réveille le contexte audio. Au retour d'arrière-plan, iOS met le contexte en
+ * état "interrupted" (et parfois "suspended") : sans réveil explicite, plus
+ * aucun son de l'app. On resume, et on recrée si le contexte est mort.
+ */
+function wake() {
+  if (!ctx) return;
+  if (ctx.state === "closed") {
+    ctx = null;
+    return;
+  }
+  if (ctx.state !== "running") void ctx.resume().catch(() => {});
+}
+
+if (typeof window !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") wake();
+  });
+  // Un geste après le retour d'arrière-plan relance le contexte (exigence iOS)
+  window.addEventListener("pointerdown", wake, { capture: true, passive: true });
+}
+
 function audio(): AudioContext | null {
   if (typeof window === "undefined" || isMuted()) return null;
   try {
-    if (!ctx) ctx = new AudioContext();
-    if (ctx.state === "suspended") void ctx.resume();
+    if (!ctx || ctx.state === "closed") ctx = makeCtx();
+    // "suspended" (Chrome) ET "interrupted" (iOS) → on relance
+    if (ctx && ctx.state !== "running") void ctx.resume().catch(() => {});
     return ctx;
   } catch {
     return null;
