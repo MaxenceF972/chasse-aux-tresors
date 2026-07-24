@@ -49,7 +49,7 @@ export default function LandingPage() {
         transition={{ type: "spring", stiffness: 200, damping: 16 }}
         className="animate-floaty"
       >
-        <Logo className="w-[28rem] max-w-[88vw]" />
+        <Logo className="w-[34rem] max-w-[94vw]" />
       </motion.div>
 
       <motion.p

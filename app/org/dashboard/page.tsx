@@ -171,7 +171,7 @@ export default function OrgDashboardPage() {
     <main className="min-h-dvh px-5 py-6 max-w-2xl mx-auto">
       <header className="flex items-center justify-between mb-8">
         <Link href="/">
-          <Logo className="w-44 max-w-[50vw]" />
+          <Logo className="w-64 max-w-[60vw]" />
         </Link>
         <button
           className="font-bold text-parchment/60 underline"
