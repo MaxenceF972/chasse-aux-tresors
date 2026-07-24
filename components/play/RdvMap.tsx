@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { BASE_OPTIONS, createBaseLayers, switchBaseLayer, type BaseKind } from "@/lib/map/layers";
 
 interface RdvMapProps {
   lat: number;
@@ -17,9 +18,8 @@ interface RdvMapProps {
 export default function RdvMap({ lat, lng }: RdvMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
-  const satLayerRef = useRef<L.TileLayer | null>(null);
-  const planLayerRef = useRef<L.TileLayer | null>(null);
-  const [view, setView] = useState<"plan" | "sat">("plan");
+  const layersRef = useRef<Record<BaseKind, L.TileLayer> | null>(null);
+  const [view, setView] = useState<BaseKind>("plan");
 
   useEffect(() => {
     let cancelled = false;
@@ -29,17 +29,10 @@ export default function RdvMap({ lat, lng }: RdvMapProps) {
       const map = leaflet.map(containerRef.current, {
         zoomControl: true,
         attributionControl: true,
-        maxZoom: 19,
+        maxZoom: 22,
       });
-      planLayerRef.current = leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "© OpenStreetMap",
-      });
-      satLayerRef.current = leaflet.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        { maxZoom: 19, attribution: "© Esri, Maxar" }
-      );
-      planLayerRef.current.addTo(map);
+      layersRef.current = createBaseLayers(leaflet);
+      layersRef.current.plan.addTo(map); // plan par défaut : lire les rues
       map.setView([lat, lng], 16);
       leaflet
         .circleMarker([lat, lng], {
@@ -69,18 +62,10 @@ export default function RdvMap({ lat, lng }: RdvMapProps) {
     };
   }, [lat, lng]);
 
-  function switchView(next: "plan" | "sat") {
+  function switchView(next: BaseKind) {
     setView(next);
-    const map = mapRef.current;
-    const sat = satLayerRef.current;
-    const plan = planLayerRef.current;
-    if (!map || !sat || !plan) return;
-    if (next === "sat") {
-      map.removeLayer(plan);
-      sat.addTo(map);
-    } else {
-      map.removeLayer(sat);
-      plan.addTo(map);
+    if (mapRef.current && layersRef.current) {
+      switchBaseLayer(mapRef.current, layersRef.current, next);
     }
   }
 
@@ -88,20 +73,18 @@ export default function RdvMap({ lat, lng }: RdvMapProps) {
     <div className="relative isolate">
       <div ref={containerRef} className="h-56 rounded-xl border-[3px] border-ink overflow-hidden z-0" />
       <div className="absolute top-2 right-2 z-20 flex rounded-lg border-2 border-ink overflow-hidden shadow-[2px_2px_0_0_#111111]">
-        <button
-          type="button"
-          onClick={() => switchView("plan")}
-          className={`px-2 h-8 text-xs font-bold ${view === "plan" ? "bg-gold text-ink" : "bg-white text-ink/60"}`}
-        >
-          🗺️
-        </button>
-        <button
-          type="button"
-          onClick={() => switchView("sat")}
-          className={`px-2 h-8 text-xs font-bold border-l-2 border-ink ${view === "sat" ? "bg-gold text-ink" : "bg-white text-ink/60"}`}
-        >
-          🛰️
-        </button>
+        {BASE_OPTIONS.map((opt, i) => (
+          <button
+            key={opt.kind}
+            type="button"
+            onClick={() => switchView(opt.kind)}
+            className={`px-2 h-8 text-xs font-bold ${i > 0 ? "border-l-2 border-ink" : ""} ${
+              view === opt.kind ? "bg-gold text-ink" : "bg-white text-ink/60"
+            }`}
+          >
+            {opt.label.split(" ")[0]}
+          </button>
+        ))}
       </div>
     </div>
   );

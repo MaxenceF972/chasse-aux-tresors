@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type * as L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { BASE_OPTIONS, createBaseLayers, switchBaseLayer, type BaseKind } from "@/lib/map/layers";
 import Button from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 
@@ -23,12 +24,11 @@ export default function MapPicker({ lat, lng, onPick }: MapPickerProps) {
   const mapRef = useRef<L.Map | null>(null);
   const markerRef = useRef<L.CircleMarker | null>(null);
   const leafletRef = useRef<typeof L | null>(null);
-  const satLayerRef = useRef<L.TileLayer | null>(null);
-  const planLayerRef = useRef<L.TileLayer | null>(null);
+  const layersRef = useRef<Record<BaseKind, L.TileLayer> | null>(null);
   const onPickRef = useRef(onPick);
   onPickRef.current = onPick;
 
-  const [view, setView] = useState<"sat" | "plan">("sat");
+  const [view, setView] = useState<BaseKind>("hd");
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -60,20 +60,10 @@ export default function MapPicker({ lat, lng, onPick }: MapPickerProps) {
       const map = leaflet.map(containerRef.current, {
         zoomControl: true,
         attributionControl: true,
-        maxZoom: 19,
+        maxZoom: 22, // sur-zoom au-delà des tuiles natives : on vise au mètre
       });
-
-      // Satellite (Esri World Imagery) : on voit les toits — précis pour viser.
-      satLayerRef.current = leaflet.tileLayer(
-        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
-        { maxZoom: 19, attribution: "© Esri, Maxar" }
-      );
-      // Plan (OpenStreetMap) : noms de rues et lieux.
-      planLayerRef.current = leaflet.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-        maxZoom: 19,
-        attribution: "© OpenStreetMap",
-      });
-      satLayerRef.current.addTo(map);
+      layersRef.current = createBaseLayers(leaflet);
+      layersRef.current.hd.addTo(map); // orthophotos IGN HD par défaut
       mapRef.current = map;
 
       if (lat != null && lng != null) {
@@ -121,18 +111,10 @@ export default function MapPicker({ lat, lng, onPick }: MapPickerProps) {
     map.setView([lat, lng], Math.max(map.getZoom(), 17));
   }, [lat, lng]);
 
-  function switchView(next: "sat" | "plan") {
+  function switchView(next: BaseKind) {
     setView(next);
-    const map = mapRef.current;
-    const sat = satLayerRef.current;
-    const plan = planLayerRef.current;
-    if (!map || !sat || !plan) return;
-    if (next === "sat") {
-      map.removeLayer(plan);
-      sat.addTo(map);
-    } else {
-      map.removeLayer(sat);
-      plan.addTo(map);
+    if (mapRef.current && layersRef.current) {
+      switchBaseLayer(mapRef.current, layersRef.current, next);
     }
   }
 
@@ -185,22 +167,20 @@ export default function MapPicker({ lat, lng, onPick }: MapPickerProps) {
       {searchError && <p className="text-crimson font-bold text-xs">{searchError}</p>}
       <div className="relative isolate">
         <div ref={containerRef} className="h-72 rounded-xl border-[3px] border-ink overflow-hidden z-0" />
-        {/* Bascule satellite / plan, par-dessus la carte */}
+        {/* Bascule de fond de carte, par-dessus la carte */}
         <div className="absolute top-2 right-2 z-20 flex rounded-lg border-2 border-ink overflow-hidden shadow-[2px_2px_0_0_#111111]">
-          <button
-            type="button"
-            onClick={() => switchView("sat")}
-            className={`px-2.5 h-9 text-xs font-bold ${view === "sat" ? "bg-gold text-ink" : "bg-white text-ink/60"}`}
-          >
-            🛰️ Satellite
-          </button>
-          <button
-            type="button"
-            onClick={() => switchView("plan")}
-            className={`px-2.5 h-9 text-xs font-bold border-l-2 border-ink ${view === "plan" ? "bg-gold text-ink" : "bg-white text-ink/60"}`}
-          >
-            🗺️ Plan
-          </button>
+          {BASE_OPTIONS.map((opt, i) => (
+            <button
+              key={opt.kind}
+              type="button"
+              onClick={() => switchView(opt.kind)}
+              className={`px-2 h-9 text-xs font-bold ${i > 0 ? "border-l-2 border-ink" : ""} ${
+                view === opt.kind ? "bg-gold text-ink" : "bg-white text-ink/60"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
       <p className="text-xs font-bold text-ink/55">
