@@ -75,6 +75,8 @@ export interface Step {
   media_urls: string[];
   is_common_checkpoint: boolean;
   is_final: boolean;
+  /** Épreuve de départ : toujours la première du parcours, identique pour tous */
+  is_start: boolean;
   order_hint: number;
   /** Points gagnés en validant l'étape (classement aux points) */
   points: number;
@@ -203,6 +205,8 @@ export interface PublicStep {
   media_urls: string[];
   is_final: boolean;
   is_common: boolean;
+  /** Optionnel tant que le SQL n'est pas ré-appliqué */
+  is_start?: boolean;
   points: number;
   time_limit_sec: number | null;
 }

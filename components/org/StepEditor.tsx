@@ -11,7 +11,7 @@ import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label, TextArea } from "@/components/ui/Input";
 
-type Placement = "pool" | "common" | "final";
+type Placement = "start" | "pool" | "common" | "final";
 
 /**
  * Détecte un couple « lat, lng » collé d'un bloc (format Google Maps :
@@ -36,6 +36,7 @@ interface StepEditorProps {
   initialType: StepType;
   nextOrderHint: number;
   hasOtherFinal: boolean;
+  hasOtherStart: boolean;
   onSaved: () => void;
   onClose: () => void;
 }
@@ -75,6 +76,7 @@ export default function StepEditor({
   initialType,
   nextOrderHint,
   hasOtherFinal,
+  hasOtherStart,
   onSaved,
   onClose,
 }: StepEditorProps) {
@@ -84,7 +86,7 @@ export default function StepEditor({
   const [body, setBody] = useState(step?.content?.body ?? "");
   const [mediaUrls, setMediaUrls] = useState<string[]>(step?.media_urls ?? []);
   const [placement, setPlacement] = useState<Placement>(
-    step?.is_final ? "final" : step?.is_common_checkpoint ? "common" : "pool"
+    step?.is_final ? "final" : step?.is_start ? "start" : step?.is_common_checkpoint ? "common" : "pool"
   );
   const [answersText, setAnswersText] = useState((secrets?.answers ?? []).join("\n"));
   // Ne générer un identifiant/code qu'à la CRÉATION : pour une étape
@@ -134,6 +136,10 @@ export default function StepEditor({
     }
     if (placement === "final" && hasOtherFinal) {
       setError("Il y a déjà un sprint final — retire d'abord l'autre étape finale.");
+      return;
+    }
+    if (placement === "start" && hasOtherStart) {
+      setError("Il y a déjà une épreuve de départ — retire d'abord l'autre.");
       return;
     }
     const answers = answersText.split("\n").map((a) => a.trim()).filter(Boolean);
@@ -190,6 +196,7 @@ export default function StepEditor({
         media_urls: mediaUrls,
         is_common_checkpoint: placement === "common",
         is_final: placement === "final",
+        is_start: placement === "start",
         points: Math.max(0, points || 0),
         time_limit_sec: timeLimitMin.trim() ? Math.max(1, Number(timeLimitMin)) * 60 : null,
       };
@@ -708,6 +715,7 @@ export default function StepEditor({
           <div className="space-y-2">
             {(
               [
+                { v: "start", icon: "🚀", label: "Épreuve de départ", help: "Toujours la première étape, identique pour toutes les équipes" },
                 { v: "pool", icon: "🎲", label: "Pool aléatoire", help: "Ordre décalé pour chaque équipe (anti-suivi)" },
                 { v: "common", icon: "📍", label: "Palier commun", help: "Position fixe, tout le monde y passe à ce moment du parcours" },
                 { v: "final", icon: "🏁", label: "Sprint final", help: "Dernière étape identique pour tous, débloquée quand tout est validé" },

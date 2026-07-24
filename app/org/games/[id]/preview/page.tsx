@@ -43,7 +43,10 @@ export default function PreviewPage() {
     setGame(g.data as Game);
     const rows = (s.data as Step[]) ?? [];
     // même ordre logique que le jeu : la finale à la fin
-    rows.sort((a, b) => Number(a.is_final) - Number(b.is_final));
+    // Ordre de jeu réel : départ d'abord, finale en dernier
+    rows.sort(
+      (a, b) => Number(b.is_start) - Number(a.is_start) || Number(a.is_final) - Number(b.is_final)
+    );
     setSteps(rows);
     if (rows.length) {
       const { data: secs } = await sb()
@@ -151,6 +154,11 @@ export default function PreviewPage() {
                 {step.is_final && (
                   <span className="font-display text-sm bg-crimson text-parchment px-2.5 py-1 rounded-lg">
                     🏁 FINALE
+                  </span>
+                )}
+                {step.is_start && (
+                  <span className="font-display text-sm bg-gold text-ink px-2.5 py-1 rounded-lg">
+                    🚀 DÉPART
                   </span>
                 )}
                 {step.is_common_checkpoint && (

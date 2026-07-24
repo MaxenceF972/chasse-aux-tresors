@@ -59,6 +59,7 @@ create table if not exists public.steps (
   media_urls           text[] not null default '{}',
   is_common_checkpoint boolean not null default false,
   is_final             boolean not null default false,
+  is_start             boolean not null default false,  -- épreuve de départ (première pour tous)
   order_hint           int not null default 0,
   points               int not null default 100,   -- points gagnés (mode points)
   time_limit_sec       int,                        -- limite de temps optionnelle
@@ -67,6 +68,7 @@ create table if not exists public.steps (
 
 alter table public.steps add column if not exists points int not null default 100;
 alter table public.steps add column if not exists time_limit_sec int;
+alter table public.steps add column if not exists is_start boolean not null default false;
 
 -- Secrets d'étape : réponses, identifiants de balise, indices.
 -- JAMAIS lisibles par les joueurs (vérifiés uniquement en RPC).
@@ -429,6 +431,7 @@ declare
   v_teams   uuid[];
   v_pool    uuid[];
   v_finals  uuid[];
+  v_starts  uuid[];
   v_slot    record;
   v_t       int;
   v_n       int;
@@ -463,7 +466,7 @@ begin
   -- avec un décalage distinct → jamais deux équipes sur la même énigme au même index.
   select coalesce(array_agg(id order by random()), '{}') into v_pool
   from public.steps
-  where game_id = p_game_id and not is_common_checkpoint and not is_final;
+  where game_id = p_game_id and not is_common_checkpoint and not is_final and not is_start;
   v_n := coalesce(array_length(v_pool, 1), 0);
 
   if v_n > 0 and v_t > v_n then
@@ -473,6 +476,10 @@ begin
   select coalesce(array_agg(id order by order_hint, created_at), '{}') into v_finals
   from public.steps where game_id = p_game_id and is_final;
 
+  -- Épreuve(s) de départ : identiques pour tous, toujours en premier
+  select coalesce(array_agg(id order by order_hint, created_at), '{}') into v_starts
+  from public.steps where game_id = p_game_id and is_start and not is_final;
+
   -- Nettoyage au cas où (relance après erreur)
   delete from public.team_routes where game_id = p_game_id;
 
@@ -481,10 +488,20 @@ begin
     v_pos := 0;
     v_pool_i := 0;
 
+    -- L'épreuve de départ ouvre le parcours de chaque équipe
+    if array_length(v_starts, 1) is not null then
+      foreach v_step_id in array v_starts loop
+        insert into public.team_routes (game_id, team_id, step_id, position, status)
+        values (p_game_id, v_teams[v_k], v_step_id, v_pos,
+                case when v_pos = 0 then 'current' else 'locked' end::public.route_status);
+        v_pos := v_pos + 1;
+      end loop;
+    end if;
+
     for v_slot in
       select id, is_common_checkpoint
       from public.steps
-      where game_id = p_game_id and not is_final
+      where game_id = p_game_id and not is_final and not is_start
       order by order_hint, created_at
     loop
       if v_slot.is_common_checkpoint then
@@ -631,10 +648,10 @@ begin
     select * from public.steps where game_id = p_game_id order by order_hint, created_at
   loop
     insert into public.steps (game_id, type, title, content, media_urls,
-                              is_common_checkpoint, is_final, order_hint,
+                              is_common_checkpoint, is_final, is_start, order_hint,
                               points, time_limit_sec)
     values (v_new.id, v_step.type, v_step.title, v_step.content, v_step.media_urls,
-            v_step.is_common_checkpoint, v_step.is_final, v_step.order_hint,
+            v_step.is_common_checkpoint, v_step.is_final, v_step.is_start, v_step.order_hint,
             v_step.points, v_step.time_limit_sec)
     returning id into v_new_step_id;
 
@@ -923,6 +940,7 @@ begin
         'id', v_step.id, 'type', v_step.type, 'title', v_step.title,
         'content', v_step.content, 'media_urls', to_jsonb(v_step.media_urls),
         'is_final', v_step.is_final, 'is_common', v_step.is_common_checkpoint,
+        'is_start', v_step.is_start,
         'points', v_step.points, 'time_limit_sec', v_step.time_limit_sec
       ),
       'position', v_route.position,

@@ -318,6 +318,11 @@ export default function GameScreen() {
                     🏁 SPRINT FINAL
                   </span>
                 )}
+                {current.step.is_start && (
+                  <span className="font-display text-sm bg-gold text-ink px-2.5 py-1 rounded-lg rotate-1">
+                    🚀 DÉPART
+                  </span>
+                )}
                 {current.step.is_common && !current.step.is_final && (
                   <span className="font-display text-sm bg-leaf text-parchment px-2.5 py-1 rounded-lg rotate-1">
                     📍 PALIER COMMUN

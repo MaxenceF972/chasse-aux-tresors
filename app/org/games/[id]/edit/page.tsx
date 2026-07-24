@@ -67,7 +67,7 @@ export default function GameEditPage() {
 
   const editable = game?.status === "lobby";
   const poolCount = useMemo(
-    () => steps.filter((s) => !s.is_common_checkpoint && !s.is_final).length,
+    () => steps.filter((s) => !s.is_common_checkpoint && !s.is_final && !s.is_start).length,
     [steps]
   );
   const hasFinal = useMemo(() => steps.some((s) => s.is_final), [steps]);
@@ -337,6 +337,10 @@ export default function GameEditPage() {
                     <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-crimson text-parchment border-2 border-ink">
                       🏁 Sprint final
                     </span>
+                  ) : step.is_start ? (
+                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-gold border-2 border-ink">
+                      🚀 Départ
+                    </span>
                   ) : step.is_common_checkpoint ? (
                     <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-leaf text-parchment border-2 border-ink">
                       📍 Palier commun
@@ -423,6 +427,7 @@ export default function GameEditPage() {
           initialType={editing.type}
           nextOrderHint={(steps.length ? Math.max(...steps.map((s) => s.order_hint)) : 0) + 10}
           hasOtherFinal={steps.some((s) => s.is_final && s.id !== editing.step?.id)}
+          hasOtherStart={steps.some((s) => s.is_start && s.id !== editing.step?.id)}
           onSaved={() => {
             setEditing(null);
             void load();
