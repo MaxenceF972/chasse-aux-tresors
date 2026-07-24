@@ -87,7 +87,7 @@ export default function FinalPage() {
   const params = useParams<{ code: string }>();
   const code = params.code?.toUpperCase() ?? "";
   const [data, setData] = useState<RankingData | null>(null);
-  const [winnerPhoto, setWinnerPhoto] = useState<{ url: string; team_id: string } | null>(null);
+  const [winnerPhotos, setWinnerPhotos] = useState<{ url: string; team_id: string }[]>([]);
   const myTeamId = getPlayerSession()?.team_id;
 
   const load = useCallback(async () => {
@@ -95,19 +95,20 @@ export default function FinalPage() {
       const ranking = await rpc<RankingData>("get_ranking", { p_code: code });
       if (!ranking.error) {
         setData(ranking);
-        if (ranking.winner_photo !== undefined) {
-          // Servie par get_ranking (visible par TOUTES les équipes)
-          setWinnerPhoto(ranking.winner_photo);
+        if (ranking.winner_photos !== undefined) {
+          // Servies par get_ranking (visibles par TOUTES les équipes)
+          setWinnerPhotos(ranking.winner_photos ?? []);
+        } else if (ranking.winner_photo !== undefined) {
+          setWinnerPhotos(ranking.winner_photo ? [ranking.winner_photo] : []);
         } else if (ranking.game?.id) {
-          // Repli tant que le SQL n'a pas été ré-appliqué (RLS : visible
-          // seulement par l'équipe gagnante et l'organisateur)
-          const { data: win } = await sb()
+          // Repli tant que le SQL n'a pas été ré-appliqué (RLS : visibles
+          // seulement par l'équipe concernée et l'organisateur)
+          const { data: wins } = await sb()
             .from("submissions")
             .select("url, team_id")
             .eq("game_id", ranking.game.id)
-            .eq("is_winner", true)
-            .maybeSingle();
-          setWinnerPhoto((win as { url: string; team_id: string } | null) ?? null);
+            .eq("is_winner", true);
+          setWinnerPhotos((wins as { url: string; team_id: string }[] | null) ?? []);
         }
       }
     } catch {
@@ -253,23 +254,27 @@ export default function FinalPage() {
         ))}
       </div>
 
-      {/* Photo gagnante */}
-      {finished && winnerPhoto && (
+      {/* Photos à l'honneur */}
+      {finished && winnerPhotos.length > 0 && (
         <div className="mt-10">
           <h2 className="font-display text-2xl text-gold text-center mb-3 -rotate-1">
-            🏅 LA PHOTO DE LA PARTIE
+            🏅 {winnerPhotos.length > 1 ? "LES PHOTOS DE LA PARTIE" : "LA PHOTO DE LA PARTIE"}
           </h2>
-          <Card className="p-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={winnerPhoto.url}
-              alt="Meilleure photo"
-              className="w-full rounded-xl border-2 border-ink"
-            />
-            <p className="text-center font-display mt-2">
-              {teamName(data.teams, winnerPhoto.team_id)}
-            </p>
-          </Card>
+          <div className={winnerPhotos.length > 1 ? "grid grid-cols-2 gap-3" : ""}>
+            {winnerPhotos.map((photo, i) => (
+              <Card key={photo.url} className="p-2">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={photo.url}
+                  alt={`Photo à l'honneur ${i + 1}`}
+                  className="w-full rounded-xl border-2 border-ink"
+                />
+                <p className="text-center font-display mt-2 text-sm">
+                  {teamName(data.teams, photo.team_id)}
+                </p>
+              </Card>
+            ))}
+          </div>
         </div>
       )}
 

@@ -283,7 +283,9 @@ export interface RankingData {
     elapsed_ms: number;
   };
   teams: RankedTeam[];
-  /** Photo gagnante (servie par get_ranking : la RLS submissions ne laisse pas les autres équipes la lire) */
+  /** Photos à l'honneur (servies par get_ranking : la RLS submissions ne laisse pas les autres équipes les lire) */
+  winner_photos?: { url: string; team_id: string }[];
+  /** Compat ancien schéma : première photo à l'honneur */
   winner_photo?: { url: string; team_id: string } | null;
 }
 

@@ -81,7 +81,7 @@ export default function PhotosPage() {
         p_submission_id: sub.id,
       });
       showToast(
-        res.winner ? "🏅 Photo gagnante désignée !" : "Photo gagnante désélectionnée",
+        res.winner ? "🏅 Photo mise à l'honneur !" : "Photo retirée des mises à l'honneur",
         res.winner ? "success" : "info"
       );
       await load();
@@ -136,6 +136,7 @@ export default function PhotosPage() {
   if (loading || !user || !game) return <Spinner label="Chargement de la galerie…" />;
 
   const pendingCount = submissions.filter((s) => s.status === "pending").length;
+  const winnerCount = submissions.filter((s) => s.is_winner).length;
   // La lightbox suit la liste rechargée : sinon badge et bouton 🏅 restent
   // figés après un jugement (et un 2e clic 🏅 désélectionnerait la gagnante).
   const lightboxSub = lightbox ? (submissions.find((s) => s.id === lightbox.id) ?? lightbox) : null;
@@ -156,8 +157,9 @@ export default function PhotosPage() {
         </div>
         <p className="font-bold text-parchment/60 text-sm mt-1">
           {submissions.length} photo{submissions.length > 1 ? "s" : ""}
-          {pendingCount > 0 && ` · ${pendingCount} à juger`} · désigne ta 🏅 préférée pour la
-          récompense « meilleure photo »
+          {pendingCount > 0 && ` · ${pendingCount} à juger`}
+          {winnerCount > 0 && ` · ${winnerCount} à l'honneur 🏅`} · touche 🏅 sur la ou les
+          meilleures photos — elles s&apos;afficheront à la fin pour tout le monde
         </p>
       </header>
 

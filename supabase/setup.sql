@@ -1476,7 +1476,8 @@ begin
   return jsonb_build_object('ok', true);
 end $$;
 
--- Désigne LA meilleure photo de la partie (exclusif ; re-cliquer désélectionne).
+-- Marque/démarque une photo comme « à l'honneur » (affichée à la fin pour
+-- tout le monde). Interrupteur INDÉPENDANT : on peut en désigner plusieurs.
 create or replace function public.org_set_photo_winner(p_submission_id uuid)
 returns jsonb
 language plpgsql volatile security definer
@@ -1491,7 +1492,6 @@ begin
     update public.submissions set is_winner = false where id = p_submission_id;
     return jsonb_build_object('ok', true, 'winner', false);
   end if;
-  update public.submissions set is_winner = false where game_id = v_sub.game_id;
   update public.submissions set is_winner = true where id = p_submission_id;
   insert into public.events (game_id, team_id, type, payload)
   values (v_sub.game_id, v_sub.team_id, 'photo_winner', jsonb_build_object('submission_id', p_submission_id));
@@ -1596,12 +1596,20 @@ begin
                                'finished_at', v_game.finished_at, 'scoring', v_scoring,
                                'elapsed_ms', public.game_elapsed_ms(v_game)),
     'teams', v_teams,
-    -- Servie ici (security definer) car la RLS de submissions ne permet pas
-    -- aux autres équipes de lire la photo gagnante en direct.
+    -- Servies ici (security definer) car la RLS de submissions ne permet pas
+    -- aux autres équipes de lire les photos à l'honneur en direct.
+    'winner_photos', coalesce((
+      select jsonb_agg(jsonb_build_object('url', sub.url, 'team_id', sub.team_id)
+                       order by sub.created_at)
+      from public.submissions sub
+      where sub.game_id = v_game.id and sub.is_winner
+    ), '[]'::jsonb),
+    -- Compat ancien client : la 1re photo à l'honneur
     'winner_photo', (
       select jsonb_build_object('url', sub.url, 'team_id', sub.team_id)
       from public.submissions sub
       where sub.game_id = v_game.id and sub.is_winner
+      order by sub.created_at
       limit 1
     )
   );
