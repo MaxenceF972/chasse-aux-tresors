@@ -10,6 +10,7 @@ import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import { showToast } from "@/components/ui/Toaster";
 import GpsCompass from "./GpsCompass";
+import GpsHotCold from "./GpsHotCold";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
@@ -332,35 +333,33 @@ function GpsValidation({
     );
   }
 
-  // Mode chaud/froid : cible cachée, on tente et le serveur renvoie la distance
-  function check() {
-    if (!navigator.geolocation) {
-      setStatus("📵 Pas de GPS sur ce téléphone — contacte le maître du jeu.");
-      return;
-    }
-    setChecking(true);
-    setStatus(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => void submitPos(pos.coords.latitude, pos.coords.longitude),
-      (err) => {
-        setChecking(false);
-        setStatus(
-          err.code === err.PERMISSION_DENIED
-            ? "📵 Localisation refusée. Autorise la position dans les réglages du navigateur, puis réessaie."
-            : "🛰️ Position introuvable — sors à découvert (loin des bâtiments) et réessaie."
-        );
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
-  }
-
+  // Mode chaud/froid : cible cachée. Thermomètre live (pings serveur en lecture
+  // seule) — la distance et l'intensité montent à mesure qu'on approche, sans
+  // jamais divulguer la position exacte de la balise. Validation automatique à
+  // l'arrivée, plus un bouton manuel de repli.
   return (
     <div className="space-y-3">
-      <Button full size="xl" onClick={check} disabled={disabled || checking}>
-        {checking ? "🛰️ POSITION EN COURS…" : "📍 ON EST SUR PLACE !"}
+      <GpsHotCold
+        stepId={step.id}
+        onPosition={(lat, lng) => {
+          livePos.current = { lat, lng };
+        }}
+        onWithin={(lat, lng) => {
+          if (!checking) void submitPos(lat, lng);
+        }}
+      />
+      <Button
+        full
+        size="xl"
+        variant="gold"
+        disabled={disabled || checking || !livePos.current}
+        onClick={() => livePos.current && submitPos(livePos.current.lat, livePos.current.lng)}
+      >
+        {checking ? "🛰️ VÉRIFICATION…" : "📍 VALIDER MA POSITION"}
       </Button>
       <p className="text-center font-bold text-ink/55 text-sm">
-        Rendez-vous au lieu mystère puis appuie : le téléphone vérifie que vous y êtes vraiment.
+        Approchez-vous du lieu mystère : plus vous chauffez, plus vous êtes près. La validation se
+        fait toute seule dès que vous y êtes.
       </p>
       {status && (
         <p className="text-center font-bold text-ink/75 text-sm rounded-xl border-2 border-ink/20 bg-white/60 px-3 py-2">

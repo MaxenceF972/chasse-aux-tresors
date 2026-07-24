@@ -1327,6 +1327,53 @@ as $$
   where auth_uid = auth.uid();
 $$;
 
+-- Distance vers la balise GPS de l'étape EN COURS (mode chaud/froid) : lecture
+-- seule, ne valide rien et n'émet aucun event. Alimente le thermomètre
+-- chaud/froid côté joueur SANS jamais renvoyer la position de la cible au
+-- client (contrairement au mode boussole). Bornée à l'étape courante de mon
+-- équipe pour éviter de sonder d'autres balises.
+create or replace function public.gps_ping(
+  p_step_id uuid, p_lat double precision, p_lng double precision
+)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_team_id uuid;
+  v_secret  public.step_secrets%rowtype;
+  v_dist    double precision;
+  v_radius  int;
+begin
+  v_team_id := public.my_team_id();
+  if v_team_id is null then
+    return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT');
+  end if;
+
+  if not exists (
+    select 1 from public.team_routes
+    where team_id = v_team_id and step_id = p_step_id and status = 'current'
+  ) then
+    return jsonb_build_object('ok', false, 'error', 'ETAPE_INVALIDE');
+  end if;
+
+  select * into v_secret from public.step_secrets where step_id = p_step_id;
+  if v_secret.gps_lat is null or v_secret.gps_lng is null
+     or p_lat is null or p_lng is null then
+    return jsonb_build_object('ok', false, 'error', 'POSITION_INDISPONIBLE');
+  end if;
+
+  v_radius := coalesce(v_secret.gps_radius_m, 30);
+  v_dist := public.gps_distance_m(p_lat, p_lng, v_secret.gps_lat, v_secret.gps_lng);
+
+  return jsonb_build_object(
+    'ok', true,
+    'distance_m', round(v_dist),
+    'radius', v_radius,
+    'within', v_dist <= v_radius
+  );
+end $$;
+
 -- Soumet la photo d'une épreuve photo (validée ensuite par l'organisateur).
 create or replace function public.submit_photo(p_step_id uuid, p_url text)
 returns jsonb
@@ -1990,6 +2037,7 @@ begin
     'skip_minigame(uuid)', 'skip_step(uuid)', 'redeem_minigame(uuid,uuid,jsonb)', 'skip_step_timeout(uuid)',
     'send_team_message(text)',
     'report_position(double precision,double precision)', 'submit_photo(uuid,text)',
+    'gps_ping(uuid,double precision,double precision)',
     'save_push_subscription(jsonb)'
   ] loop
     execute format('revoke all on function public.%s from public, anon', f);

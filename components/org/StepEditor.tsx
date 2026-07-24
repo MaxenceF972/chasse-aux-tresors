@@ -517,8 +517,8 @@ export default function StepEditor({
                 >
                   <span className="font-display">🔥 Chaud / froid</span>
                   <span className="block text-xs font-bold text-ink/60">
-                    Pas de flèche : l&apos;équipe appuie sur « On est sur place ! » et n&apos;a que
-                    la distance restante. Plus mystérieux, plus de recherche.
+                    Pas de flèche : un thermomètre chauffe (glacial → brûlant) avec la distance en
+                    direct à mesure que l&apos;équipe approche. Plus mystérieux, plus de recherche.
                   </span>
                 </button>
               </div>
