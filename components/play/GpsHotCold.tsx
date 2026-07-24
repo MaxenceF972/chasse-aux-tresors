@@ -49,15 +49,17 @@ const TIERS = [
   { label: "BRÛLANT", emoji: "🔥🔥🔥", color: "#C0392B", grad: ["#EC7063", "#7B241C"] },
 ] as const;
 
-/** Palier (0 = glacial … 6 = brûlant) selon la distance restante. */
+// Palier (0 = glacial … 6 = brûlant) selon la distance restante. Échelle
+// calibrée sur 100 m : au-delà, c'est « glacial » (les balises sont posées à
+// moins de 100 m du point de départ de l'équipe).
 function heatIndex(dist: number): number {
-  if (dist <= 20) return 6;
-  if (dist <= 40) return 5;
-  if (dist <= 75) return 4;
-  if (dist <= 150) return 3;
-  if (dist <= 300) return 2;
-  if (dist <= 600) return 1;
-  return 0;
+  if (dist <= 10) return 6;   // brûlant
+  if (dist <= 20) return 5;   // très chaud
+  if (dist <= 35) return 4;   // chaud
+  if (dist <= 50) return 3;   // tiède
+  if (dist <= 70) return 2;   // frais
+  if (dist <= 100) return 1;  // froid
+  return 0;                    // glacial (> 100 m)
 }
 
 /**
