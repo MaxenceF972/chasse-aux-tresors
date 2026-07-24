@@ -20,7 +20,6 @@ export type MinigameKind =
   | "cascade"
   | "chimp"
   | "balance"
-  | "nonogram"
   | "sokoban"
   | "crypto"
   | "bonto";

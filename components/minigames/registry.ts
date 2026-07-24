@@ -14,7 +14,6 @@ import { flashcodeDef } from "./FlashCode";
 import { cascadeDef } from "./Cascade";
 import { chimpDef } from "./ChimpMemory";
 import { balanceDef } from "./Balance";
-import { nonogramDef } from "./Nonogram";
 import { sokobanDef } from "./Sokoban";
 import { cryptoDef } from "./Crypto";
 import { bontoDef } from "./Bonto";
@@ -38,7 +37,6 @@ export const MINIGAMES: Record<MinigameKind, MiniGameDef> = {
   cascade: cascadeDef,
   chimp: chimpDef,
   balance: balanceDef,
-  nonogram: nonogramDef,
   sokoban: sokobanDef,
   crypto: cryptoDef,
   bonto: bontoDef,

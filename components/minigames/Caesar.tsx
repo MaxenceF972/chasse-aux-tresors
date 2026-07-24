@@ -2,7 +2,6 @@
 
 import { useMemo, useRef, useState } from "react";
 import type { ConfigEditorProps, MiniGameDef, MiniGameProps } from "./types";
-import { normalizeAnswer } from "@/lib/game/normalize";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import Button from "@/components/ui/Button";
@@ -70,26 +69,28 @@ function CaesarGame({ config, onComplete }: MiniGameProps) {
   const [wheel, setWheel] = useState(0);
   const [input, setInput] = useState("");
   const [wrong, setWrong] = useState(false);
+  const [busy, setBusy] = useState(false);
   const startRef = useRef(Date.now());
 
-  const plaintext = useMemo(
-    () => caesarShift(cfg.ciphertext || "", -(cfg.shift || 0)),
-    [cfg.ciphertext, cfg.shift]
-  );
   const preview = useMemo(
     () => caesarShift(cfg.ciphertext || "", -wheel),
     [cfg.ciphertext, wheel]
   );
 
+  // Le message en clair est vérifié CÔTÉ SERVEUR (step_secrets.answers) : c'est
+  // la seule source de vérité — pas de contrôle local qui pourrait diverger des
+  // réponses acceptées par l'organisateur (variantes, mots-clés…).
   async function submit() {
-    if (normalizeAnswer(input) === normalizeAnswer(plaintext) && normalizeAnswer(input) !== "") {
-      const durationMs = Date.now() - startRef.current;
-      await onComplete({
-        score: Math.max(100, 1000 - Math.floor(durationMs / 1000) * 5),
-        durationMs,
-        answer: input,
-      });
-    } else {
+    if (!input.trim() || busy) return;
+    setBusy(true);
+    const durationMs = Date.now() - startRef.current;
+    const ok = await onComplete({
+      score: Math.max(100, 1000 - Math.floor(durationMs / 1000) * 5),
+      durationMs,
+      answer: input,
+    });
+    setBusy(false);
+    if (!ok) {
       setWrong(true);
       sfx.fail();
       haptics.fail();
@@ -174,8 +175,8 @@ function CaesarGame({ config, onComplete }: MiniGameProps) {
             autoComplete="off"
             autoCorrect="off"
           />
-          <Button onClick={submit} disabled={!input.trim()}>
-            OK
+          <Button onClick={submit} disabled={!input.trim() || busy}>
+            {busy ? "…" : "OK"}
           </Button>
         </div>
         {wrong && (
