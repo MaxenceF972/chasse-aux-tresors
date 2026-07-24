@@ -464,12 +464,8 @@ function PhotoValidation({
       )}
       {pending ? (
         <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={pending.url}
-            alt="Aperçu de la photo"
-            className="w-full rounded-2xl border-[3px] border-ink shadow-[4px_4px_0_0_#111111] bg-ink"
-          />
+          {/* Boutons AU-DESSUS de la photo : sur un portrait plein cadre, placés
+              en dessous ils passaient sous la ligne de flottaison. */}
           <div className="flex gap-2">
             <Button className="flex-1" size="lg" variant="parchment" disabled={busy} onClick={retake}>
               🔄 REPRENDRE
@@ -483,6 +479,12 @@ function PhotoValidation({
               ? "Vérifiez la photo avant d'envoyer — le maître du jeu doit la valider pour que vous passiez à la suite."
               : "Vérifiez la photo avant d'envoyer — une fois partie, le maître du jeu la jugera (refusée = 0 point sur l'étape 😬)."}
           </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={pending.url}
+            alt="Aperçu de la photo"
+            className="w-full rounded-2xl border-[3px] border-ink shadow-[4px_4px_0_0_#111111] bg-ink"
+          />
         </>
       ) : (
         <>
