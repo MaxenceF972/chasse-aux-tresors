@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { rpc } from "@/lib/supabase/client";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
@@ -49,7 +49,7 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
     return () => clearInterval(t);
   }, [load]);
 
-  const teams = data?.teams ?? [];
+  const teams = useMemo(() => data?.teams ?? [], [data]);
   const isPoints = data?.game.scoring === "points";
 
   // « o devant t » : étapes validées (ou points), départagées par temps d'arrivée.
