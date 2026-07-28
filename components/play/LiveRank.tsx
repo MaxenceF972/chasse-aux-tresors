@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { motion } from "framer-motion";
 import { rpc } from "@/lib/supabase/client";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import type { RankedTeam, RankingData } from "@/lib/types";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import { showToast } from "@/components/ui/Toaster";
+import Dialog from "@/components/ui/Dialog";
 
 interface LiveRankProps {
   code: string;
@@ -17,19 +18,17 @@ interface LiveRankProps {
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
-function rankLabel(rank: number): string {
-  return rank === 1 ? "1ᵉʳ" : `${rank}ᵉ`;
-}
-
 /**
- * Bandeau de classement live sur l'écran de jeu : rang de l'équipe toujours
- * visible (pression compétitive !), toast + son quand on gagne ou perd une
- * place, et un tap ouvre le classement complet.
+ * Classement live sur l'écran de jeu, dosé « ni trop ni pas assez » :
+ * - un bandeau une ligne (pastille tampon encre/or) toujours visible ;
+ * - un tap ouvre le classement complet en bottom-sheet, sans quitter l'énigme ;
+ * - une seule famille de notifs : prendre ou perdre la 1re place.
+ *   Les autres dépassements se lisent en silence dans le bandeau.
  */
 export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
-  const router = useRouter();
   const [data, setData] = useState<RankingData | null>(null);
-  const prevRankRef = useRef<number | null>(null);
+  const [open, setOpen] = useState(false);
+  const wasLeaderRef = useRef<boolean | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -52,61 +51,115 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
 
   const teams = data?.teams ?? [];
   const isPoints = data?.game.scoring === "points";
-  const me = teams.find((t) => t.id === teamId);
-  const metric = (t: RankedTeam) => (isPoints ? t.points : t.done);
-  // Rang avec ex-aequo : 1 + nombre d'équipes strictement devant
-  const rank = me ? 1 + teams.filter((t) => metric(t) > metric(me)).length : 0;
-  const tiedForLead = rank === 1 && !!me && teams.some((t) => t.id !== teamId && metric(t) === metric(me));
 
-  // Toast + son quand le rang change (jamais au premier chargement)
+  // « o devant t » : étapes validées (ou points), départagées par temps d'arrivée.
+  const isAhead = useCallback(
+    (o: RankedTeam, t: RankedTeam) => {
+      if (isPoints) return o.points > t.points;
+      if (o.done !== t.done) return o.done > t.done;
+      return o.time_ms != null && (t.time_ms == null || o.time_ms < t.time_ms);
+    },
+    [isPoints]
+  );
+  // Rang avec ex-aequo : 1 + nombre d'équipes strictement devant
+  const rankOf = useCallback(
+    (t: RankedTeam) => 1 + teams.filter((o) => o.id !== t.id && isAhead(o, t)).length,
+    [teams, isAhead]
+  );
+
+  const me = teams.find((t) => t.id === teamId);
+  const myRank = me ? rankOf(me) : 0;
+  const leader = teams.find((t) => t.id !== teamId && rankOf(t) === 1);
+  const tiedForLead = myRank === 1 && !!leader;
+
+  // Notif uniquement pour la bataille de la 1re place (jamais au 1er chargement)
   useEffect(() => {
     if (!me || teams.length < 2) return;
-    const prev = prevRankRef.current;
-    prevRankRef.current = rank;
-    if (prev == null || prev === rank) return;
-    if (rank < prev) {
+    const isLeader = myRank === 1;
+    const was = wasLeaderRef.current;
+    wasLeaderRef.current = isLeader;
+    if (was == null || was === isLeader) return;
+    if (isLeader) {
       sfx.success();
       haptics.success();
-      showToast(`🚀 À l'abordage — vous voilà ${rankLabel(rank)} !`, "success");
+      showToast("👑 Vous prenez la tête de la course !", "success");
     } else {
       haptics.scan();
-      showToast(`😱 Une équipe vous double — ${rankLabel(rank)} maintenant !`, "info");
+      showToast(`😱 « ${leader?.name ?? "Une équipe"} » vous prend la tête !`, "info");
     }
-  }, [rank, me, teams.length]);
+  }, [myRank, me, teams.length, leader]);
 
   // Solo ou pas encore chargé : rien à comparer, rien à afficher
   if (!me || teams.length < 2) return null;
 
-  const leader = teams.find((t) => t.id !== teamId && metric(t) >= metric(me));
+  const scoreOf = (t: RankedTeam) => (isPoints ? `${Math.round(t.points)} pts` : `${t.done}/${t.total}`);
   const subline =
-    rank === 1
+    myRank === 1
       ? tiedForLead
         ? "À égalité en tête — sprintez ! ⚡"
-        : "Vous menez la course — tenez bon ! 🏴‍☠️"
+        : "Vous menez — tenez bon ! 🏴‍☠️"
       : leader
-        ? `« ${leader.name} » mène ${
-            isPoints ? `avec ${Math.round(leader.points)} pts` : `avec ${leader.done}/${leader.total}`
-          }`
+        ? `« ${leader.name} » mène (${scoreOf(leader)})`
         : "";
 
   return (
-    <button
-      onClick={() => router.push(`/play/${code}/final`)}
-      className="w-full mt-3 rounded-2xl border-[3px] border-ink bg-white/70 shadow-[4px_4px_0_0_#111111] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#111111] transition-all px-4 py-2.5 flex items-center gap-3 text-left"
-      aria-label="Voir le classement complet"
-    >
-      <span className="text-3xl shrink-0" aria-hidden>
-        {MEDALS[rank - 1] ?? "🏅"}
-      </span>
-      <span className="flex-1 min-w-0">
-        <span className="block font-display text-lg leading-tight">
-          {rank === 1 ? "EN TÊTE !" : `${rank}ᵉ SUR ${teams.length}`}
+    <>
+      <button
+        onClick={() => setOpen(true)}
+        className="w-full mt-3 flex items-center gap-2.5 rounded-2xl border-[3px] border-ink bg-white/60 shadow-[4px_4px_0_0_#111111] active:translate-y-[2px] active:shadow-[2px_2px_0_0_#111111] transition-all px-3 py-2 min-h-11 text-left"
+        aria-label="Voir le classement en direct"
+      >
+        {/* Pastille tampon : re-tamponnée à chaque changement de rang */}
+        <motion.span
+          key={myRank}
+          initial={{ scale: 1.6, rotate: -12, opacity: 0.6 }}
+          animate={{ scale: 1, rotate: -2, opacity: 1 }}
+          transition={{ type: "spring", stiffness: 320, damping: 16 }}
+          className="shrink-0 inline-flex items-center gap-1.5 bg-ink text-gold font-display text-sm px-2.5 py-1 rounded-lg"
+        >
+          <span aria-hidden>{MEDALS[myRank - 1] ?? "🏅"}</span>
+          {myRank === 1 ? "EN TÊTE" : `${myRank}ᵉ/${teams.length}`}
+        </motion.span>
+        <span className="flex-1 min-w-0 font-bold text-ink/70 text-sm truncate">{subline}</span>
+        <span className="font-display text-ink/40 text-xl shrink-0" aria-hidden>
+          ›
         </span>
-        <span className="block font-bold text-ink/60 text-sm truncate">{subline}</span>
-      </span>
-      <span className="font-display text-ink/40 text-2xl shrink-0" aria-hidden>
-        ›
-      </span>
-    </button>
+      </button>
+
+      {/* Classement complet en bottom-sheet : un œil, on referme, on repart */}
+      <Dialog open={open} onClose={() => setOpen(false)} title="🏅 Classement en direct">
+        <div className="space-y-2">
+          {teams.map((t) => {
+            const r = rankOf(t);
+            const mine = t.id === teamId;
+            return (
+              <div
+                key={t.id}
+                className={`flex items-center gap-3 rounded-xl border-[3px] border-ink bg-white/70 px-3 py-2.5 ${
+                  mine ? "ring-4 ring-gold" : ""
+                }`}
+              >
+                <span className="font-display text-lg w-9 text-center shrink-0" aria-hidden>
+                  {MEDALS[r - 1] ?? r}
+                </span>
+                <span
+                  className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
+                  style={{ backgroundColor: t.color }}
+                />
+                <span className="flex-1 min-w-0 font-display truncate">
+                  {t.name}
+                  {mine && " ⭐"}
+                </span>
+                <span className="font-display tabular-nums shrink-0">{scoreOf(t)}</span>
+              </div>
+            );
+          })}
+          <p className="text-center font-bold text-ink/50 text-xs pt-1">
+            {isPoints ? "Classement aux points" : "Classement au nombre d'étapes validées"} — mis à
+            jour en direct.
+          </p>
+        </div>
+      </Dialog>
+    </>
   );
 }
