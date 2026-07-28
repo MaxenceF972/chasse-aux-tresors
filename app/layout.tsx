@@ -27,8 +27,9 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
   },
   icons: {
-    icon: "/icons/icon-192.png",
-    apple: "/icons/icon-192.png",
+    icon: "/icons/icon-192.png?v=2",
+    // Signet iPhone : logo TOYAH TREASURE sur parchemin (généré par scripts/make-icons.mjs)
+    apple: "/icons/apple-icon-180.png",
   },
   // Aperçu des liens partagés (WhatsApp, iMessage, réseaux) : logo sur parchemin
   openGraph: {

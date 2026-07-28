@@ -18,6 +18,7 @@ import { clearPlayerSession } from "@/lib/game/session";
 import { rpc } from "@/lib/supabase/client";
 import { showToast } from "@/components/ui/Toaster";
 import { TextArea, Label } from "@/components/ui/Input";
+import LiveRank from "@/components/play/LiveRank";
 import MinigameModal from "@/components/play/MinigameModal";
 import ValidationZone from "@/components/play/ValidationZone";
 import HintPanel from "@/components/play/HintPanel";
@@ -306,6 +307,9 @@ export default function GameScreen() {
         <div className="mt-2">
           <ProgressPath total={progress.total} done={progress.done} color={team.color} />
         </div>
+
+        {/* Classement live : rang toujours visible, tap = classement complet */}
+        {!finished && <LiveRank code={code} gameId={game.id} teamId={team.id} />}
 
         {/* Équipe arrivée au bout */}
         {finished && (
