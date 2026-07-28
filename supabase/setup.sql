@@ -1582,6 +1582,9 @@ begin
            case when v_scoring = 'points' then -(trow->>'points')::numeric
                 else -(trow->>'done')::numeric end,
            coalesce((trow->>'time_ms')::numeric, 9e15),
+           -- à progression égale en course (chrono commun), les pénalités
+           -- de temps départagent : moins pénalisé = devant
+           (trow->>'penalty_seconds')::numeric,
            trow->>'name'), '[]'::jsonb)
   into v_teams
   from (

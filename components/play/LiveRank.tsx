@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { rpc } from "@/lib/supabase/client";
+import { formatDuration } from "@/lib/game/format";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import type { RankedTeam, RankingData } from "@/lib/types";
 import { sfx } from "@/lib/game/sounds";
@@ -52,12 +53,18 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
   const teams = useMemo(() => data?.teams ?? [], [data]);
   const isPoints = data?.game.scoring === "points";
 
-  // « o devant t » : étapes validées (ou points), départagées par temps d'arrivée.
+  // « o devant t » selon le VRAI barème de la partie :
+  // - points : plus de points (pénalités déjà déduites par le serveur) ;
+  // - chrono : progression, puis temps final (arrivés), puis pénalités de
+  //   temps — le chrono courant étant commun, à progression égale c'est
+  //   bien la pénalité qui fait la différence de temps.
   const isAhead = useCallback(
     (o: RankedTeam, t: RankedTeam) => {
       if (isPoints) return o.points > t.points;
       if (o.done !== t.done) return o.done > t.done;
-      return o.time_ms != null && (t.time_ms == null || o.time_ms < t.time_ms);
+      if (o.time_ms != null || t.time_ms != null)
+        return o.time_ms != null && (t.time_ms == null || o.time_ms < t.time_ms);
+      return o.penalty_seconds < t.penalty_seconds;
     },
     [isPoints]
   );
@@ -92,7 +99,14 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
   // Solo ou pas encore chargé : rien à comparer, rien à afficher
   if (!me || teams.length < 2) return null;
 
-  const scoreOf = (t: RankedTeam) => (isPoints ? `${Math.round(t.points)} pts` : `${t.done}/${t.total}`);
+  // Score affiché dans la langue du barème : points, temps final (arrivés),
+  // ou progression + pénalités de temps (en course).
+  const scoreOf = (t: RankedTeam) => {
+    if (isPoints) return `${Math.round(t.points)} pts`;
+    if (t.time_ms != null) return formatDuration(t.time_ms);
+    const penMin = Math.round(t.penalty_seconds / 60);
+    return `${t.done}/${t.total}${penMin > 0 ? ` · +${penMin} min` : ""}`;
+  };
   const subline =
     myRank === 1
       ? tiedForLead
@@ -146,17 +160,24 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
                   className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
                   style={{ backgroundColor: t.color }}
                 />
-                <span className="flex-1 min-w-0 font-display truncate">
-                  {t.name}
-                  {mine && " ⭐"}
+                <span className="flex-1 min-w-0">
+                  <span className="block font-display truncate">
+                    {t.name}
+                    {mine && " ⭐"}
+                  </span>
+                  {t.finished_at && (
+                    <span className="block text-xs font-bold text-leaf">Arrivés ! 🏁</span>
+                  )}
                 </span>
-                <span className="font-display tabular-nums shrink-0">{scoreOf(t)}</span>
+                <span className="font-display tabular-nums shrink-0 text-right">{scoreOf(t)}</span>
               </div>
             );
           })}
           <p className="text-center font-bold text-ink/50 text-xs pt-1">
-            {isPoints ? "Classement aux points" : "Classement au nombre d'étapes validées"} — mis à
-            jour en direct.
+            {isPoints
+              ? "Classement aux points (pénalités déduites)"
+              : "Classement au chrono : progression, puis pénalités de temps"}{" "}
+            — mis à jour en direct.
           </p>
         </div>
       </Dialog>
