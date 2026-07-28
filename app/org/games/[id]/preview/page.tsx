@@ -103,7 +103,7 @@ export default function PreviewPage() {
       <header className="sticky top-0 z-30 bg-ink text-parchment px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
         <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
           <Link href={`/org/games/${gameId}/edit`} className="contents">
-            <Button size="sm" variant="ghost" className="!h-8 !px-2.5 !text-sm">
+            <Button size="sm" variant="ghost" className="!min-h-8 !py-0.5 !px-2.5 !text-sm">
               ← ÉDITEUR
             </Button>
           </Link>

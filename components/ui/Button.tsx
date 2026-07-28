@@ -18,11 +18,13 @@ const variants: Record<Variant, string> = {
   "outline-crimson": "bg-white/50 text-crimson border-ink hover:bg-white/70",
 };
 
+/* min-h (pas h fixe) : un libellé qui passe sur 2 lignes agrandit le bouton
+   au lieu de déborder du cadre (vu sur petits écrans / gros réglages de texte). */
 const sizes: Record<Size, string> = {
-  sm: "h-9 px-3 text-sm",
-  md: "h-12 px-5 text-base",
-  lg: "h-14 px-6 text-lg",
-  xl: "h-16 px-8 text-xl",
+  sm: "min-h-9 px-3 py-1 text-sm",
+  md: "min-h-12 px-5 py-1.5 text-base",
+  lg: "min-h-14 px-6 py-2 text-lg",
+  xl: "min-h-16 px-8 py-2 text-xl",
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -39,7 +41,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
     <button
       ref={ref}
       className={[
-        "font-display tracking-wide rounded-2xl border-[3px]",
+        "font-display tracking-wide leading-tight text-center rounded-2xl border-[3px]",
         "shadow-[0_5px_0_0_#111111] active:translate-y-[4px] active:shadow-[0_1px_0_0_#111111]",
         "transition-[transform,box-shadow,background-color] duration-100 select-none",
         "disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2",

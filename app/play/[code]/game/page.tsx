@@ -497,7 +497,7 @@ export default function GameScreen() {
                 <button
                   key={skippedStep.id}
                   onClick={() => setRedeemStep(skippedStep)}
-                  className="px-3 h-11 rounded-xl border-[3px] border-ink bg-white font-display text-sm shadow-[2px_2px_0_0_#111111] active:translate-y-[1px]"
+                  className="px-3 min-h-11 py-1 rounded-xl border-[3px] border-ink bg-white font-display text-sm leading-tight shadow-[2px_2px_0_0_#111111] active:translate-y-[1px]"
                 >
                   {skippedStep.content.minigame
                     ? `🎮 ${skippedStep.title}`

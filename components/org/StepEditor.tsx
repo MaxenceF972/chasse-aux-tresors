@@ -552,7 +552,7 @@ export default function StepEditor({
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="shrink-0 !h-8 !px-2.5 !text-xs"
+                      className="shrink-0 !min-h-8 !py-0.5 !px-2.5 !text-xs"
                       onClick={() => setGpsThresholds(HOTCOLD_DEFAULT_THRESHOLDS.map(String))}
                     >
                       🔄 RÉINITIALISER

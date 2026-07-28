@@ -169,13 +169,14 @@ export default function OrgDashboardPage() {
 
   return (
     <main className="min-h-dvh px-5 py-6 pt-safe-page pb-safe-page max-w-2xl mx-auto">
-      <header className="flex items-center justify-between mb-8">
+      <header className="flex items-center justify-between gap-3 mb-8">
         <Link href="/">
-          <Logo className="w-64 max-w-[60vw]" />
+          <Logo className="w-64 max-w-[46vw]" />
         </Link>
         <Button
           size="sm"
           variant="ghost"
+          className="shrink-0 whitespace-nowrap"
           onClick={async () => {
             await sb().auth.signOut();
             router.replace("/");

@@ -540,7 +540,7 @@ export default function LiveDashboardPage() {
               <Button
                 size="sm"
                 variant="gold"
-                className="!h-7 !px-2.5 !text-xs"
+                className="!min-h-7 !py-0.5 !px-2.5 !text-xs"
                 onClick={() => sosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
               >
                 🆘 {unreadCount} message{unreadCount > 1 ? "s" : ""} non lu{unreadCount > 1 ? "s" : ""}
@@ -550,7 +550,7 @@ export default function LiveDashboardPage() {
               <Button
                 size="sm"
                 variant="gold"
-                className="!h-7 !px-2.5 !text-xs"
+                className="!min-h-7 !py-0.5 !px-2.5 !text-xs"
                 onClick={() => photosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
               >
                 📸 {submissions.length} photo{submissions.length > 1 ? "s" : ""} à juger
@@ -989,7 +989,7 @@ export default function LiveDashboardPage() {
                         target="_blank"
                         rel="noreferrer"
                       >
-                        <Button size="sm" variant="ghost" className="ml-auto !h-8 !px-2.5 !text-xs">
+                        <Button size="sm" variant="ghost" className="ml-auto !min-h-8 !py-0.5 !px-2.5 !text-xs">
                           🗺️ MAPS
                         </Button>
                       </a>
