@@ -144,7 +144,7 @@ export default function TagScanPage() {
   // Mode test organisateur : la balise fonctionne, rien n'est validé
   if (state === "test") {
     return (
-      <main className="min-h-dvh bg-leaf text-parchment flex flex-col items-center justify-center gap-5 px-8 text-center">
+      <main className="min-h-dvh bg-leaf text-parchment flex flex-col items-center justify-center gap-5 px-8 pt-safe pb-safe text-center">
         <motion.div
           initial={{ scale: 0, rotate: -15 }}
           animate={{ scale: 1, rotate: 0 }}
@@ -211,7 +211,7 @@ export default function TagScanPage() {
 
   return (
     <main
-      className={`min-h-dvh flex flex-col items-center justify-center gap-5 px-8 text-center ${
+      className={`min-h-dvh flex flex-col items-center justify-center gap-5 px-8 pt-safe pb-safe text-center ${
         screen.danger ? "bg-crimson text-parchment" : "parchment-texture text-ink"
       }`}
     >

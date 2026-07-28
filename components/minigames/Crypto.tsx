@@ -5,6 +5,7 @@ import type { ConfigEditorProps, MiniGameDef, MiniGameProps } from "./types";
 import { rngFromSeed, seededInt, seededShuffle } from "@/lib/game/prng";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
+import Button from "@/components/ui/Button";
 import { Label } from "@/components/ui/Input";
 
 const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -233,13 +234,14 @@ function CryptoGame({ config, seed, onComplete }: MiniGameProps) {
             </div>
           </div>
 
-          <button
-            onClick={reveal}
-            disabled={reveals >= 3}
-            className="w-full text-center font-bold text-ink/60 underline disabled:opacity-40"
-          >
-            💡 Révéler une lettre ({3 - reveals} restante{3 - reveals > 1 ? "s" : ""}, coûte des points)
-          </button>
+          <div>
+            <Button full size="md" variant="outline" onClick={reveal} disabled={reveals >= 3}>
+              💡 RÉVÉLER UNE LETTRE
+            </Button>
+            <p className="mt-1 text-center text-xs font-bold text-ink/55">
+              {3 - reveals} restante{3 - reveals > 1 ? "s" : ""} — coûte des points
+            </p>
+          </div>
         </>
       )}
     </div>

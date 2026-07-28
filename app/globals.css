@@ -93,6 +93,14 @@ textarea {
 .pb-safe {
   padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
+/* Variante « page » : conserve une respiration même hors PWA, et dégage
+   la barre d'état / barre home quand l'app est installée en signet. */
+.pt-safe-page {
+  padding-top: max(1.5rem, calc(env(safe-area-inset-top) + 0.75rem));
+}
+.pb-safe-page {
+  padding-bottom: max(2rem, calc(env(safe-area-inset-bottom) + 1rem));
+}
 
 @media (prefers-reduced-motion: reduce) {
   *,

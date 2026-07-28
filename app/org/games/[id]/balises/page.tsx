@@ -106,10 +106,10 @@ export default function BalisesPage() {
   if (loading || !user || balises === null) return <Spinner label="Chargement…" />;
 
   return (
-    <main className="min-h-dvh px-5 py-6 max-w-2xl mx-auto bg-white text-ink print:p-2">
+    <main className="min-h-dvh px-5 py-6 pt-safe-page pb-safe-page max-w-2xl mx-auto bg-white text-ink print:p-2">
       <header className="mb-6 print:hidden">
-        <Link href={`/org/games/${gameId}/edit`} className="font-bold text-ink/50 underline">
-          ← Retour à l&apos;éditeur
+        <Link href={`/org/games/${gameId}/edit`} className="contents">
+          <Button size="sm" variant="outline">← RETOUR À L&apos;ÉDITEUR</Button>
         </Link>
         <div className="flex items-center justify-between mt-2 gap-3">
           <h1 className="font-display text-3xl">🏷️ Balises</h1>

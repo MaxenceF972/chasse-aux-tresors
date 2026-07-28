@@ -66,6 +66,13 @@ export default function RootLayout({
         <PwaSetup />
         <Toaster />
         {children}
+        {/* PWA iPhone (barre d'état translucide) : fond opaque derrière l'heure
+            et la batterie — sinon texte blanc illisible sur les pages claires.
+            Hauteur nulle hors mode signet : invisible partout ailleurs. */}
+        <div
+          aria-hidden
+          className="fixed inset-x-0 top-0 h-[env(safe-area-inset-top)] bg-ink z-[90] pointer-events-none print:hidden"
+        />
       </body>
     </html>
   );

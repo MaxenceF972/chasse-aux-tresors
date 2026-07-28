@@ -548,13 +548,15 @@ export default function StepEditor({
                 <div className="mt-3 rounded-xl border-[3px] border-ink/20 p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <Label className="!mb-0">Paliers du thermomètre (mètres)</Label>
-                    <button
+                    <Button
                       type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0 !h-8 !px-2.5 !text-xs"
                       onClick={() => setGpsThresholds(HOTCOLD_DEFAULT_THRESHOLDS.map(String))}
-                      className="text-xs font-bold text-ink/60 underline shrink-0"
                     >
-                      Réinitialiser
-                    </button>
+                      🔄 RÉINITIALISER
+                    </Button>
                   </div>
                   <p className="text-xs font-bold text-ink/55">
                     Distance max de chaque palier, du plus loin (froid) au plus près (brûlant). Les

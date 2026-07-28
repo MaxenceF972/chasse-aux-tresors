@@ -196,7 +196,7 @@ export default function GameScreen() {
   }
 
   return (
-    <main className="min-h-dvh parchment-texture text-ink pb-10">
+    <main className="min-h-dvh parchment-texture text-ink pb-safe-page">
       {/* Barre du haut */}
       <header className="sticky top-0 z-30 bg-ink text-parchment border-b-[3px] border-ink shadow-md pt-[env(safe-area-inset-top)]">
         <div className="max-w-lg mx-auto px-4 py-2.5 flex items-center gap-3">
@@ -435,9 +435,11 @@ export default function GameScreen() {
                       href={`https://maps.google.com/?q=${current.step.content.rdv.lat},${current.step.content.rdv.lng}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="shrink-0 font-bold text-sm underline text-ink/70 py-1"
+                      className="contents"
                     >
-                      🧭 Itinéraire
+                      <Button size="sm" variant="outline" className="shrink-0">
+                        🧭 ITINÉRAIRE
+                      </Button>
                     </a>
                   </div>
                 </div>
@@ -466,21 +468,20 @@ export default function GameScreen() {
 
               {/* Passer l'étape (bloqué) — pénalité propre à l'étape */}
               {game.status === "running" && (
-                <button
-                  className="w-full text-center font-bold text-crimson/80 underline py-1.5"
-                  onClick={handleSkipStep}
-                >
-                  🚪 Bloqués ? Passer cette étape (pénalité : {currentSkipLabel}
-                  {currentIsMinigame ? ", rattrapable" : ""})
-                </button>
+                <div>
+                  <Button full size="md" variant="outline-crimson" onClick={handleSkipStep}>
+                    🚪 BLOQUÉS ? PASSER L&apos;ÉTAPE
+                  </Button>
+                  <p className="mt-1 text-center text-xs font-bold text-crimson/70">
+                    Pénalité : {currentSkipLabel}
+                    {currentIsMinigame ? " — rattrapable plus tard" : ""}
+                  </p>
+                </div>
               )}
 
-              <button
-                className="w-full text-center font-bold text-ink/50 underline py-1"
-                onClick={() => setContactOpen(true)}
-              >
-                🆘 Un souci sur le terrain ? Contacter le maître du jeu
-              </button>
+              <Button full size="md" variant="outline" onClick={() => setContactOpen(true)}>
+                🆘 CONTACTER LE MAÎTRE DU JEU
+              </Button>
             </motion.div>
           </AnimatePresence>
         )}
@@ -678,16 +679,19 @@ export default function GameScreen() {
               {pushError && <p className="text-crimson font-bold text-xs mt-1">{pushError}</p>}
             </div>
           )}
-          <button
-            className="w-full text-center font-bold text-ink/60 underline text-sm"
+          <Button
+            full
+            variant="outline"
             onClick={() => {
               const next = geo === "granted" ? "denied" : "granted";
               setGeoConsent(next);
               setGeo(next);
             }}
           >
-            📍 Partage de position : {geo === "granted" ? "activé (toucher pour couper)" : "coupé (toucher pour activer)"}
-          </button>
+            {geo === "granted"
+              ? "📍 COUPER LE PARTAGE DE POSITION"
+              : "📍 ACTIVER LE PARTAGE DE POSITION"}
+          </Button>
           <Button
             full
             variant="crimson"

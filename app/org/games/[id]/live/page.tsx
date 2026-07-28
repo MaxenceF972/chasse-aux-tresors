@@ -494,20 +494,20 @@ export default function LiveDashboardPage() {
     : ranking;
 
   return (
-    <main className="min-h-dvh px-5 py-6 max-w-3xl mx-auto pb-24">
+    <main className="min-h-dvh px-5 py-6 pt-safe-page max-w-3xl mx-auto pb-24">
       <header className="mb-6">
-        <nav className="flex gap-4 flex-wrap">
-          <Link href="/org/dashboard" className="font-bold text-parchment/70 underline py-2 inline-block">
-            ← Mes parties
+        <nav className="flex gap-2 flex-wrap">
+          <Link href="/org/dashboard" className="contents">
+            <Button size="sm" variant="ghost">← MES PARTIES</Button>
           </Link>
-          <Link href={`/org/games/${gameId}/edit`} className="font-bold text-parchment/70 underline py-2 inline-block">
-            ✏️ Éditeur
+          <Link href={`/org/games/${gameId}/edit`} className="contents">
+            <Button size="sm" variant="ghost">✏️ ÉDITEUR</Button>
           </Link>
-          <Link href={`/org/games/${gameId}/balises`} className="font-bold text-parchment/70 underline py-2 inline-block">
-            🏷️ Balises
+          <Link href={`/org/games/${gameId}/balises`} className="contents">
+            <Button size="sm" variant="ghost">🏷️ BALISES</Button>
           </Link>
-          <Link href={`/org/games/${gameId}/photos`} className="font-bold text-parchment/70 underline py-2 inline-block">
-            🖼️ Photos
+          <Link href={`/org/games/${gameId}/photos`} className="contents">
+            <Button size="sm" variant="ghost">🖼️ PHOTOS</Button>
           </Link>
         </nav>
         <div className="flex flex-wrap items-center justify-between gap-3 mt-2">
@@ -531,26 +531,30 @@ export default function LiveDashboardPage() {
       </header>
 
       {/* Actions globales : barre collante avec compteurs d'état (grosses chasses) */}
-      <div className="sticky top-0 z-40 -mx-5 px-5 py-2.5 mb-4 bg-ink/95 backdrop-blur-sm border-b-2 border-parchment/10">
+      <div className="sticky top-[env(safe-area-inset-top)] z-40 -mx-5 px-5 py-2.5 mb-4 bg-ink/95 backdrop-blur-sm border-b-2 border-parchment/10">
         {game.status !== "lobby" && (
           <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 font-bold text-xs text-parchment/70">
             <span>🏁 {finishedCount}/{teams.length} arrivées</span>
             {stuckCount > 0 && <span className="text-crimson">⚠️ {stuckCount} bloquée{stuckCount > 1 ? "s" : ""}</span>}
             {unreadCount > 0 && (
-              <button
-                className="text-gold underline"
+              <Button
+                size="sm"
+                variant="gold"
+                className="!h-7 !px-2.5 !text-xs"
                 onClick={() => sosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
               >
                 🆘 {unreadCount} message{unreadCount > 1 ? "s" : ""} non lu{unreadCount > 1 ? "s" : ""}
-              </button>
+              </Button>
             )}
             {submissions.length > 0 && (
-              <button
-                className="text-gold underline"
+              <Button
+                size="sm"
+                variant="gold"
+                className="!h-7 !px-2.5 !text-xs"
                 onClick={() => photosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
               >
                 📸 {submissions.length} photo{submissions.length > 1 ? "s" : ""} à juger
-              </button>
+              </Button>
             )}
           </div>
         )}
@@ -814,9 +818,9 @@ export default function LiveDashboardPage() {
               )}
             </h2>
             {unreadCount > 0 && (
-              <button className="font-bold text-parchment/60 underline text-sm py-1" onClick={markMessagesRead}>
-                Tout marquer lu
-              </button>
+              <Button size="sm" variant="ghost" onClick={markMessagesRead}>
+                ✅ TOUT MARQUER LU
+              </Button>
             )}
           </div>
           <div className="space-y-2 mb-8 max-h-80 overflow-y-auto overscroll-contain pr-1">
@@ -980,12 +984,14 @@ export default function LiveDashboardPage() {
                         {ageMin != null ? (ageMin < 1 ? "à l'instant" : `il y a ${ageMin} min`) : ""}
                       </span>
                       <a
-                        className="ml-auto underline text-parchment/60 py-1"
+                        className="contents"
                         href={`https://maps.google.com/?q=${p.last_lat},${p.last_lng}`}
                         target="_blank"
                         rel="noreferrer"
                       >
-                        🗺️ Maps
+                        <Button size="sm" variant="ghost" className="ml-auto !h-8 !px-2.5 !text-xs">
+                          🗺️ MAPS
+                        </Button>
                       </a>
                     </li>
                   );

@@ -129,12 +129,14 @@ function MastermindGame({ config, seed, onComplete }: MiniGameProps) {
             <span className="text-leaf">Indice : les {slots} couleurs sont toutes différentes.</span>
           )}
         </p>
-        <button
-          className="font-bold text-leaf underline text-sm mt-1"
+        <Button
+          size="sm"
+          variant="outline"
+          className="mt-2"
           onClick={() => setHelpOpen((o) => !o)}
         >
-          {helpOpen ? "Masquer les règles" : "Comment jouer ?"}
-        </button>
+          {helpOpen ? "➖ MASQUER LES RÈGLES" : "❓ COMMENT JOUER ?"}
+        </Button>
         {helpOpen && (
           <ol className="mt-2 space-y-1 font-bold text-sm text-ink/70 list-decimal list-inside">
             <li>Touche les couleurs en bas pour remplir les {slots} cases.</li>

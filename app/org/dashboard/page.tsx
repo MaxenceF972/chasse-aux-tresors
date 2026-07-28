@@ -168,20 +168,21 @@ export default function OrgDashboardPage() {
   if (loading || !user) return <Spinner label="Chargement…" />;
 
   return (
-    <main className="min-h-dvh px-5 py-6 max-w-2xl mx-auto">
+    <main className="min-h-dvh px-5 py-6 pt-safe-page pb-safe-page max-w-2xl mx-auto">
       <header className="flex items-center justify-between mb-8">
         <Link href="/">
           <Logo className="w-64 max-w-[60vw]" />
         </Link>
-        <button
-          className="font-bold text-parchment/60 underline"
+        <Button
+          size="sm"
+          variant="ghost"
           onClick={async () => {
             await sb().auth.signOut();
             router.replace("/");
           }}
         >
-          Déconnexion
-        </button>
+          🚪 DÉCONNEXION
+        </Button>
       </header>
 
       <div className="flex items-center justify-between mb-5 gap-2 flex-wrap">

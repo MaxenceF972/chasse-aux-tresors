@@ -143,10 +143,10 @@ export default function GameEditPage() {
   if (loading || !user || !game) return <Spinner label="Chargement…" />;
 
   return (
-    <main className="min-h-dvh px-5 py-6 max-w-2xl mx-auto pb-24">
+    <main className="min-h-dvh px-5 py-6 pt-safe-page max-w-2xl mx-auto pb-24">
       <header className="mb-6">
-        <Link href="/org/dashboard" className="font-bold text-parchment/60 underline">
-          ← Mes parties
+        <Link href="/org/dashboard" className="contents">
+          <Button size="sm" variant="ghost">← MES PARTIES</Button>
         </Link>
         <div className="flex items-center justify-between gap-2 mt-2">
           {editingName ? (
@@ -209,11 +209,13 @@ export default function GameEditPage() {
         <Card dark className="p-4 mb-6 border-gold">
           <p className="font-bold">
             ⚠️ La partie est {game.status === "finished" ? "terminée" : "lancée"} — le parcours
-            n&apos;est plus modifiable.{" "}
-            <Link href={`/org/games/${gameId}/live`} className="underline text-gold">
-              Ouvrir le dashboard live →
-            </Link>
+            n&apos;est plus modifiable.
           </p>
+          <Link href={`/org/games/${gameId}/live`} className="contents">
+            <Button size="sm" variant="gold" className="mt-2">
+              📊 OUVRIR LE DASHBOARD LIVE
+            </Button>
+          </Link>
         </Card>
       )}
 

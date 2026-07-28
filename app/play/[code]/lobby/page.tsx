@@ -214,7 +214,7 @@ export default function LobbyPage() {
   const rules = charterRules(settings.charter);
 
   return (
-    <main className="min-h-dvh px-5 py-8 max-w-lg mx-auto flex flex-col gap-6">
+    <main className="min-h-dvh px-5 py-8 pt-safe-page pb-safe-page max-w-lg mx-auto flex flex-col gap-6">
       <div className="text-center">
         <Link href="/" className="inline-block">
           <Logo className="w-72 max-w-[78vw] mx-auto" />
@@ -224,8 +224,10 @@ export default function LobbyPage() {
         </h1>
         <p className="font-mono font-bold text-gold tracking-[0.3em]">{code}</p>
         {!me && (
-          <Link href="/play" className="font-bold text-parchment/50 underline text-sm">
-            ← Changer de code
+          <Link href="/play" className="contents">
+            <Button size="sm" variant="ghost" className="mt-2">
+              ← CHANGER DE CODE
+            </Button>
           </Link>
         )}
       </div>
@@ -314,12 +316,15 @@ export default function LobbyPage() {
               {busy ? "…" : "⚓ REJOINDRE L'ÉQUIPE"}
             </Button>
           </form>
-          <button
-            className="mt-3 font-bold text-ink/50 underline text-sm"
+          <Button
+            full
+            size="sm"
+            variant="outline"
+            className="mt-3"
             onClick={() => setInvitedTeamCode(null)}
           >
-            Ce n&apos;est pas la bonne équipe ? Choisir moi-même
-          </button>
+            🔄 PAS LA BONNE ÉQUIPE ? CHOISIR MOI-MÊME
+          </Button>
         </Card>
       ) : (
         <>
@@ -370,16 +375,18 @@ export default function LobbyPage() {
           >
             ➕ CRÉER UNE ÉQUIPE
           </Button>
-          <button
-            className="w-full text-center font-bold text-parchment/70 underline py-2.5"
+          <Button
+            full
+            size="md"
+            variant="ghost"
             onClick={() => {
               setNickname("");
               setRejoinCode("");
               setRejoinOpen(true);
             }}
           >
-            🔑 J&apos;ai déjà un code équipe (changement de téléphone…)
-          </button>
+            🔑 J&apos;AI DÉJÀ UN CODE ÉQUIPE
+          </Button>
           <HowToPlay />
         </>
       )}
@@ -432,19 +439,23 @@ export default function LobbyPage() {
               checked={charterAccepted}
               onChange={(e) => setCharterAccepted(e.target.checked)}
             />
-            <span className="font-bold text-sm text-ink/85">
-              Au nom de mon équipe, j&apos;accepte la{" "}
-              <button
+            <span className="flex-1">
+              <span className="font-bold text-sm text-ink/85">
+                Au nom de mon équipe, j&apos;accepte la charte de l&apos;aventurier (respect des
+                balises, des autres équipes et de la sécurité).
+              </span>
+              <Button
                 type="button"
-                className="text-leaf underline"
+                size="sm"
+                variant="outline"
+                className="mt-2"
                 onClick={(e) => {
                   e.preventDefault();
                   setCharterOpen(true);
                 }}
               >
-                charte de l&apos;aventurier
-              </button>{" "}
-              (respect des balises, des autres équipes et de la sécurité).
+                📜 LIRE LA CHARTE
+              </Button>
             </span>
           </label>
 

@@ -55,7 +55,12 @@ export default function Dialog({ open, onClose, children, title, fullScreen, ele
             }
           >
             {title && (
-              <div className="sticky top-0 z-10 parchment-texture border-b-[3px] border-ink px-4 py-2.5 flex items-center justify-between gap-3">
+              <div
+                className={`sticky z-10 parchment-texture border-b-[3px] border-ink px-4 py-2.5 flex items-center justify-between gap-3 ${
+                  // Plein écran : la barre de titre se cale sous la barre d'état iOS
+                  fullScreen ? "top-[env(safe-area-inset-top)]" : "top-0"
+                }`}
+              >
                 <h2 className="font-display text-xl min-w-0 truncate">{title}</h2>
                 {onClose && (
                   <button

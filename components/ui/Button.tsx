@@ -2,15 +2,20 @@
 
 import { ButtonHTMLAttributes, forwardRef } from "react";
 
-type Variant = "gold" | "crimson" | "parchment" | "leaf" | "ghost";
+type Variant = "gold" | "crimson" | "parchment" | "leaf" | "ghost" | "outline" | "outline-crimson";
 type Size = "sm" | "md" | "lg" | "xl";
 
 const variants: Record<Variant, string> = {
-  gold: "bg-gold text-ink hover:bg-gold-light",
-  crimson: "bg-crimson text-parchment hover:bg-crimson-dark",
-  parchment: "bg-parchment text-ink hover:bg-parchment-dark",
-  leaf: "bg-leaf text-parchment hover:bg-leaf-light",
-  ghost: "bg-transparent text-parchment border-parchment/40 shadow-none hover:bg-parchment/10",
+  gold: "bg-gold text-ink border-ink hover:bg-gold-light",
+  crimson: "bg-crimson text-parchment border-ink hover:bg-crimson-dark",
+  parchment: "bg-parchment text-ink border-ink hover:bg-parchment-dark",
+  leaf: "bg-leaf text-parchment border-ink hover:bg-leaf-light",
+  /* Secondaire sur fond sombre : contour parchemin bien visible */
+  ghost: "bg-parchment/10 text-parchment border-parchment/70 hover:bg-parchment/20",
+  /* Secondaire sur fond parchemin : carte blanche cerclée d'encre */
+  outline: "bg-white/50 text-ink border-ink hover:bg-white/70",
+  /* Secondaire « risqué » (passer l'étape…) : même base, texte rouge */
+  "outline-crimson": "bg-white/50 text-crimson border-ink hover:bg-white/70",
 };
 
 const sizes: Record<Size, string> = {
@@ -34,7 +39,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
     <button
       ref={ref}
       className={[
-        "font-display tracking-wide rounded-2xl border-[3px] border-ink",
+        "font-display tracking-wide rounded-2xl border-[3px]",
         "shadow-[0_5px_0_0_#111111] active:translate-y-[4px] active:shadow-[0_1px_0_0_#111111]",
         "transition-[transform,box-shadow,background-color] duration-100 select-none",
         "disabled:opacity-50 disabled:pointer-events-none inline-flex items-center justify-center gap-2",

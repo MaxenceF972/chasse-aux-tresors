@@ -48,7 +48,7 @@ export default function Toaster() {
   }, []);
 
   return (
-    <div className="fixed top-[max(0.75rem,env(safe-area-inset-top))] inset-x-4 z-[70] flex flex-col items-center gap-2 pointer-events-none">
+    <div className="fixed top-[max(0.75rem,calc(env(safe-area-inset-top)+0.5rem))] inset-x-4 z-[70] flex flex-col items-center gap-2 pointer-events-none">
       <AnimatePresence>
         {toasts.map((toast) => (
           <motion.button

@@ -102,8 +102,10 @@ export default function PreviewPage() {
     <main className="min-h-dvh parchment-texture text-ink pb-16">
       <header className="sticky top-0 z-30 bg-ink text-parchment px-4 py-2.5 pt-[max(0.625rem,env(safe-area-inset-top))]">
         <div className="max-w-lg mx-auto flex items-center justify-between gap-3">
-          <Link href={`/org/games/${gameId}/edit`} className="font-bold underline text-parchment/70">
-            ← Éditeur
+          <Link href={`/org/games/${gameId}/edit`} className="contents">
+            <Button size="sm" variant="ghost" className="!h-8 !px-2.5 !text-sm">
+              ← ÉDITEUR
+            </Button>
           </Link>
           <span className="font-display text-gold">🧪 MODE TEST</span>
           <span className="font-bold text-parchment/60 text-sm tabular-nums">
@@ -297,9 +299,9 @@ export default function PreviewPage() {
                 </div>
               )}
 
-              <button className="w-full text-center font-bold text-ink/50 underline" onClick={next}>
-                Passer cette étape →
-              </button>
+              <Button full size="md" variant="outline" onClick={next}>
+                PASSER CETTE ÉTAPE →
+              </Button>
             </motion.div>
           </AnimatePresence>
         ) : (

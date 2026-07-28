@@ -142,10 +142,10 @@ export default function PhotosPage() {
   const lightboxSub = lightbox ? (submissions.find((s) => s.id === lightbox.id) ?? lightbox) : null;
 
   return (
-    <main className="min-h-dvh px-5 py-6 max-w-3xl mx-auto pb-16">
+    <main className="min-h-dvh px-5 py-6 pt-safe-page max-w-3xl mx-auto pb-16">
       <header className="mb-6">
-        <Link href={`/org/games/${gameId}/live`} className="font-bold text-parchment/70 underline py-2 inline-block">
-          ← Dashboard live
+        <Link href={`/org/games/${gameId}/live`} className="contents">
+          <Button size="sm" variant="ghost">← DASHBOARD LIVE</Button>
         </Link>
         <div className="flex items-center justify-between gap-3 mt-1 flex-wrap">
           <h1 className="font-display text-3xl text-parchment">🖼️ Galerie photos</h1>

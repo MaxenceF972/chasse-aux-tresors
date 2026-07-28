@@ -169,7 +169,7 @@ export default function FinalPage() {
   }
 
   return (
-    <main className="min-h-dvh px-5 py-8 max-w-lg mx-auto">
+    <main className="min-h-dvh px-5 py-8 pt-safe-page pb-safe-page max-w-lg mx-auto">
       <div className="text-center mb-8">
         <Logo className="w-72 max-w-[76vw] mx-auto" />
         <motion.h1

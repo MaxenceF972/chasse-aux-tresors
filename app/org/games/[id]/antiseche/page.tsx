@@ -59,10 +59,10 @@ export default function AntisechePage() {
   if (loading || !user || !game) return <Spinner label="Préparation de l'antisèche…" />;
 
   return (
-    <main className="min-h-dvh bg-white text-ink px-5 py-6 max-w-2xl mx-auto print:p-2 print:max-w-none">
+    <main className="min-h-dvh bg-white text-ink px-5 py-6 pt-safe-page pb-safe-page max-w-2xl mx-auto print:p-2 print:max-w-none">
       <header className="mb-5 print:hidden">
-        <Link href={`/org/games/${gameId}/edit`} className="font-bold text-ink/50 underline py-2 inline-block">
-          ← Retour à l&apos;éditeur
+        <Link href={`/org/games/${gameId}/edit`} className="contents">
+          <Button size="sm" variant="outline">← RETOUR À L&apos;ÉDITEUR</Button>
         </Link>
         <div className="flex items-center justify-between gap-3 mt-1 flex-wrap">
           <h1 className="font-display text-3xl">📜 Antisèche terrain</h1>

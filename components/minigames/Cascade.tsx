@@ -141,12 +141,14 @@ function CascadeGame({ config, seed, onComplete }: MiniGameProps) {
             onSubmit={submit}
             submitDisabled={!input}
           />
-          <button
-            className="w-full text-center font-bold text-ink/60 underline"
-            onClick={start}
-          >
-            🔁 Revoir le calcul (ça compte comme un essai raté !)
-          </button>
+          <div>
+            <Button full size="md" variant="outline" onClick={start}>
+              🔁 REVOIR LE CALCUL
+            </Button>
+            <p className="mt-1 text-center text-xs font-bold text-ink/55">
+              (ça compte comme un essai raté !)
+            </p>
+          </div>
         </>
       )}
       {attempt > 0 && !done && (

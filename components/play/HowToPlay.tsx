@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 
 const RULES = [
@@ -41,12 +42,9 @@ export default function HowToPlay() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button
-        className="w-full text-center font-bold text-parchment/70 underline py-2.5"
-        onClick={() => setOpen(true)}
-      >
-        📖 Comment jouer ?
-      </button>
+      <Button full size="md" variant="ghost" onClick={() => setOpen(true)}>
+        📖 COMMENT JOUER ?
+      </Button>
       <Dialog open={open} onClose={() => setOpen(false)} title="📖 Comment jouer">
         <div className="space-y-4">
           {RULES.map((rule) => (

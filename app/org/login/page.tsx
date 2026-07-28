@@ -63,7 +63,7 @@ export default function OrgLoginPage() {
   }
 
   return (
-    <main className="min-h-dvh flex flex-col items-center justify-center px-5 py-10 gap-8">
+    <main className="min-h-dvh flex flex-col items-center justify-center px-5 py-10 pt-safe-page pb-safe-page gap-8">
       <Link href="/">
         <Logo className="w-80 max-w-[82vw]" />
       </Link>
@@ -116,15 +116,18 @@ export default function OrgLoginPage() {
           </Button>
         </form>
 
-        <button
-          className="mt-4 w-full text-center font-bold text-ink/60 underline"
+        <Button
+          full
+          size="md"
+          variant="outline"
+          className="mt-4"
           onClick={() => {
             setMode(mode === "login" ? "signup" : "login");
             setMessage(null);
           }}
         >
-          {mode === "login" ? "Pas de compte ? Inscris-toi" : "Déjà un compte ? Connecte-toi"}
-        </button>
+          {mode === "login" ? "🆕 PAS DE COMPTE ? INSCRIS-TOI" : "⚓ DÉJÀ UN COMPTE ? CONNECTE-TOI"}
+        </Button>
       </Card>
     </main>
   );

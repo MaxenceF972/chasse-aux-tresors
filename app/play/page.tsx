@@ -36,7 +36,7 @@ export default function JoinPage() {
   }
 
   return (
-    <main className="min-h-dvh flex flex-col items-center justify-center px-5 py-10 gap-8">
+    <main className="min-h-dvh flex flex-col items-center justify-center px-5 py-10 pt-safe-page pb-safe-page gap-8">
       <Link href="/">
         <Logo className="w-80 max-w-[82vw]" />
       </Link>
@@ -68,8 +68,8 @@ export default function JoinPage() {
         </form>
       </Card>
 
-      <Link href="/" className="font-bold text-parchment/70 underline py-2 inline-block">
-        ← Retour à l&apos;accueil
+      <Link href="/" className="contents">
+        <Button size="sm" variant="ghost">← RETOUR À L&apos;ACCUEIL</Button>
       </Link>
     </main>
   );

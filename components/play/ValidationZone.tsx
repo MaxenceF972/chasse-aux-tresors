@@ -229,13 +229,15 @@ function NfcValidation({
           {nfcError}
         </p>
       )}
-      <button
-        className="w-full text-center font-bold text-ink/60 underline py-1"
+      <Button
+        full
+        size="md"
+        variant="outline"
         onClick={() => setManualOpen(true)}
         disabled={disabled}
       >
-        Balise abîmée ou introuvable ? Saisir son code
-      </button>
+        🔢 BALISE ABÎMÉE ? SAISIR SON CODE
+      </Button>
 
       <Dialog open={manualOpen} onClose={() => setManualOpen(false)} title="🔢 Code de la balise">
         <form onSubmit={submitManual} className="space-y-4">
