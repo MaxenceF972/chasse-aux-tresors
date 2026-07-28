@@ -142,6 +142,10 @@ export default function StepEditor({
     if (scoring === "points") return c?.skip_penalty_points != null ? String(c.skip_penalty_points) : "";
     return c?.skip_penalty_sec != null ? String(Math.round(c.skip_penalty_sec / 60)) : "";
   });
+  // Rattrapable après un skip (défaut : oui pour les mini-jeux)
+  const [redeemable, setRedeemable] = useState<boolean>(
+    step?.content?.redeemable ?? (step?.type ?? initialType) === "minigame"
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -242,6 +246,7 @@ export default function StepEditor({
                 ? Math.max(0, Number(skipPenalty))
                 : undefined
               : step?.content?.skip_penalty_points,
+          redeemable,
         },
         media_urls: mediaUrls,
         is_common_checkpoint: placement === "common",
@@ -863,6 +868,23 @@ export default function StepEditor({
             utilise la pénalité globale de la partie. Mets une grosse valeur pour décourager
             l&apos;abandon d&apos;une épreuve clé.
           </p>
+
+          {/* Rattrapable après un skip */}
+          <label className="mt-3 flex items-start gap-2.5 rounded-xl border-[3px] border-ink bg-white/60 p-3 cursor-pointer">
+            <input
+              type="checkbox"
+              className="w-6 h-6 mt-0.5 shrink-0 accent-[#2E5E3A]"
+              checked={redeemable}
+              onChange={(e) => setRedeemable(e.target.checked)}
+            />
+            <span className="font-bold text-sm text-ink/85">
+              <span className="font-display">↩️ Rattrapable après un skip</span> — l&apos;équipe
+              peut revenir finir cette épreuve plus tard. La pénalité du skip reste due ;
+              le rattrapage rend {scoring === "points" ? "les points de l'étape" : "l'épreuve réussie (photo jugée, mini-jeu compté…)"}.
+              Décochée = passer est définitif. Les épreuves d&apos;un groupe se rattrapent
+              dans l&apos;ordre du groupe.
+            </span>
+          </label>
         </div>
 
         {/* Placement dans le parcours */}

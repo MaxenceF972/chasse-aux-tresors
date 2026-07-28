@@ -46,6 +46,7 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
     case "minigame_skipped": return `⏭️ « ${team} » a passé « ${String(e.payload.step_title ?? "?")} » (pénalité)`;
     case "step_skipped": return `⏭️ « ${team} » a passé « ${String(e.payload.step_title ?? "?")} » (bloqué, pénalité)`;
     case "minigame_redeemed": return `💪 « ${team} » a rattrapé « ${String(e.payload.step_title ?? "?")} »`;
+    case "step_redeemed": return `💪 « ${team} » a rattrapé « ${String(e.payload.step_title ?? "?")} »`;
     case "step_timeout": return `⌛ « ${team} » — temps écoulé sur « ${String(e.payload.step_title ?? "?")} »`;
     case "step_neutralized": return `🛠️ Étape « ${String(e.payload.step_title ?? "?")} » neutralisée (${String(e.payload.teams_affected ?? 0)} équipes)`;
     case "team_message": return `🆘 « ${team} » : ${String(e.payload.message ?? "")}`;
@@ -665,8 +666,8 @@ export default function LiveDashboardPage() {
           </h2>
           <p className="font-bold text-parchment/50 text-xs mb-3">
             Une case par étape — couleur de l&apos;équipe : validée · 🟡 clignotante : en cours ·
-            🔴 : passée avec pénalité · grise : temps écoulé · blanche : à venir. Touche une case
-            pour voir le nom de l&apos;étape.
+            🔴 : passée avec pénalité · 🟢 : rattrapée · grise : temps écoulé · blanche : à venir.
+            Touche une case pour voir le nom de l&apos;étape.
           </p>
           {teams.length > 6 && (
             <div className="mb-3">
@@ -715,13 +716,21 @@ export default function LiveDashboardPage() {
                     .sort((a, b) => a.position - b.position)
                     .map((r) => {
                       const st = stepMap.get(r.step_id);
+                      const redeemed = r.skipped && !!r.redeemed_at;
                       const label = `${r.position + 1}. ${st?.title ?? "?"}${
-                        r.skipped ? " (passée, pénalité)" : r.timed_out ? " (temps écoulé)" : ""
+                        redeemed
+                          ? " (rattrapée)"
+                          : r.skipped
+                            ? " (passée, pénalité)"
+                            : r.timed_out
+                              ? " (temps écoulé)"
+                              : ""
                       }`;
                       let cls = "bg-white";
                       let bg: string | undefined;
                       if (r.status === "done") {
-                        if (r.skipped) cls = "bg-crimson";
+                        if (redeemed) cls = "bg-leaf";
+                        else if (r.skipped) cls = "bg-crimson";
                         else if (r.timed_out) cls = "bg-ink/25";
                         else {
                           cls = "";
@@ -883,7 +892,7 @@ export default function LiveDashboardPage() {
         {(() => {
           const FILTER_TYPES: Record<string, string[]> = {
             sos: ["team_message"],
-            valid: ["step_validated", "team_finished", "manual_validate", "step_neutralized", "minigame_redeemed"],
+            valid: ["step_validated", "team_finished", "manual_validate", "step_neutralized", "minigame_redeemed", "step_redeemed"],
             warn: ["wrong_answer", "minigame_skipped", "step_skipped", "step_timeout", "hint_unlocked", "game_paused"],
             photo: ["photo_submitted", "photo_approved", "photo_rejected", "photo_winner"],
           };

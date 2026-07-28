@@ -13,13 +13,14 @@ import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import { getGeoConsent, isMuted, setGeoConsent, setMuted, type GeoConsent } from "@/lib/game/prefs";
 import { enablePush, isPushEnabled, pushSupported } from "@/lib/push";
-import type { PlayState, ValidateKind } from "@/lib/types";
+import type { PlayState, SkippedStep, ValidateKind } from "@/lib/types";
 import { clearPlayerSession } from "@/lib/game/session";
 import { rpc } from "@/lib/supabase/client";
 import { showToast } from "@/components/ui/Toaster";
 import { TextArea, Label } from "@/components/ui/Input";
 import LiveRank from "@/components/play/LiveRank";
 import MinigameModal from "@/components/play/MinigameModal";
+import RedeemModal from "@/components/play/RedeemModal";
 import ValidationZone from "@/components/play/ValidationZone";
 import HintPanel from "@/components/play/HintPanel";
 import SuccessOverlay from "@/components/play/SuccessOverlay";
@@ -29,6 +30,14 @@ import Spinner from "@/components/ui/Spinner";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { useConfirm } from "@/components/ui/Confirm";
+
+const SKIPPED_ICONS: Record<string, string> = {
+  minigame: "🎮",
+  text: "❓",
+  nfc: "🏷️",
+  gps: "🧭",
+  photo: "📸",
+};
 
 export default function GameScreen() {
   const params = useParams<{ code: string }>();
@@ -52,7 +61,7 @@ export default function GameScreen() {
   const [contactOpen, setContactOpen] = useState(false);
   const [contactMessage, setContactMessage] = useState("");
   const [contactBusy, setContactBusy] = useState(false);
-  const [redeemStep, setRedeemStep] = useState<PlayState["skipped_minigames"][number] | null>(null);
+  const [redeemStep, setRedeemStep] = useState<SkippedStep | null>(null);
   const [timerNow, setTimerNow] = useState(() => Date.now());
   const { confirm: confirmDlg, confirmDialog } = useConfirm();
   const [muted, setMutedState] = useState(false);
@@ -103,7 +112,12 @@ export default function GameScreen() {
     );
   }
 
-  const { game, team, progress, current, finished, skipped_minigames: skippedMinigames } = state;
+  const { game, team, progress, current, finished } = state;
+  // Épreuves à rattraper : nouveau format tous-types, ou repli sur l'ancien
+  // (mini-jeux seuls) tant que le SQL n'est pas ré-appliqué.
+  const skippedSteps: SkippedStep[] =
+    state.skipped_steps ??
+    state.skipped_minigames.map((m) => ({ ...m, type: "minigame" as const, media_urls: [] }));
   const teamElapsedMs = team.final_time_ms ?? game.elapsed_ms;
   const chronoTicking = game.status === "running" && !team.finished_at;
   const isPoints = game.settings.scoring === "points";
@@ -144,12 +158,19 @@ export default function GameScreen() {
   // Passer l'étape volontairement (bloqué) → pénalité de l'étape
   async function handleSkipStep() {
     if (!current) return;
-    const isMg = current.step.type === "minigame";
+    const isRedeemable =
+      current.step.content.redeemable ?? current.step.type === "minigame";
+    const inGroup = !!current.step.chain_group;
     const ok = await confirmDlg({
-      title: "🚪 Passer cette étape ?",
-      message: isMg
-        ? `Vous êtes bloqués ? Vous passez avec ${currentSkipLabel} de pénalité — mais vous pourrez retenter ce mini-jeu plus tard pour l'annuler.`
-        : `Vous êtes bloqués ? Vous passez à la suite et perdez ${currentSkipLabel}. C'est définitif pour cette étape.`,
+      title: inGroup ? "🚪 Passer ce GROUPE d'épreuves ?" : "🚪 Passer cette étape ?",
+      message: [
+        inGroup
+          ? `Cette épreuve fait partie d'un groupe : c'est TOUT le reste du groupe qui sera passé (une pénalité par épreuve, ${currentSkipLabel} pour celle-ci).`
+          : `Vous êtes bloqués ? Vous passez à la suite et perdez ${currentSkipLabel}.`,
+        isRedeemable
+          ? "Vous pourrez revenir la rattraper plus tard — la pénalité, elle, restera due."
+          : "C'est définitif pour cette étape.",
+      ].join(" "),
       confirmLabel: "Passer",
       danger: true,
     });
@@ -490,22 +511,21 @@ export default function GameScreen() {
           </AnimatePresence>
         )}
 
-        {/* Mini-jeux passés, à rattraper pour annuler la pénalité */}
-        {!finished && skippedMinigames.length > 0 && (
+        {/* Épreuves sautées, à rattraper plus tard (pénalité déjà payée) */}
+        {!finished && skippedSteps.length > 0 && (
           <div className="mt-6 rounded-xl border-[3px] border-dashed border-crimson/50 p-3">
             <p className="font-display text-sm text-crimson mb-2">
-              🎮 MINI-JEUX À RATTRAPER — les réussir annule leur pénalité de skip !
+              ⏩ ÉPREUVES À RATTRAPER —{" "}
+              {isPoints ? "les réussir rend leurs points !" : "finissez la carte avec les honneurs !"}
             </p>
             <div className="flex flex-wrap gap-2">
-              {skippedMinigames.map((skippedStep) => (
+              {skippedSteps.map((skippedStep) => (
                 <button
                   key={skippedStep.id}
                   onClick={() => setRedeemStep(skippedStep)}
                   className="px-3 min-h-11 py-1 rounded-xl border-[3px] border-ink bg-white font-display text-sm leading-tight shadow-[2px_2px_0_0_#111111] active:translate-y-[1px]"
                 >
-                  {skippedStep.content.minigame
-                    ? `🎮 ${skippedStep.title}`
-                    : skippedStep.title}
+                  {SKIPPED_ICONS[skippedStep.type] ?? "⏩"} {skippedStep.title}
                 </button>
               ))}
             </div>
@@ -513,8 +533,9 @@ export default function GameScreen() {
         )}
       </div>
 
-      {/* Rattrapage d'un mini-jeu passé */}
-      {redeemStep?.content.minigame && (
+      {/* Rattrapage d'une épreuve sautée : mini-jeu rejoué sur place,
+          autres types via le dialog de rattrapage */}
+      {redeemStep?.type === "minigame" && redeemStep.content.minigame && (
         <MinigameModal
           kind={redeemStep.content.minigame.kind}
           config={redeemStep.content.minigame.config}
@@ -522,21 +543,32 @@ export default function GameScreen() {
           onClose={() => setRedeemStep(null)}
           onComplete={async (result) => {
             try {
-              const res = await rpc<{ ok: boolean; correct?: boolean }>("redeem_minigame", {
-                p_idem_key: crypto.randomUUID(),
-                p_step_id: redeemStep.id,
-                p_payload: {
-                  answer: result.answer,
-                  score: result.score,
-                  duration_ms: result.durationMs,
-                },
-              });
+              const res = await rpc<{ ok: boolean; correct?: boolean; error?: string; blocking_title?: string }>(
+                "redeem_minigame",
+                {
+                  p_idem_key: crypto.randomUUID(),
+                  p_step_id: redeemStep.id,
+                  p_payload: {
+                    answer: result.answer,
+                    score: result.score,
+                    duration_ms: result.durationMs,
+                  },
+                }
+              );
               if (res.correct) {
                 sfx.success();
                 haptics.success();
-                showToast("💪 Mini-jeu rattrapé — pénalité annulée !", "success");
+                showToast("💪 Mini-jeu rattrapé !", "success");
                 setRedeemStep(null);
                 await refetch();
+                return true;
+              }
+              if (res.error === "GROUPE_ORDRE") {
+                showToast(
+                  `⛓️ Rattrapez d'abord « ${res.blocking_title ?? "l'épreuve précédente"} » — le groupe se joue dans l'ordre !`,
+                  "error"
+                );
+                setRedeemStep(null);
                 return true;
               }
               return false;
@@ -545,6 +577,14 @@ export default function GameScreen() {
               return false;
             }
           }}
+        />
+      )}
+      {redeemStep && redeemStep.type !== "minigame" && (
+        <RedeemModal
+          step={redeemStep}
+          gameId={game.id}
+          onClose={() => setRedeemStep(null)}
+          onDone={refetch}
         />
       )}
 

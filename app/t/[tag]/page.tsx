@@ -16,6 +16,7 @@ import Spinner from "@/components/ui/Spinner";
 type ScanState =
   | "loading"
   | "success"
+  | "redeemed"
   | "wrong"
   | "already"
   | "notjoined"
@@ -29,6 +30,8 @@ interface TagResult {
   correct?: boolean;
   already?: boolean;
   finished?: boolean;
+  /** Balise d'une épreuve sautée : le scan l'a rattrapée */
+  redeemed?: boolean;
   error?: string;
   game_code?: string;
   test_mode?: boolean;
@@ -66,6 +69,10 @@ export default function TagScanPage() {
         if (res.test_mode) {
           setTestTitle(res.step_title ?? "");
           setState("test");
+          sfx.success();
+          haptics.success();
+        } else if (res.redeemed && res.correct) {
+          setState("redeemed");
           sfx.success();
           haptics.success();
         } else if (res.correct && !res.already) {
@@ -171,6 +178,11 @@ export default function TagScanPage() {
     text: string;
     danger?: boolean;
   }> = {
+    redeemed: {
+      icon: "💪",
+      title: "ÉPREUVE RATTRAPÉE !",
+      text: "Cette balise sautée est maintenant validée — bien joué d'être revenus ! Retour à votre énigme en cours.",
+    },
     wrong: {
       icon: "🙅",
       title: "MAUVAISE BALISE !",

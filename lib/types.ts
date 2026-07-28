@@ -64,6 +64,9 @@ export interface StepContent {
   /** Pénalité si l'équipe passe cette étape (surcharge le réglage global de la partie) */
   skip_penalty_sec?: number;   // mode chrono : minutes ajoutées ×60
   skip_penalty_points?: number; // mode points : points retirés
+  /** L'épreuve peut être sautée PUIS rattrapée plus tard — la pénalité du skip
+      reste due, seul le gain de l'étape revient (défaut : vrai pour les mini-jeux) */
+  redeemable?: boolean;
   /** Balise GPS : "compass" (boussole + distance live) ou "hotcold" (distance seule) */
   gps_guidance?: "compass" | "hotcold";
   /** Chaud/froid : 6 seuils en m (FROID→BRÛLANT, décroissants ; au-delà = glacial) */
@@ -159,6 +162,8 @@ export interface TeamRoute {
   validated_at: string | null;
   skipped: boolean;
   timed_out: boolean;
+  /** Épreuve sautée puis rattrapée (skipped reste vrai : pénalité conservée) */
+  redeemed_at?: string | null;
 }
 
 export interface GameEvent {
@@ -215,6 +220,8 @@ export interface PublicStep {
   is_common: boolean;
   /** Optionnel tant que le SQL n'est pas ré-appliqué */
   is_start?: boolean;
+  /** Groupe d'enchaînement : un skip saute tout le groupe restant */
+  chain_group?: string | null;
   points: number;
   time_limit_sec: number | null;
   /** Balise GPS en mode boussole : cible révélée pour l'étape courante uniquement */
@@ -251,9 +258,22 @@ export interface PlayState {
     hints: HintMeta[];
     submission: { status: Submission["status"]; url: string } | null;
   } | null;
-  /** Mini-jeux passés, rattrapables pour annuler la pénalité */
+  /** Compat ancien SQL : mini-jeux passés à rattraper */
   skipped_minigames: { id: string; title: string; content: StepContent }[];
+  /** Épreuves sautées rattrapables (tous types) — absent tant que le SQL n'est pas ré-appliqué */
+  skipped_steps?: SkippedStep[];
   finished: boolean;
+}
+
+/** Épreuve sautée, à rattraper plus tard (la pénalité du skip reste due). */
+export interface SkippedStep {
+  id: string;
+  title: string;
+  type: StepType;
+  content: StepContent;
+  media_urls: string[];
+  /** Balise GPS en mode boussole : cible révélée pour le rattrapage */
+  gps_target?: { lat: number; lng: number; radius: number } | null;
 }
 
 export interface RankedTeam {

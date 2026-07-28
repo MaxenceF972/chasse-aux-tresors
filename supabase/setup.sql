@@ -141,6 +141,10 @@ create table if not exists public.team_routes (
 
 alter table public.team_routes add column if not exists skipped boolean not null default false;
 alter table public.team_routes add column if not exists timed_out boolean not null default false;
+-- Rattrapage d'une épreuve sautée : date de réussite (null = pas encore rattrapée).
+-- `skipped` reste vrai à jamais : la pénalité du skip est définitive, seul le
+-- gain de l'étape revient au rattrapage.
+alter table public.team_routes add column if not exists redeemed_at timestamptz;
 
 create table if not exists public.events (
   id         bigint generated always as identity primary key,
@@ -978,6 +982,8 @@ begin
         'content', v_step.content, 'media_urls', to_jsonb(v_step.media_urls),
         'is_final', v_step.is_final, 'is_common', v_step.is_common_checkpoint,
         'is_start', v_step.is_start,
+        -- Groupe d'enchaînement : le client prévient qu'un skip saute tout le groupe
+        'chain_group', nullif(trim(coalesce(v_step.chain_group, '')), ''),
         'points', v_step.points, 'time_limit_sec', v_step.time_limit_sec,
         -- Balise GPS en mode boussole : on révèle la cible de l'étape EN COURS
         -- uniquement (il faut de toute façon s'y rendre physiquement).
@@ -1013,14 +1019,36 @@ begin
                                'final_time_ms', v_team.final_time_ms),
     'progress', jsonb_build_object('done', v_done, 'total', v_total),
     'current', v_current,
-    -- Seuls les MINI-JEUX passés sont rattrapables (une balise/photo passée
-    -- est définitive) → on ne liste que ceux-là dans « à rattraper ».
+    -- Compat ancien client : les mini-jeux à rattraper (ancien format)
     'skipped_minigames', coalesce((
       select jsonb_agg(jsonb_build_object('id', s.id, 'title', s.title, 'content', s.content)
                        order by tr.position)
       from public.team_routes tr
       join public.steps s on s.id = tr.step_id
-      where tr.team_id = v_team.id and tr.skipped and s.type = 'minigame'
+      where tr.team_id = v_team.id and tr.skipped and tr.redeemed_at is null
+        and s.type = 'minigame'
+        and coalesce((s.content->>'redeemable')::boolean, true)
+    ), '[]'::jsonb),
+    -- Épreuves sautées et rattrapables (tous types, réglage par étape ;
+    -- défaut : les mini-jeux). Cible GPS révélée pour le mode boussole —
+    -- comme pour l'étape courante, il faut de toute façon s'y rendre.
+    'skipped_steps', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'id', s.id, 'title', s.title, 'type', s.type, 'content', s.content,
+               'media_urls', to_jsonb(s.media_urls),
+               'gps_target', case
+                 when s.type = 'gps'
+                      and coalesce(s.content->>'gps_guidance', 'compass') <> 'hotcold'
+                      and sec.gps_lat is not null and sec.gps_lng is not null
+                 then jsonb_build_object('lat', sec.gps_lat, 'lng', sec.gps_lng,
+                                         'radius', coalesce(sec.gps_radius_m, 30))
+                 else null end
+             ) order by tr.position)
+      from public.team_routes tr
+      join public.steps s on s.id = tr.step_id
+      left join public.step_secrets sec on sec.step_id = s.id
+      where tr.team_id = v_team.id and tr.skipped and tr.redeemed_at is null
+        and coalesce((s.content->>'redeemable')::boolean, s.type = 'minigame')
     ), '[]'::jsonb),
     'finished', (v_total > 0 and v_done = v_total)
   );
@@ -1218,6 +1246,7 @@ declare
   v_tag    text;
   v_test_title text;
   v_test_code  text;
+  v_redeem_id  uuid;
 begin
   -- Mode test organisateur : scanner sa propre balise la vérifie sans rien valider
   v_tag := regexp_replace(trim(coalesce(p_tag, '')), '^https?://[^/]+/t/', '');
@@ -1238,6 +1267,22 @@ begin
   end if;
   select * into v_team from public.teams where id = v_player.team_id;
   select * into v_game from public.games where id = v_team.game_id;
+
+  -- Balise d'une épreuve SAUTÉE et rattrapable : le scan la rattrape direct
+  select tr.step_id into v_redeem_id
+  from public.team_routes tr
+  join public.steps s on s.id = tr.step_id
+  join public.step_secrets sec on sec.step_id = s.id
+  where tr.team_id = v_team.id and tr.skipped and tr.redeemed_at is null
+    and s.type = 'nfc'
+    and coalesce((s.content->>'redeemable')::boolean, false)
+    and (sec.nfc_tag_id = v_tag
+         or (sec.manual_code is not null and upper(v_tag) = upper(sec.manual_code)))
+  limit 1;
+  if found then
+    return public.redeem_step(p_idem_key, v_redeem_id, jsonb_build_object('tag', p_tag))
+           || jsonb_build_object('game_code', v_game.code, 'redeemed', true);
+  end if;
 
   select * into v_route from public.team_routes
   where team_id = v_team.id and status = 'current' limit 1;
@@ -1350,9 +1395,14 @@ begin
     return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT');
   end if;
 
+  -- Étape courante, ou épreuve sautée rattrapable (thermomètre du rattrapage)
   if not exists (
-    select 1 from public.team_routes
-    where team_id = v_team_id and step_id = p_step_id and status = 'current'
+    select 1 from public.team_routes tr
+    join public.steps s on s.id = tr.step_id
+    where tr.team_id = v_team_id and tr.step_id = p_step_id
+      and (tr.status = 'current'
+           or (tr.skipped and tr.redeemed_at is null
+               and coalesce((s.content->>'redeemable')::boolean, false)))
   ) then
     return jsonb_build_object('ok', false, 'error', 'ETAPE_INVALIDE');
   end if;
@@ -1605,7 +1655,10 @@ begin
         coalesce((
           select sum(
             case
-              when tr.timed_out or tr.skipped then 0
+              when tr.timed_out then 0
+              -- Sautée et jamais rattrapée = 0 ; rattrapée = points regagnés
+              -- (la pénalité de skip, elle, reste déduite plus bas)
+              when tr.skipped and tr.redeemed_at is null then 0
               when s.type = 'photo' and (
                 select sub.status from public.submissions sub
                 where sub.team_id = t.id and sub.step_id = s.id
@@ -1744,7 +1797,10 @@ end $$;
 -- Passe l'étape en cours (bloqué sur le terrain) : l'équipe avance et subit
 -- la pénalité de skip PROPRE À L'ÉTAPE (content.skip_penalty_sec/points) ou,
 -- à défaut, le réglage global de la partie. Fonctionne pour TOUS les types.
--- Les mini-jeux passés restent rattrapables (redeem_minigame).
+-- Étape d'un GROUPE (chain_group) : c'est tout le reste du groupe qui saute
+-- d'un bloc (une pénalité par épreuve) — un groupe ne se saute jamais à moitié.
+-- Les épreuves marquées « rattrapables » (content.redeemable, défaut : les
+-- mini-jeux) restent jouables plus tard via redeem_step.
 create or replace function public.skip_step(p_step_id uuid)
 returns jsonb
 language plpgsql volatile security definer
@@ -1757,8 +1813,12 @@ declare
   v_route  public.team_routes%rowtype;
   v_step   public.steps%rowtype;
   v_next   public.team_routes%rowtype;
+  v_grp    text;
+  v_r      record;
   v_finished boolean := false;
   v_pen    int;
+  v_total_pen int := 0;
+  v_count  int := 0;
 begin
   select * into v_player from public.players where auth_uid = auth.uid();
   if not found then return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT'); end if;
@@ -1773,17 +1833,40 @@ begin
   if not found then return jsonb_build_object('ok', false, 'error', 'ETAPE_INVALIDE'); end if;
 
   select * into v_step from public.steps where id = p_step_id;
+  v_grp := nullif(trim(coalesce(v_step.chain_group, '')), '');
 
-  update public.team_routes set status = 'done', validated_at = now(), skipped = true
-  where id = v_route.id;
+  -- L'étape courante + tout le reste de son groupe éventuel, dans l'ordre
+  for v_r in
+    select tr.id as route_id, s.id as sid, s.title, s.type, s.content
+    from public.team_routes tr
+    join public.steps s on s.id = tr.step_id
+    where tr.team_id = v_team.id
+      and tr.status in ('current', 'locked')
+      and (tr.step_id = p_step_id
+           or (v_grp is not null and nullif(trim(coalesce(s.chain_group, '')), '') = v_grp))
+    order by tr.position
+  loop
+    update public.team_routes set status = 'done', validated_at = now(), skipped = true
+    where id = v_r.route_id;
+    v_count := v_count + 1;
 
-  -- Mode chrono : pénalité de temps appliquée tout de suite (par étape ou globale).
-  if coalesce(v_game.settings->>'scoring', 'time') = 'time' then
-    v_pen := coalesce((v_step.content->>'skip_penalty_sec')::int,
-                      (v_game.settings->>'skip_penalty_sec')::int, 180);
-    update public.teams set penalty_seconds = penalty_seconds + v_pen where id = v_team.id;
+    -- Mode chrono : pénalité de temps PAR épreuve sautée (propre ou globale).
+    if coalesce(v_game.settings->>'scoring', 'time') = 'time' then
+      v_pen := coalesce((v_r.content->>'skip_penalty_sec')::int,
+                        (v_game.settings->>'skip_penalty_sec')::int, 180);
+      v_total_pen := v_total_pen + v_pen;
+    end if;
+    -- Mode points : la pénalité est soustraite dans get_ranking (par étape).
+
+    insert into public.events (game_id, team_id, type, payload)
+    values (v_game.id, v_team.id, 'step_skipped',
+            jsonb_build_object('step_id', v_r.sid, 'step_title', v_r.title,
+                               'step_type', v_r.type, 'chain_group', v_grp));
+  end loop;
+
+  if v_total_pen > 0 then
+    update public.teams set penalty_seconds = penalty_seconds + v_total_pen where id = v_team.id;
   end if;
-  -- Mode points : la pénalité est soustraite dans get_ranking (par étape).
 
   select * into v_next from public.team_routes
   where team_id = v_team.id and status = 'locked' order by position limit 1;
@@ -1798,11 +1881,7 @@ begin
     values (v_game.id, v_team.id, 'team_finished');
   end if;
 
-  insert into public.events (game_id, team_id, type, payload)
-  values (v_game.id, v_team.id, 'step_skipped',
-          jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title, 'step_type', v_step.type));
-
-  return jsonb_build_object('ok', true, 'finished', v_finished);
+  return jsonb_build_object('ok', true, 'finished', v_finished, 'skipped_count', v_count);
 end $$;
 
 -- Compat : ancien nom, délègue à skip_step.
@@ -1815,8 +1894,13 @@ begin
   return public.skip_step(p_step_id);
 end $$;
 
--- Rattrape un mini-jeu passé : succès = la pénalité saute et les points reviennent.
-create or replace function public.redeem_minigame(p_idem_key uuid, p_step_id uuid, p_payload jsonb default '{}'::jsonb)
+-- Rattrape une épreuve sautée (marquée « rattrapable » par l'organisateur —
+-- défaut : les mini-jeux). Validation selon le type : réponse (texte,
+-- mini-jeu à réponse), balise (NFC/code), position (GPS), photo (envoyée en
+-- revue). La PÉNALITÉ du skip reste acquise : seul le gain de l'étape revient
+-- (ses points en mode points, la photo jugée). Les épreuves d'un groupe se
+-- rattrapent dans l'ordre du groupe.
+create or replace function public.redeem_step(p_idem_key uuid, p_step_id uuid, p_payload jsonb default '{}'::jsonb)
 returns jsonb
 language plpgsql volatile security definer
 set search_path = public, extensions
@@ -1829,6 +1913,10 @@ declare
   v_route  public.team_routes%rowtype;
   v_step   public.steps%rowtype;
   v_secret public.step_secrets%rowtype;
+  v_grp    text;
+  v_blocking text;
+  v_submitted text;
+  v_dist   double precision;
   v_ok     boolean := false;
   v_result jsonb;
 begin
@@ -1846,50 +1934,113 @@ begin
   end if;
 
   select * into v_route from public.team_routes
-  where team_id = v_team.id and step_id = p_step_id and skipped for update;
+  where team_id = v_team.id and step_id = p_step_id and skipped and redeemed_at is null
+  for update;
   if not found then return jsonb_build_object('ok', false, 'error', 'PAS_EN_RATTRAPAGE'); end if;
 
   select * into v_step from public.steps where id = p_step_id;
   select * into v_secret from public.step_secrets where step_id = p_step_id;
-  if coalesce(array_length(v_secret.answers, 1), 0) > 0 then
+
+  if not coalesce((v_step.content->>'redeemable')::boolean, v_step.type = 'minigame') then
+    return jsonb_build_object('ok', false, 'error', 'PAS_RATTRAPABLE');
+  end if;
+
+  -- Groupe d'épreuves liées : rattrapage dans l'ordre du groupe uniquement
+  v_grp := nullif(trim(coalesce(v_step.chain_group, '')), '');
+  if v_grp is not null then
+    select s.title into v_blocking
+    from public.team_routes tr
+    join public.steps s on s.id = tr.step_id
+    where tr.team_id = v_team.id and tr.skipped and tr.redeemed_at is null
+      and nullif(trim(coalesce(s.chain_group, '')), '') = v_grp
+      and tr.position < v_route.position
+      and coalesce((s.content->>'redeemable')::boolean, s.type = 'minigame')
+    order by tr.position limit 1;
+    if found then
+      return jsonb_build_object('ok', false, 'error', 'GROUPE_ORDRE', 'blocking_title', v_blocking);
+    end if;
+  end if;
+
+  if v_step.type = 'text' then
     v_ok := exists (
-      select 1 from unnest(v_secret.answers) a
+      select 1 from unnest(coalesce(v_secret.answers, '{}')) a
       where public.normalize_answer(a) <> ''
         and public.normalize_answer(a) = public.normalize_answer(p_payload->>'answer')
     );
-  else
+  elsif v_step.type = 'nfc' then
+    v_submitted := regexp_replace(trim(coalesce(p_payload->>'tag', '')), '^https?://[^/]+/t/', '');
+    v_ok := (v_secret.nfc_tag_id is not null and v_submitted = v_secret.nfc_tag_id)
+         or (v_secret.manual_code is not null and upper(v_submitted) = upper(v_secret.manual_code));
+  elsif v_step.type = 'gps' then
+    if v_secret.gps_lat is not null and v_secret.gps_lng is not null
+       and (p_payload->>'lat') is not null and (p_payload->>'lng') is not null then
+      v_dist := public.gps_distance_m(
+        (p_payload->>'lat')::double precision, (p_payload->>'lng')::double precision,
+        v_secret.gps_lat, v_secret.gps_lng);
+      v_ok := v_dist <= coalesce(v_secret.gps_radius_m, 30);
+    end if;
+  elsif v_step.type = 'minigame' then
+    if coalesce(array_length(v_secret.answers, 1), 0) > 0 then
+      v_ok := exists (
+        select 1 from unnest(v_secret.answers) a
+        where public.normalize_answer(a) <> ''
+          and public.normalize_answer(a) = public.normalize_answer(p_payload->>'answer')
+      );
+    else
+      v_ok := true;
+    end if;
+  elsif v_step.type = 'photo' then
+    -- La photo part en revue organisateur, comme sur l'épreuve normale
+    -- (refusée = 0 point sur l'étape, get_ranking s'en charge déjà).
+    if p_payload->>'url' is null or (p_payload->>'url') !~ '^https?://' then
+      return jsonb_build_object('ok', false, 'error', 'URL_INVALIDE');
+    end if;
+    insert into public.submissions (game_id, team_id, step_id, url)
+    values (v_game.id, v_team.id, p_step_id, p_payload->>'url');
+    insert into public.events (game_id, team_id, type, payload)
+    values (v_game.id, v_team.id, 'photo_submitted',
+            jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title,
+                               'url', p_payload->>'url', 'redeem', true));
     v_ok := true;
   end if;
 
   if not v_ok then
     v_result := jsonb_build_object('ok', true, 'correct', false);
+    if v_step.type = 'gps' and v_dist is not null then
+      v_result := v_result || jsonb_build_object('distance_m', round(v_dist));
+    end if;
     insert into public.events (game_id, team_id, type, payload, idem_key)
     values (v_game.id, v_team.id, 'wrong_answer',
-            jsonb_build_object('step_id', p_step_id, 'kind', 'redeem', 'result', v_result), p_idem_key);
+            jsonb_build_object('step_id', p_step_id, 'kind', 'redeem',
+                               'step_title', v_step.title, 'result', v_result), p_idem_key);
     return v_result;
   end if;
 
-  update public.team_routes set skipped = false where id = v_route.id;
-  if coalesce(v_game.settings->>'scoring', 'time') = 'time' then
-    -- On retire exactement la pénalité de skip appliquée (par étape ou globale)
-    -- — PAS de plancher à 0 : une pénalité négative est un bonus temps légitime.
-    update public.teams
-    set penalty_seconds = penalty_seconds - coalesce((v_step.content->>'skip_penalty_sec')::int,
-                                                     (v_game.settings->>'skip_penalty_sec')::int, 180)
-    where id = v_team.id;
+  -- Rattrapée ! `skipped` reste vrai (la pénalité du skip est conservée).
+  update public.team_routes set redeemed_at = now() where id = v_route.id;
+  if v_step.type = 'minigame' then
+    insert into public.minigame_results (game_id, team_id, step_id, score, duration_ms)
+    values (v_game.id, v_team.id, p_step_id,
+            nullif(p_payload->>'score', '')::numeric, nullif(p_payload->>'duration_ms', '')::int)
+    on conflict (team_id, step_id) do nothing;
   end if;
-  insert into public.minigame_results (game_id, team_id, step_id, score, duration_ms)
-  values (v_game.id, v_team.id, p_step_id,
-          nullif(p_payload->>'score', '')::numeric, nullif(p_payload->>'duration_ms', '')::int)
-  on conflict (team_id, step_id) do nothing;
 
   v_result := jsonb_build_object('ok', true, 'correct', true);
   insert into public.events (game_id, team_id, type, payload, idem_key)
-  values (v_game.id, v_team.id, 'minigame_redeemed',
-          jsonb_build_object('step_id', p_step_id,
-                             'step_title', (select title from public.steps where id = p_step_id),
-                             'result', v_result), p_idem_key);
+  values (v_game.id, v_team.id, 'step_redeemed',
+          jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title,
+                             'step_type', v_step.type, 'result', v_result), p_idem_key);
   return v_result;
+end $$;
+
+-- Compat ancien client : le rattrapage mini-jeu délègue au rattrapage générique.
+create or replace function public.redeem_minigame(p_idem_key uuid, p_step_id uuid, p_payload jsonb default '{}'::jsonb)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+begin
+  return public.redeem_step(p_idem_key, p_step_id, p_payload);
 end $$;
 
 -- Timer d'étape expiré : passage sans pénalité (0 point sur l'étape).
@@ -2037,7 +2188,8 @@ begin
     'get_lobby(text)', 'create_team(text,text,text,text[])', 'join_team(text,uuid,text)',
     'join_by_team_code(text,text,text)', 'get_play_state()', 'get_next_media()', 'get_ranking(text)',
     'validate_step(uuid,uuid,text,jsonb)', 'validate_tag(uuid,text)', 'unlock_hint(uuid,int)',
-    'skip_minigame(uuid)', 'skip_step(uuid)', 'redeem_minigame(uuid,uuid,jsonb)', 'skip_step_timeout(uuid)',
+    'skip_minigame(uuid)', 'skip_step(uuid)', 'redeem_minigame(uuid,uuid,jsonb)',
+    'redeem_step(uuid,uuid,jsonb)', 'skip_step_timeout(uuid)',
     'send_team_message(text)',
     'report_position(double precision,double precision)', 'submit_photo(uuid,text)',
     'gps_ping(uuid,double precision,double precision)',
