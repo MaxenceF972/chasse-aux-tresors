@@ -13,7 +13,7 @@ const RULES = [
   {
     icon: "🏷️",
     title: "Scanne les balises",
-    text: "Sur place, touche 📷 SCANNER LA BALISE dans l'app et vise le QR — ou pose ton téléphone sur la puce NFC. Balise abîmée ? Saisis le code imprimé.",
+    text: "Sur place, pose ton téléphone sur la puce NFC — ou scanne le QR avec l'appareil photo. Balise abîmée ? Saisis le code imprimé.",
   },
   {
     icon: "🧩",

@@ -10,12 +10,8 @@ import { frError, rpc } from "@/lib/supabase/client";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import { showToast } from "@/components/ui/Toaster";
-import dynamic from "next/dynamic";
 import GpsCompass from "./GpsCompass";
 import GpsHotCold from "./GpsHotCold";
-
-// Chargé à la demande : jsQR (~45 kB) ne pèse pas sur l'ouverture de l'écran de jeu
-const QrScanner = dynamic(() => import("./QrScanner"), { ssr: false });
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
@@ -144,17 +140,7 @@ function NfcValidation({
   const [nfcError, setNfcError] = useState<string | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualCode, setManualCode] = useState("");
-  const [qrOpen, setQrOpen] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-
-  // QR décodé dans l'app : on valide sans jamais quitter l'écran de jeu
-  async function handleQrScan(raw: string) {
-    setQrOpen(false);
-    const outcome = await onRun("qr", { tag: extractTagId(raw) });
-    if (outcome.status === "wrong") {
-      setNfcError("🙅 Ce n'est pas la balise de VOTRE étape — chaque équipe suit sa propre route !");
-    }
-  }
 
   useEffect(() => {
     setNfcSupported("NDEFReader" in window);
@@ -226,41 +212,17 @@ function NfcValidation({
             📡 POSITIONNE TON TÉLÉPHONE SUR LA BALISE
           </Button>
         ))}
-      {/* iPhone (pas de Web NFC) : le scan caméra intégré est le geste principal —
-          tout se passe dans l'app, aucune page Safari ne s'ouvre. */}
       {!nfcSupported && (
-        <>
-          <Button
-            full
-            size="xl"
-            onClick={() => {
-              setNfcError(null);
-              setQrOpen(true);
-            }}
-            disabled={disabled}
-          >
-            📷 SCANNER LA BALISE
-          </Button>
-          <p className="text-center font-bold text-ink/55 text-sm">
-            Vise le QR imprimé sur la balise — ou pose le haut du téléphone sur la
-            puce NFC, écran allumé (la validation s&apos;ouvre alors dans le navigateur).
+        <div className="rounded-xl border-[3px] border-ink bg-gold px-4 py-4 text-center">
+          <div className="text-3xl mb-1 animate-pulse">📡</div>
+          <p className="font-display text-lg leading-tight">
+            POSITIONNE TON TÉLÉPHONE SUR LA BALISE
           </p>
-        </>
-      )}
-      {/* Android : le NFC in-app est déjà là, la caméra devient le plan B */}
-      {nfcSupported && (
-        <Button
-          full
-          size="md"
-          variant="outline"
-          onClick={() => {
-            setNfcError(null);
-            setQrOpen(true);
-          }}
-          disabled={disabled}
-        >
-          📷 SCANNER LE QR À LA CAMÉRA
-        </Button>
+          <p className="font-bold text-ink/60 text-sm mt-1">
+            Colle le haut du téléphone sur la balise, écran allumé : la validation
+            s&apos;ouvre toute seule !
+          </p>
+        </div>
       )}
       {nfcError && (
         <p className="text-center font-bold text-crimson text-sm rounded-xl border-2 border-crimson/40 bg-crimson/5 px-3 py-2">
@@ -276,8 +238,6 @@ function NfcValidation({
       >
         🔢 BALISE ABÎMÉE ? SAISIR SON CODE
       </Button>
-
-      {qrOpen && <QrScanner onScan={handleQrScan} onClose={() => setQrOpen(false)} />}
 
       <Dialog open={manualOpen} onClose={() => setManualOpen(false)} title="🔢 Code de la balise">
         <form onSubmit={submitManual} className="space-y-4">

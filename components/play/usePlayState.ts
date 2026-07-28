@@ -145,8 +145,14 @@ export function usePlayState(expectedCode?: string) {
       })();
     };
     const onOffline = () => setOffline(true);
+    // Retour sur l'onglet (les scans NFC iPhone ouvrent de nouveaux onglets :
+    // chaque onglet du jeu doit être à jour dès qu'on revient dessus)
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) void onOnline();
+    };
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
+    document.addEventListener("visibilitychange", onVisible);
     // filet de sécurité : retente régulièrement s'il reste des validations en attente
     const interval = setInterval(() => {
       if (navigator.onLine) void onOnline();
@@ -154,6 +160,7 @@ export function usePlayState(expectedCode?: string) {
     return () => {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
+      document.removeEventListener("visibilitychange", onVisible);
       clearInterval(interval);
     };
   }, [refetch, refreshPending]);
