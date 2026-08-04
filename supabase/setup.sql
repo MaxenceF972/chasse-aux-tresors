@@ -142,8 +142,8 @@ create table if not exists public.team_routes (
 alter table public.team_routes add column if not exists skipped boolean not null default false;
 alter table public.team_routes add column if not exists timed_out boolean not null default false;
 -- Rattrapage d'une épreuve sautée : date de réussite (null = pas encore rattrapée).
--- `skipped` reste vrai à jamais : la pénalité du skip est définitive, seul le
--- gain de l'étape revient au rattrapage.
+-- `skipped` reste vrai (trace historique) ; un rattrapage réussi rend le gain
+-- de l'étape ET annule la pénalité du skip.
 alter table public.team_routes add column if not exists redeemed_at timestamptz;
 
 create table if not exists public.events (
@@ -1675,7 +1675,8 @@ begin
                       (v_game.settings->>'skip_penalty_points')::int, 50)), 0)
            from public.team_routes tr
            join public.steps s on s.id = tr.step_id
-           where tr.team_id = t.id and tr.skipped)
+           -- rattrapée = pénalité de skip annulée
+           where tr.team_id = t.id and tr.skipped and tr.redeemed_at is null)
         - floor(t.penalty_seconds / 60.0) * 10
         + t.bonus_points,
       'bonus_points', t.bonus_points,
@@ -1897,8 +1898,8 @@ end $$;
 -- Rattrape une épreuve sautée (marquée « rattrapable » par l'organisateur —
 -- défaut : les mini-jeux). Validation selon le type : réponse (texte,
 -- mini-jeu à réponse), balise (NFC/code), position (GPS), photo (envoyée en
--- revue). La PÉNALITÉ du skip reste acquise : seul le gain de l'étape revient
--- (ses points en mode points, la photo jugée). Les épreuves d'un groupe se
+-- revue). Réussir ANNULE la pénalité du skip et rend le gain de l'étape —
+-- le détour sur le terrain est le vrai prix. Les épreuves d'un groupe se
 -- rattrapent dans l'ordre du groupe.
 create or replace function public.redeem_step(p_idem_key uuid, p_step_id uuid, p_payload jsonb default '{}'::jsonb)
 returns jsonb
@@ -2016,8 +2017,17 @@ begin
     return v_result;
   end if;
 
-  -- Rattrapée ! `skipped` reste vrai (la pénalité du skip est conservée).
+  -- Rattrapée ! La pénalité du skip saute : temps rendu ici, points recomptés
+  -- par get_ranking (`skipped` reste vrai comme trace historique).
   update public.team_routes set redeemed_at = now() where id = v_route.id;
+  if coalesce(v_game.settings->>'scoring', 'time') = 'time' then
+    -- On retire exactement la pénalité appliquée au skip (par étape ou globale)
+    -- — PAS de plancher à 0 : une pénalité négative est un bonus temps légitime.
+    update public.teams
+    set penalty_seconds = penalty_seconds - coalesce((v_step.content->>'skip_penalty_sec')::int,
+                                                     (v_game.settings->>'skip_penalty_sec')::int, 180)
+    where id = v_team.id;
+  end if;
   if v_step.type = 'minigame' then
     insert into public.minigame_results (game_id, team_id, step_id, score, duration_ms)
     values (v_game.id, v_team.id, p_step_id,

@@ -168,7 +168,7 @@ export default function GameScreen() {
           ? `Cette épreuve fait partie d'un groupe : c'est TOUT le reste du groupe qui sera passé (une pénalité par épreuve, ${currentSkipLabel} pour celle-ci).`
           : `Vous êtes bloqués ? Vous passez à la suite et perdez ${currentSkipLabel}.`,
         isRedeemable
-          ? "Vous pourrez revenir la rattraper plus tard — la pénalité, elle, restera due."
+          ? "Vous pourrez revenir la rattraper plus tard : réussie, la pénalité saute !"
           : "C'est définitif pour cette étape.",
       ].join(" "),
       confirmLabel: "Passer",
@@ -515,8 +515,7 @@ export default function GameScreen() {
         {!finished && skippedSteps.length > 0 && (
           <div className="mt-6 rounded-xl border-[3px] border-dashed border-crimson/50 p-3">
             <p className="font-display text-sm text-crimson mb-2">
-              ⏩ ÉPREUVES À RATTRAPER —{" "}
-              {isPoints ? "les réussir rend leurs points !" : "finissez la carte avec les honneurs !"}
+              ⏩ ÉPREUVES À RATTRAPER — les réussir annule leur pénalité de skip !
             </p>
             <div className="flex flex-wrap gap-2">
               {skippedSteps.map((skippedStep) => (
@@ -558,7 +557,7 @@ export default function GameScreen() {
               if (res.correct) {
                 sfx.success();
                 haptics.success();
-                showToast("💪 Mini-jeu rattrapé !", "success");
+                showToast("💪 Mini-jeu rattrapé — pénalité annulée !", "success");
                 setRedeemStep(null);
                 await refetch();
                 return true;

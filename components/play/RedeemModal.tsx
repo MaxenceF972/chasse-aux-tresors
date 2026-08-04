@@ -60,8 +60,8 @@ export default function RedeemModal({ step, gameId, onClose, onDone }: RedeemMod
         haptics.success();
         showToast(
           step.type === "photo"
-            ? "📸 Photo envoyée — le maître du jeu la jugera !"
-            : "💪 Épreuve rattrapée !",
+            ? "📸 Photo envoyée, pénalité annulée — le maître du jeu la jugera !"
+            : "💪 Épreuve rattrapée — pénalité annulée !",
           "success"
         );
         await onDone();
@@ -120,8 +120,8 @@ export default function RedeemModal({ step, gameId, onClose, onDone }: RedeemMod
     <Dialog open onClose={onClose} title={`⏩ ${step.title}`}>
       <div className="space-y-4">
         <p className="font-bold text-ink/55 text-sm">
-          Épreuve sautée — la rattraper maintenant ne coûte rien de plus (la pénalité du
-          skip est déjà comptée).
+          Épreuve sautée — la réussir maintenant <strong>annule sa pénalité de skip</strong> et
+          rend son gain. En avant !
         </p>
 
         {/* Médias et énoncé, comme sur l'épreuve d'origine */}

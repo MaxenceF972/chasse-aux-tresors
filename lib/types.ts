@@ -64,8 +64,8 @@ export interface StepContent {
   /** Pénalité si l'équipe passe cette étape (surcharge le réglage global de la partie) */
   skip_penalty_sec?: number;   // mode chrono : minutes ajoutées ×60
   skip_penalty_points?: number; // mode points : points retirés
-  /** L'épreuve peut être sautée PUIS rattrapée plus tard — la pénalité du skip
-      reste due, seul le gain de l'étape revient (défaut : vrai pour les mini-jeux) */
+  /** L'épreuve peut être sautée PUIS rattrapée plus tard — réussir le rattrapage
+      annule la pénalité du skip et rend le gain (défaut : vrai pour les mini-jeux) */
   redeemable?: boolean;
   /** Balise GPS : "compass" (boussole + distance live) ou "hotcold" (distance seule) */
   gps_guidance?: "compass" | "hotcold";

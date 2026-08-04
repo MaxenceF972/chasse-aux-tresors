@@ -181,7 +181,7 @@ export default function TagScanPage() {
     redeemed: {
       icon: "💪",
       title: "ÉPREUVE RATTRAPÉE !",
-      text: "Cette balise sautée est maintenant validée — bien joué d'être revenus ! Retour à votre énigme en cours.",
+      text: "Cette balise sautée est validée et sa pénalité annulée — bien joué d'être revenus ! Retour à votre énigme en cours.",
     },
     wrong: {
       icon: "🙅",

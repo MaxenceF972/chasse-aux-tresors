@@ -879,10 +879,9 @@ export default function StepEditor({
             />
             <span className="font-bold text-sm text-ink/85">
               <span className="font-display">↩️ Rattrapable après un skip</span> — l&apos;équipe
-              peut revenir finir cette épreuve plus tard. La pénalité du skip reste due ;
-              le rattrapage rend {scoring === "points" ? "les points de l'étape" : "l'épreuve réussie (photo jugée, mini-jeu compté…)"}.
-              Décochée = passer est définitif. Les épreuves d&apos;un groupe se rattrapent
-              dans l&apos;ordre du groupe.
+              peut revenir finir cette épreuve plus tard : réussie, la pénalité du skip est
+              annulée et le gain de l&apos;étape rendu. Décochée = passer est définitif.
+              Les épreuves d&apos;un groupe se rattrapent dans l&apos;ordre du groupe.
             </span>
           </label>
         </div>
