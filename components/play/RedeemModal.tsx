@@ -11,6 +11,7 @@ import { haptics } from "@/lib/game/haptics";
 import { showToast } from "@/components/ui/Toaster";
 import GpsCompass from "./GpsCompass";
 import GpsHotCold from "./GpsHotCold";
+import GpsSilent from "./GpsSilent";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
@@ -216,6 +217,17 @@ export default function RedeemModal({ step, gameId, onClose, onDone }: RedeemMod
                 onUpdate={(lat, lng) => {
                   livePos.current = { lat, lng };
                   setHasPos(true);
+                }}
+              />
+            ) : (step.content.gps_guidance ?? "compass") === "none" ? (
+              <GpsSilent
+                stepId={step.id}
+                onPosition={(lat, lng) => {
+                  livePos.current = { lat, lng };
+                  setHasPos(true);
+                }}
+                onWithin={(lat, lng) => {
+                  if (!busy) void send({ lat, lng });
                 }}
               />
             ) : (

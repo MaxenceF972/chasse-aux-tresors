@@ -985,11 +985,11 @@ begin
         -- Groupe d'enchaînement : le client prévient qu'un skip saute tout le groupe
         'chain_group', nullif(trim(coalesce(v_step.chain_group, '')), ''),
         'points', v_step.points, 'time_limit_sec', v_step.time_limit_sec,
-        -- Balise GPS en mode boussole : on révèle la cible de l'étape EN COURS
-        -- uniquement (il faut de toute façon s'y rendre physiquement).
+        -- Balise GPS en mode boussole UNIQUEMENT : on révèle la cible de l'étape
+        -- EN COURS (chaud/froid et « aucun indice » ne divulguent jamais rien).
         'gps_target', case
           when v_step.type = 'gps'
-               and coalesce(v_step.content->>'gps_guidance', 'compass') <> 'hotcold'
+               and coalesce(v_step.content->>'gps_guidance', 'compass') = 'compass'
                and v_secret.gps_lat is not null and v_secret.gps_lng is not null
           then jsonb_build_object('lat', v_secret.gps_lat, 'lng', v_secret.gps_lng,
                                   'radius', coalesce(v_secret.gps_radius_m, 30))
@@ -1038,7 +1038,7 @@ begin
                'media_urls', to_jsonb(s.media_urls),
                'gps_target', case
                  when s.type = 'gps'
-                      and coalesce(s.content->>'gps_guidance', 'compass') <> 'hotcold'
+                      and coalesce(s.content->>'gps_guidance', 'compass') = 'compass'
                       and sec.gps_lat is not null and sec.gps_lng is not null
                  then jsonb_build_object('lat', sec.gps_lat, 'lng', sec.gps_lng,
                                          'radius', coalesce(sec.gps_radius_m, 30))
@@ -1193,7 +1193,9 @@ begin
   if not v_ok then
     v_result := jsonb_build_object('ok', true, 'correct', false);
     -- Balise GPS : renvoyer la distance restante guide l'équipe sur le terrain
-    if v_step.type = 'gps' and v_dist is not null then
+    -- (sauf mode « aucun indice », qui ne divulgue jamais rien)
+    if v_step.type = 'gps' and v_dist is not null
+       and coalesce(v_step.content->>'gps_guidance', 'compass') <> 'none' then
       v_result := v_result || jsonb_build_object('distance_m', round(v_dist));
     end if;
     insert into public.events (game_id, team_id, type, payload, idem_key)
@@ -1389,6 +1391,7 @@ declare
   v_secret  public.step_secrets%rowtype;
   v_dist    double precision;
   v_radius  int;
+  v_guidance text;
 begin
   v_team_id := public.my_team_id();
   if v_team_id is null then
@@ -1415,6 +1418,14 @@ begin
 
   v_radius := coalesce(v_secret.gps_radius_m, 30);
   v_dist := public.gps_distance_m(p_lat, p_lng, v_secret.gps_lat, v_secret.gps_lng);
+
+  -- Mode « aucun indice » : on ne divulgue QUE l'arrivée — ni distance ni
+  -- rayon, même dans l'inspecteur réseau d'un petit malin.
+  select coalesce(s.content->>'gps_guidance', 'compass') into v_guidance
+  from public.steps s where s.id = p_step_id;
+  if v_guidance = 'none' then
+    return jsonb_build_object('ok', true, 'within', v_dist <= v_radius);
+  end if;
 
   return jsonb_build_object(
     'ok', true,
@@ -2007,7 +2018,8 @@ begin
 
   if not v_ok then
     v_result := jsonb_build_object('ok', true, 'correct', false);
-    if v_step.type = 'gps' and v_dist is not null then
+    if v_step.type = 'gps' and v_dist is not null
+       and coalesce(v_step.content->>'gps_guidance', 'compass') <> 'none' then
       v_result := v_result || jsonb_build_object('distance_m', round(v_dist));
     end if;
     insert into public.events (game_id, team_id, type, payload, idem_key)

@@ -110,7 +110,7 @@ export default function StepEditor({
   const [gpsLat, setGpsLat] = useState<string>(secrets?.gps_lat != null ? String(secrets.gps_lat) : "");
   const [gpsLng, setGpsLng] = useState<string>(secrets?.gps_lng != null ? String(secrets.gps_lng) : "");
   const [gpsRadius, setGpsRadius] = useState<string>(String(secrets?.gps_radius_m ?? 2));
-  const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold">(
+  const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold" | "none">(
     step?.content?.gps_guidance ?? "compass"
   );
   // 6 seuils chaud/froid (FROID→BRÛLANT), édités palier par palier
@@ -545,6 +545,20 @@ export default function StepEditor({
                   <span className="block text-xs font-bold text-ink/60">
                     Pas de flèche : un thermomètre chauffe (glacial → brûlant) avec la distance en
                     direct à mesure que l&apos;équipe approche. Plus mystérieux, plus de recherche.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setGpsGuidance("none")}
+                  className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                    gpsGuidance === "none" ? "bg-gold" : "bg-white"
+                  }`}
+                >
+                  <span className="font-display">🤫 Aucun indice (lieu secret)</span>
+                  <span className="block text-xs font-bold text-ink/60">
+                    Ni flèche ni thermomètre : c&apos;est ton énoncé qui mène au lieu (« rendez-vous
+                    au vieux lavoir… »). Sur place, la validation se fait toute seule — même la
+                    distance reste cachée.
                   </span>
                 </button>
               </div>

@@ -12,6 +12,7 @@ import { haptics } from "@/lib/game/haptics";
 import { showToast } from "@/components/ui/Toaster";
 import GpsCompass from "./GpsCompass";
 import GpsHotCold from "./GpsHotCold";
+import GpsSilent from "./GpsSilent";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
@@ -277,6 +278,7 @@ function GpsValidation({
   const [status, setStatus] = useState<string | null>(null);
   const livePos = useRef<{ lat: number; lng: number } | null>(null);
   const [liveDist, setLiveDist] = useState<number | null>(null);
+  const [silentReady, setSilentReady] = useState(false);
   const autoTried = useRef(false);
 
   async function submitPos(lat: number, lng: number) {
@@ -326,6 +328,39 @@ function GpsValidation({
             : within
               ? "🎯 VALIDER — VOUS Y ÊTES !"
               : "📍 VALIDER MA POSITION"}
+        </Button>
+        {status && (
+          <p className="text-center font-bold text-ink/75 text-sm rounded-xl border-2 border-ink/20 bg-white/60 px-3 py-2">
+            {status}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // Mode « aucun indice » : suivi silencieux, l'énigme mène au lieu et
+  // l'arrivée valide toute seule (bouton manuel en repli).
+  if ((step.content.gps_guidance ?? "compass") === "none") {
+    return (
+      <div className="space-y-3">
+        <GpsSilent
+          stepId={step.id}
+          onPosition={(lat, lng) => {
+            livePos.current = { lat, lng };
+            setSilentReady(true);
+          }}
+          onWithin={(lat, lng) => {
+            if (!checking) void submitPos(lat, lng);
+          }}
+        />
+        <Button
+          full
+          size="xl"
+          variant="gold"
+          disabled={disabled || checking || !silentReady}
+          onClick={() => livePos.current && submitPos(livePos.current.lat, livePos.current.lng)}
+        >
+          {checking ? "🛰️ VÉRIFICATION…" : "📍 ON EST SUR PLACE !"}
         </Button>
         {status && (
           <p className="text-center font-bold text-ink/75 text-sm rounded-xl border-2 border-ink/20 bg-white/60 px-3 py-2">

@@ -67,8 +67,9 @@ export interface StepContent {
   /** L'épreuve peut être sautée PUIS rattrapée plus tard — réussir le rattrapage
       annule la pénalité du skip et rend le gain (défaut : vrai pour les mini-jeux) */
   redeemable?: boolean;
-  /** Balise GPS : "compass" (boussole + distance live) ou "hotcold" (distance seule) */
-  gps_guidance?: "compass" | "hotcold";
+  /** Balise GPS : "compass" (boussole + distance live), "hotcold" (thermomètre)
+      ou "none" (aucun indice — validation silencieuse à l'arrivée) */
+  gps_guidance?: "compass" | "hotcold" | "none";
   /** Chaud/froid : 6 seuils en m (FROID→BRÛLANT, décroissants ; au-delà = glacial) */
   gps_hotcold_thresholds?: number[];
   /** Compat : ancienne portée unique (au-delà = glacial) — remplacée par les seuils */
