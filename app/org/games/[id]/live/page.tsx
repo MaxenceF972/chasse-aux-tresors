@@ -94,6 +94,8 @@ export default function LiveDashboardPage() {
   const [bonusTarget, setBonusTarget] = useState<{ teamId: string; teamName: string; reason: string } | null>(null);
   const [bonusAmount, setBonusAmount] = useState("50");
   const [bonusListOpen, setBonusListOpen] = useState(false);
+  // Tous les bonus de la partie (requête dédiée, hors fenêtre du journal)
+  const [bonusEvents, setBonusEvents] = useState<GameEvent[]>([]);
   // Modification d'un bonus existant : l'event d'origine est annulé au moment
   // de ré-attribuer le nouveau montant
   const [bonusEditEventId, setBonusEditEventId] = useState<number | null>(null);
@@ -102,7 +104,7 @@ export default function LiveDashboardPage() {
   const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
-    const [g, t, p, s, r, e, sub] = await Promise.all([
+    const [g, t, p, s, r, e, sub, bev] = await Promise.all([
       sb().from("games").select("*").eq("id", gameId).single(),
       sb().from("teams").select("*").eq("game_id", gameId).order("created_at"),
       sb().from("players").select("*").eq("game_id", gameId),
@@ -110,6 +112,9 @@ export default function LiveDashboardPage() {
       sb().from("team_routes").select("*").eq("game_id", gameId),
       sb().from("events").select("*").eq("game_id", gameId).order("id", { ascending: false }).limit(250),
       sb().from("submissions").select("*").eq("game_id", gameId).eq("status", "pending").order("created_at"),
+      // Bonus chargés à part : la fenêtre de 250 events du journal ne suffit
+      // pas sur une grosse partie, et la gestion doit TOUS les voir.
+      sb().from("events").select("*").eq("game_id", gameId).eq("type", "bonus_awarded").order("id", { ascending: false }),
     ]);
     if (g.data) {
       setGame(g.data as Game);
@@ -123,6 +128,7 @@ export default function LiveDashboardPage() {
     setRoutes((r.data as TeamRoute[]) ?? []);
     setEvents((e.data as GameEvent[]) ?? []);
     setSubmissions((sub.data as Submission[]) ?? []);
+    setBonusEvents((bev.data as GameEvent[]) ?? []);
   }, [gameId]);
 
   useEffect(() => {
@@ -627,9 +633,17 @@ export default function LiveDashboardPage() {
           </Button>
         )}
         {game.status !== "lobby" && (
-          <Button variant="parchment" disabled={busy} onClick={() => setStatsOpen(true)}>
-            📈 Stats
-          </Button>
+          <>
+            <Button variant="parchment" disabled={busy} onClick={() => setStatsOpen(true)}>
+              📈 Stats
+            </Button>
+            {/* Accessible aussi partie terminée : corriger les bonus après coup */}
+            <Button variant="parchment" disabled={busy} onClick={() => setBonusListOpen(true)}>
+              🎁 Bonus
+              {bonusEvents.filter((e) => !e.payload.revoked).length > 0 &&
+                ` (${bonusEvents.filter((e) => !e.payload.revoked).length})`}
+            </Button>
+          </>
         )}
         {(game.status === "running" || game.status === "paused") && (
           <>
@@ -1162,15 +1176,14 @@ export default function LiveDashboardPage() {
 
       {/* Dialog gestion des bonus : liste, annulation, modification */}
       <Dialog open={bonusListOpen} onClose={() => setBonusListOpen(false)} title="🎁 Bonus attribués">
-        {events.filter((e) => e.type === "bonus_awarded").length === 0 ? (
+        {bonusEvents.length === 0 ? (
           <p className="font-bold text-ink/60">
             Aucun bonus attribué pour l&apos;instant. Attribue-les depuis le classement ou les
             stats — tu pourras les annuler ou les modifier ici.
           </p>
         ) : (
           <div className="space-y-2">
-            {events
-              .filter((e) => e.type === "bonus_awarded")
+            {bonusEvents
               .map((ev) => {
                 const pts = Number(ev.payload.points ?? 0);
                 const sec = Number(ev.payload.seconds ?? 0);
@@ -1399,8 +1412,8 @@ export default function LiveDashboardPage() {
             }}
           >
             🎁 GÉRER LES BONUS ATTRIBUÉS
-            {events.some((e) => e.type === "bonus_awarded") &&
-              ` (${events.filter((e) => e.type === "bonus_awarded" && !e.payload.revoked).length})`}
+            {bonusEvents.length > 0 &&
+              ` (${bonusEvents.filter((e) => !e.payload.revoked).length})`}
           </Button>
           <p className="font-bold text-ink/70 text-sm">
             Balise cassée, lieu inaccessible ? Neutralise l&apos;étape : elle sera validée pour
