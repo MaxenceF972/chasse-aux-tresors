@@ -54,7 +54,14 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
       const pts = Number(e.payload.points ?? 0);
       const sec = Number(e.payload.seconds ?? 0);
       const amount = pts !== 0 ? `+${pts} pts` : `${sec > 0 ? "+" : "−"}${Math.abs(Math.round(sec / 60))} min`;
-      return `BONUS ${amount} pour « ${team} » — ${String(e.payload.reason ?? "")}`;
+      const revoked = e.payload.revoked ? " (annulé depuis)" : "";
+      return `BONUS ${amount} pour « ${team} » — ${String(e.payload.reason ?? "")}${revoked}`;
+    }
+    case "bonus_revoked": {
+      const pts = Number(e.payload.points ?? 0);
+      const sec = Number(e.payload.seconds ?? 0);
+      const amount = pts !== 0 ? `${pts} pts` : `${Math.abs(Math.round(sec / 60))} min`;
+      return `↩️ Bonus de ${amount} annulé pour « ${team} » — ${String(e.payload.reason ?? "")}`;
     }
     case "team_finished": return `🏆 « ${team} » a terminé le parcours !`;
     default: return `${e.type}`;
@@ -86,6 +93,10 @@ export default function LiveDashboardPage() {
   const [teamQuery, setTeamQuery] = useState("");
   const [bonusTarget, setBonusTarget] = useState<{ teamId: string; teamName: string; reason: string } | null>(null);
   const [bonusAmount, setBonusAmount] = useState("50");
+  const [bonusListOpen, setBonusListOpen] = useState(false);
+  // Modification d'un bonus existant : l'event d'origine est annulé au moment
+  // de ré-attribuer le nouveau montant
+  const [bonusEditEventId, setBonusEditEventId] = useState<number | null>(null);
   const sosRef = useRef<HTMLDivElement>(null);
   const photosRef = useRef<HTMLHeadingElement>(null);
   const { confirm, confirmDialog } = useConfirm();
@@ -401,6 +412,15 @@ export default function LiveDashboardPage() {
     const amount = Math.max(1, Math.round(Number(bonusAmount) || 0));
     if (!amount) return;
     try {
+      // Modification : on annule d'abord l'ancien bonus, puis on ré-attribue
+      if (bonusEditEventId != null) {
+        const res = await rpc<{ ok: boolean; error?: string }>("org_revoke_bonus", {
+          p_event_id: bonusEditEventId,
+        });
+        if (!res.ok && res.error !== "DEJA_ANNULE") {
+          throw new Error(res.error ?? "Annulation impossible");
+        }
+      }
       await rpc("org_award_bonus", {
         p_team_id: bonusTarget.teamId,
         p_points: isPoints ? amount : 0,
@@ -408,13 +428,44 @@ export default function LiveDashboardPage() {
         p_reason: bonusTarget.reason,
       });
       showToast(
-        `Bonus ${isPoints ? `+${amount} pts` : `−${amount} min`} attribué à « ${bonusTarget.teamName} »`,
+        `Bonus ${isPoints ? `+${amount} pts` : `−${amount} min`} ${
+          bonusEditEventId != null ? "modifié" : "attribué"
+        } pour « ${bonusTarget.teamName} »`,
         "success"
       );
       setBonusTarget(null);
+      setBonusEditEventId(null);
       await load();
     } catch (err) {
       showToast(`Bonus impossible : ${frError(err, "erreur")}`, "error");
+    }
+  }
+
+  // Annule un bonus depuis la liste « Bonus attribués »
+  async function revokeBonus(ev: GameEvent) {
+    const teamName = ev.team_id ? (teamMap.get(ev.team_id)?.name ?? "?") : "?";
+    const ok = await confirm({
+      title: "↩️ Annuler ce bonus ?",
+      message: `Le bonus de « ${teamName} » sera repris (montants reversés). L'opération reste visible dans le journal.`,
+      confirmLabel: "Annuler le bonus",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await rpc<{ ok: boolean; error?: string }>("org_revoke_bonus", {
+        p_event_id: ev.id,
+      });
+      if (!res.ok) {
+        showToast(
+          res.error === "DEJA_ANNULE" ? "Ce bonus est déjà annulé." : `Impossible : ${res.error}`,
+          "error"
+        );
+        return;
+      }
+      showToast(`↩️ Bonus annulé pour « ${teamName} »`, "success");
+      await load();
+    } catch (err) {
+      showToast(`Annulation impossible : ${frError(err, "erreur")}`, "error");
     }
   }
 
@@ -1067,8 +1118,11 @@ export default function LiveDashboardPage() {
       {/* Dialog Bonus : montant au choix — élevé pour passer au-dessus de Stats */}
       <Dialog
         open={!!bonusTarget}
-        onClose={() => setBonusTarget(null)}
-        title={`Bonus pour « ${bonusTarget?.teamName ?? ""} »`}
+        onClose={() => {
+          setBonusTarget(null);
+          setBonusEditEventId(null);
+        }}
+        title={`${bonusEditEventId != null ? "✏️ Modifier le bonus de" : "Bonus pour"} « ${bonusTarget?.teamName ?? ""} »`}
         elevated
       >
         {bonusTarget && (
@@ -1100,8 +1154,86 @@ export default function LiveDashboardPage() {
               </div>
             </div>
             <Button full size="lg" onClick={sendBonus} disabled={!Number(bonusAmount)}>
-              ATTRIBUER LE BONUS
+              {bonusEditEventId != null ? "💾 ENREGISTRER LA MODIFICATION" : "ATTRIBUER LE BONUS"}
             </Button>
+          </div>
+        )}
+      </Dialog>
+
+      {/* Dialog gestion des bonus : liste, annulation, modification */}
+      <Dialog open={bonusListOpen} onClose={() => setBonusListOpen(false)} title="🎁 Bonus attribués">
+        {events.filter((e) => e.type === "bonus_awarded").length === 0 ? (
+          <p className="font-bold text-ink/60">
+            Aucun bonus attribué pour l&apos;instant. Attribue-les depuis le classement ou les
+            stats — tu pourras les annuler ou les modifier ici.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {events
+              .filter((e) => e.type === "bonus_awarded")
+              .map((ev) => {
+                const pts = Number(ev.payload.points ?? 0);
+                const sec = Number(ev.payload.seconds ?? 0);
+                const revoked = !!ev.payload.revoked;
+                const team = ev.team_id ? teamMap.get(ev.team_id) : undefined;
+                const amount =
+                  pts !== 0
+                    ? `+${pts} pts`
+                    : `${sec > 0 ? "+" : "−"}${Math.abs(Math.round(sec / 60))} min`;
+                return (
+                  <div
+                    key={ev.id}
+                    className={`rounded-xl border-2 border-ink/20 px-3 py-2 ${revoked ? "opacity-50" : ""}`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-3 h-3 rounded-full border border-ink shrink-0"
+                        style={{ backgroundColor: team?.color }}
+                      />
+                      <span className="font-bold text-sm flex-1 min-w-0 truncate">
+                        {team?.name ?? "Équipe supprimée"}
+                      </span>
+                      <span className={`font-display text-sm shrink-0 ${revoked ? "line-through" : ""}`}>
+                        {amount}
+                      </span>
+                    </div>
+                    <p className="font-bold text-ink/55 text-xs mt-0.5">
+                      {formatClock(ev.created_at)} — {String(ev.payload.reason ?? "")}
+                      {revoked && " · ↩️ annulé"}
+                    </p>
+                    {!revoked && team && (
+                      <div className="flex gap-2 mt-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="flex-1"
+                          onClick={() => {
+                            setBonusEditEventId(ev.id);
+                            setBonusAmount(
+                              String(pts !== 0 ? pts : Math.max(1, Math.abs(Math.round(sec / 60))))
+                            );
+                            setBonusTarget({
+                              teamId: team.id,
+                              teamName: team.name,
+                              reason: String(ev.payload.reason ?? ""),
+                            });
+                          }}
+                        >
+                          ✏️ MODIFIER
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline-crimson"
+                          className="flex-1"
+                          onClick={() => void revokeBonus(ev)}
+                        >
+                          ↩️ ANNULER
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
           </div>
         )}
       </Dialog>
@@ -1254,9 +1386,22 @@ export default function LiveDashboardPage() {
         )}
       </Dialog>
 
-      {/* Dialog Outils : neutraliser une étape */}
+      {/* Dialog Outils : bonus + neutraliser une étape */}
       <Dialog open={toolsOpen} onClose={() => setToolsOpen(false)} title="🛠️ Outils de secours">
         <div className="space-y-3">
+          <Button
+            full
+            variant="gold"
+            size="md"
+            onClick={() => {
+              setToolsOpen(false);
+              setBonusListOpen(true);
+            }}
+          >
+            🎁 GÉRER LES BONUS ATTRIBUÉS
+            {events.some((e) => e.type === "bonus_awarded") &&
+              ` (${events.filter((e) => e.type === "bonus_awarded" && !e.payload.revoked).length})`}
+          </Button>
           <p className="font-bold text-ink/70 text-sm">
             Balise cassée, lieu inaccessible ? Neutralise l&apos;étape : elle sera validée pour
             toutes les équipes qui ne l&apos;ont pas encore faite.

@@ -733,6 +733,55 @@ begin
                              'reason', coalesce(trim(p_reason), '')));
 end $$;
 
+-- Annule un bonus déjà attribué (repéré par son event de journal) : les
+-- montants sont reversés à l'équipe et l'event d'origine est marqué révoqué
+-- (la trace reste dans le journal). Sert aussi de « modifier » côté UI :
+-- annuler puis ré-attribuer avec le bon montant.
+create or replace function public.org_revoke_bonus(p_event_id bigint)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_ev  public.events%rowtype;
+  v_pts int;
+  v_sec int;
+begin
+  select * into v_ev from public.events where id = p_event_id for update;
+  if not found or v_ev.type <> 'bonus_awarded' then
+    return jsonb_build_object('ok', false, 'error', 'BONUS_INTROUVABLE');
+  end if;
+  if not public.is_game_owner(v_ev.game_id) then
+    raise exception 'INTERDIT';
+  end if;
+  if coalesce((v_ev.payload->>'revoked')::boolean, false) then
+    return jsonb_build_object('ok', false, 'error', 'DEJA_ANNULE');
+  end if;
+  if v_ev.team_id is null or not exists (select 1 from public.teams where id = v_ev.team_id) then
+    return jsonb_build_object('ok', false, 'error', 'EQUIPE_INTROUVABLE');
+  end if;
+
+  v_pts := coalesce((v_ev.payload->>'points')::int, 0);
+  v_sec := coalesce((v_ev.payload->>'seconds')::int, 0);
+
+  update public.teams
+  set bonus_points    = bonus_points - v_pts,
+      penalty_seconds = penalty_seconds - v_sec
+  where id = v_ev.team_id;
+
+  update public.events
+  set payload = payload || jsonb_build_object('revoked', true, 'revoked_at', now())
+  where id = p_event_id;
+
+  insert into public.events (game_id, team_id, type, payload)
+  values (v_ev.game_id, v_ev.team_id, 'bonus_revoked',
+          jsonb_build_object('points', v_pts, 'seconds', v_sec,
+                             'reason', coalesce(v_ev.payload->>'reason', ''),
+                             'source_event_id', p_event_id));
+
+  return jsonb_build_object('ok', true);
+end $$;
+
 -- Envoie un message/indice à une équipe (toast temps réel côté joueur).
 create or replace function public.org_send_hint(p_team_id uuid, p_message text)
 returns void
@@ -2206,7 +2255,7 @@ begin
     'org_set_status(uuid,text)', 'org_force_validate(uuid,uuid)', 'org_send_hint(uuid,text)',
     'org_rename_team(uuid,text)', 'org_delete_team(uuid)', 'org_review_photo(uuid,boolean)',
     'org_set_photo_winner(uuid)', 'org_neutralize_step(uuid,uuid)',
-    'org_award_bonus(uuid,int,int,text)',
+    'org_award_bonus(uuid,int,int,text)', 'org_revoke_bonus(bigint)',
     'get_lobby(text)', 'create_team(text,text,text,text[])', 'join_team(text,uuid,text)',
     'join_by_team_code(text,text,text)', 'get_play_state()', 'get_next_media()', 'get_ranking(text)',
     'validate_step(uuid,uuid,text,jsonb)', 'validate_tag(uuid,text)', 'unlock_hint(uuid,int)',
