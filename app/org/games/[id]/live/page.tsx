@@ -856,21 +856,24 @@ export default function LiveDashboardPage() {
                       "En attente…"
                     )}
                   </p>
-                  {!live.team.finished_at && game.status !== "finished" && (
-                    <div className="flex gap-1.5">
-                      <Button size="sm" variant="parchment" onClick={() => setManageTeam(live.team)}>
-                        👥
-                      </Button>
-                      <Button size="sm" variant="parchment" onClick={() => setHintTarget(live.team)}>
-                        💡 Indice
-                      </Button>
-                      {live.current && (
-                        <Button size="sm" variant="leaf" onClick={() => forceValidate(live)}>
-                          ✅ Valider
+                  <div className="flex gap-1.5">
+                    {/* Détail de l'équipe : toujours accessible, même partie terminée */}
+                    <Button size="sm" variant="parchment" onClick={() => setManageTeam(live.team)}>
+                      👥
+                    </Button>
+                    {!live.team.finished_at && game.status !== "finished" && (
+                      <>
+                        <Button size="sm" variant="parchment" onClick={() => setHintTarget(live.team)}>
+                          💡 Indice
                         </Button>
-                      )}
-                    </div>
-                  )}
+                        {live.current && (
+                          <Button size="sm" variant="leaf" onClick={() => forceValidate(live)}>
+                            ✅ Valider
+                          </Button>
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
               </Card>
               );
