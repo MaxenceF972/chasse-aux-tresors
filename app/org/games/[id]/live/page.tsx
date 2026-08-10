@@ -15,7 +15,11 @@ import Dialog from "@/components/ui/Dialog";
 import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import TeamMap from "@/components/org/TeamMap";
-import AwardsDialog, { type AwardItem, type Trophy } from "@/components/org/AwardsDialog";
+import AwardsDialog, {
+  type AwardItem,
+  type StepRecord,
+  type Trophy,
+} from "@/components/org/AwardsDialog";
 import { showToast } from "@/components/ui/Toaster";
 import { useConfirm } from "@/components/ui/Confirm";
 
@@ -573,6 +577,44 @@ export default function LiveDashboardPage() {
       amount: trophyAmount,
     });
   }
+  // Détentrice du plus grand nombre de records de vitesse : une récompense
+  // forte tirée des stats, sans avoir à parcourir les épreuves une à une.
+  if (funStats && funStats.bestByStep.size > 1) {
+    const counts = new Map<string, number>();
+    for (const b of funStats.bestByStep.values()) {
+      counts.set(b.teamId, (counts.get(b.teamId) ?? 0) + 1);
+    }
+    const [topId, topCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? [];
+    if (topId && topCount >= 2) {
+      trophies.push({
+        key: "records",
+        icon: "👑",
+        label: "Reine des records de vitesse",
+        detail: `${topCount} épreuves bouclées plus vite que tout le monde`,
+        teamId: topId,
+        reason: "reine des records de vitesse",
+        amount: trophyAmount,
+      });
+    }
+  }
+  // Records par épreuve (liste repliée dans l'écran Récompenses)
+  const stepRecords: StepRecord[] = steps
+    .slice()
+    .sort((a, b) => a.order_hint - b.order_hint)
+    .flatMap((step) => {
+      const best = funStats?.bestByStep.get(step.id);
+      if (!best) return [];
+      return [
+        {
+          stepId: step.id,
+          stepTitle: step.title,
+          teamId: best.teamId,
+          time: formatDuration(best.ms),
+          reason: `plus rapide sur « ${step.title} »`,
+          amount: Math.max(1, Math.round(trophyAmount / 2)),
+        },
+      ];
+    });
   // Classement officiel, pour le podium
   const rankedTeams = ranking.map((l) => l.team);
 
@@ -1257,6 +1299,7 @@ export default function LiveDashboardPage() {
         teams={teams}
         ranked={rankedTeams}
         trophies={trophies}
+        stepRecords={stepRecords}
         bonusEvents={bonusEvents}
         onAward={awardMany}
         onRevoke={revokeBonusById}

@@ -49,9 +49,12 @@ export default function Dialog({ open, onClose, children, title, fullScreen, ele
             exit={{ y: 60, scale: 0.95, opacity: 0 }}
             transition={{ type: "spring", stiffness: 380, damping: 30 }}
             className={
+              // min-w-0 : le panneau est un élément flex, donc `min-width:auto`
+              // par défaut — un contenu large (un <select> aux options longues,
+              // par exemple) l'étirerait au-delà de l'écran.
               fullScreen
-                ? "relative z-10 w-full h-[100dvh] overflow-y-auto overscroll-contain parchment-texture text-ink pt-safe"
-                : "relative z-10 w-full sm:max-w-lg max-h-[92dvh] overflow-y-auto overscroll-contain parchment-texture text-ink rounded-t-3xl sm:rounded-3xl border-[3px] border-ink shadow-[6px_6px_0_0_#111111] m-0 sm:m-4"
+                ? "relative z-10 w-full min-w-0 h-[100dvh] overflow-y-auto overscroll-contain parchment-texture text-ink pt-safe"
+                : "relative z-10 w-full min-w-0 sm:max-w-lg max-h-[92dvh] overflow-y-auto overscroll-contain parchment-texture text-ink rounded-t-3xl sm:rounded-3xl border-[3px] border-ink shadow-[6px_6px_0_0_#111111] m-0 sm:m-4"
             }
           >
             {title && (

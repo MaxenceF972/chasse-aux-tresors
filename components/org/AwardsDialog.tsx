@@ -24,6 +24,16 @@ export interface AwardItem {
   reason: string;
 }
 
+/** Record de vitesse sur une épreuve précise (liste repliée par défaut). */
+export interface StepRecord {
+  stepId: string;
+  stepTitle: string;
+  teamId: string;
+  time: string;
+  reason: string;
+  amount: number;
+}
+
 interface AwardsDialogProps {
   open: boolean;
   onClose: () => void;
@@ -32,6 +42,8 @@ interface AwardsDialogProps {
   /** Classement officiel, dans l'ordre (1er en tête). */
   ranked: Team[];
   trophies: Trophy[];
+  /** Records par épreuve — repliés : on ne récompense pas 26 fois. */
+  stepRecords: StepRecord[];
   /** Tous les événements bonus_awarded de la partie (révoqués compris). */
   bonusEvents: GameEvent[];
   onAward: (items: AwardItem[]) => Promise<void>;
@@ -52,6 +64,7 @@ export default function AwardsDialog({
   teams,
   ranked,
   trophies,
+  stepRecords,
   bonusEvents,
   onAward,
   onRevoke,
@@ -59,6 +72,7 @@ export default function AwardsDialog({
   const isPoints = scoring === "points";
   const unit = isPoints ? "pts" : "min";
   const [busy, setBusy] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(false);
   const [podium, setPodium] = useState<string[]>(
     isPoints ? ["300", "200", "100"] : ["3", "2", "1"]
   );
@@ -162,22 +176,26 @@ export default function AwardsDialog({
                     />
                     <span className="font-display flex-1 min-w-0 truncate">{t.name}</span>
                     {done ? (
-                      <span className="font-bold text-leaf text-sm shrink-0">✅ attribué</span>
+                      <span className="font-bold text-leaf text-sm shrink-0">✅</span>
                     ) : (
-                      <>
-                        <Input
-                          value={podium[i]}
-                          onChange={(e) =>
-                            setPodium((p) =>
-                              p.map((v, j) => (j === i ? e.target.value.replace(/\D/g, "") : v))
-                            )
-                          }
-                          inputMode="numeric"
-                          className="!h-9 w-16 text-center font-mono shrink-0"
-                          aria-label={`Montant ${i + 1}e place`}
-                        />
-                        <span className="font-bold text-ink/50 text-sm shrink-0">{unit}</span>
-                      </>
+                      // Largeur imposée par le conteneur : l'Input est w-full
+                      // par nature, un w-16 sur lui ne gagnerait pas.
+                      <span className="flex items-center gap-1 shrink-0">
+                        <span className="w-16">
+                          <Input
+                            value={podium[i]}
+                            onChange={(e) =>
+                              setPodium((p) =>
+                                p.map((v, j) => (j === i ? e.target.value.replace(/\D/g, "") : v))
+                              )
+                            }
+                            inputMode="numeric"
+                            className="!h-9 !px-1 !text-base text-center font-mono"
+                            aria-label={`Montant ${i + 1}e place`}
+                          />
+                        </span>
+                        <span className="font-bold text-ink/50 text-xs">{unit}</span>
+                      </span>
                     )}
                   </div>
                 );
@@ -247,6 +265,68 @@ export default function AwardsDialog({
           </section>
         )}
 
+        {/* 3 bis. Records par épreuve — repliés : c'est du détail, pas la
+            liste d'actions principale. */}
+        {stepRecords.length > 0 && (
+          <section>
+            <Button
+              full
+              size="md"
+              variant="outline"
+              onClick={() => setRecordsOpen((v) => !v)}
+            >
+              {recordsOpen ? "➖ MASQUER" : "⚡ RÉCOMPENSER UN RECORD"} ({stepRecords.length}{" "}
+              épreuve{stepRecords.length > 1 ? "s" : ""})
+            </Button>
+            {recordsOpen && (
+              <div className="space-y-1.5 mt-2">
+                <p className="font-bold text-ink/50 text-xs">
+                  L&apos;équipe la plus rapide sur chaque épreuve.
+                </p>
+                {stepRecords.map((rec) => {
+                  const done = awardedReasons.has(rec.reason);
+                  return (
+                    <div
+                      key={rec.stepId}
+                      className={`flex items-center gap-2 rounded-xl border-2 border-ink/15 px-2.5 py-1.5 ${
+                        done ? "opacity-60" : ""
+                      }`}
+                    >
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-bold text-sm truncate">{rec.stepTitle}</span>
+                        <span
+                          className="block font-display text-xs truncate"
+                          style={{ color: teamColor(rec.teamId) }}
+                        >
+                          {teamName(rec.teamId)}
+                          <span className="font-bold text-ink/45"> · {rec.time}</span>
+                        </span>
+                      </span>
+                      {done ? (
+                        <span className="font-bold text-leaf text-sm shrink-0">✅</span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="gold"
+                          className="shrink-0 !min-h-8 !py-0.5 !px-2 !text-xs"
+                          disabled={busy}
+                          onClick={() =>
+                            run([
+                              { teamId: rec.teamId, amount: rec.amount, reason: rec.reason },
+                            ])
+                          }
+                        >
+                          +{rec.amount}
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+
         {/* 4. Bonus libre : fair-play, coup de cœur… */}
         <section>
           <h3 className="font-display text-lg mb-2">✨ Bonus libre</h3>
@@ -256,7 +336,7 @@ export default function AwardsDialog({
               <select
                 value={freeTeam}
                 onChange={(e) => setFreeTeam(e.target.value)}
-                className="w-full h-12 rounded-xl border-[3px] border-ink bg-white px-3 font-bold text-ink"
+                className="w-full min-w-0 h-12 rounded-xl border-[3px] border-ink bg-white px-3 font-bold text-ink"
               >
                 <option value="">— choisir —</option>
                 {teams.map((t) => (
