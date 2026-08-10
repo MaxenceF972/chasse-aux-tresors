@@ -778,11 +778,21 @@ export default function LiveDashboardPage() {
                 <div className="flex gap-[3px] mb-1.5">
                   {routes
                     .filter((r) => r.team_id === live.team.id)
-                    .sort((a, b) => a.position - b.position)
-                    .map((r) => {
+                    // L'ordre des étapes est choisi en direct (anti-peloton) :
+                    // on affiche la progression réelle — validées dans l'ordre
+                    // de validation, puis l'étape en cours, puis le reste.
+                    .sort((a, b) => {
+                      const grp = (r: TeamRoute) =>
+                        r.status === "done" ? 0 : r.status === "current" ? 1 : 2;
+                      if (grp(a) !== grp(b)) return grp(a) - grp(b);
+                      if (a.status === "done")
+                        return (a.validated_at ?? "").localeCompare(b.validated_at ?? "");
+                      return a.position - b.position;
+                    })
+                    .map((r, idx) => {
                       const st = stepMap.get(r.step_id);
                       const redeemed = r.skipped && !!r.redeemed_at;
-                      const label = `${r.position + 1}. ${st?.title ?? "?"}${
+                      const label = `${idx + 1}. ${st?.title ?? "?"}${
                         redeemed
                           ? " (rattrapée)"
                           : r.skipped

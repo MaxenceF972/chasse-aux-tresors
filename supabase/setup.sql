@@ -281,6 +281,94 @@ as $$
   end
 $$;
 
+-- Choisit la PROCHAINE étape d'une équipe — ANTI-PELOTON.
+-- La trame des positions reste maîtresse (épreuve de départ, paliers communs et
+-- sprint final gardent leur rang, un groupe lié reste soudé), mais À L'INTÉRIEUR
+-- du segment courant on envoie l'équipe sur l'étape du pool la MOINS fréquentée
+-- à cet instant. Le placement de départ (start_game) répartit ; ceci corrige en
+-- direct la dérive due aux équipes qui n'avancent pas à la même vitesse.
+create or replace function public.next_route_for(p_team_id uuid)
+returns public.team_routes
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare
+  v_game_id uuid;
+  v_lowest  public.team_routes%rowtype;
+  v_best    public.team_routes%rowtype;
+  v_gate    int;
+  v_chain   text;
+begin
+  select game_id into v_game_id from public.teams where id = p_team_id;
+  if v_game_id is null then return null; end if;
+
+  -- Repli (et trame) : la position verrouillée la plus basse
+  select * into v_lowest from public.team_routes
+  where team_id = p_team_id and status = 'locked'
+  order by position limit 1;
+  if not found then return null; end if;
+
+  -- Groupe d'étapes liées entamé → on enchaîne obligatoirement dessus
+  select nullif(trim(coalesce(s.chain_group, '')), '') into v_chain
+  from public.team_routes tr
+  join public.steps s on s.id = tr.step_id
+  where tr.team_id = p_team_id and tr.status = 'done' and tr.validated_at is not null
+  order by tr.validated_at desc, tr.position desc
+  limit 1;
+  if v_chain is not null then
+    select tr.* into v_best
+    from public.team_routes tr
+    join public.steps s on s.id = tr.step_id
+    where tr.team_id = p_team_id and tr.status = 'locked'
+      and nullif(trim(coalesce(s.chain_group, '')), '') = v_chain
+    order by tr.position limit 1;
+    if v_best.id is not null then return v_best; end if;
+  end if;
+
+  -- Le prochain palier commun / départ / finale encore verrouillé borne le
+  -- segment : on ne permute jamais une étape par-dessus lui.
+  select min(tr.position) into v_gate
+  from public.team_routes tr
+  join public.steps s on s.id = tr.step_id
+  where tr.team_id = p_team_id and tr.status = 'locked'
+    and (s.is_common_checkpoint or s.is_final or s.is_start);
+
+  select tr.* into v_best
+  from public.team_routes tr
+  join public.steps s on s.id = tr.step_id
+  where tr.team_id = p_team_id and tr.status = 'locked'
+    and not s.is_common_checkpoint and not s.is_final and not s.is_start
+    and (v_gate is null or tr.position < v_gate)
+    -- un groupe lié ne s'entame que par sa première étape non faite
+    and not exists (
+      select 1 from public.team_routes tr2
+      join public.steps s2 on s2.id = tr2.step_id
+      where tr2.team_id = p_team_id and tr2.status = 'locked'
+        and nullif(trim(coalesce(s2.chain_group, '')), '') is not null
+        and nullif(trim(coalesce(s2.chain_group, '')), '')
+            = nullif(trim(coalesce(s.chain_group, '')), '')
+        and tr2.position < tr.position
+    )
+  order by
+    -- 1) personne dessus en ce moment
+    (select count(*) from public.team_routes o
+     where o.game_id = v_game_id and o.status = 'current' and o.step_id = tr.step_id),
+    -- 2) personne n'en vient de partir (l'équipe précédente traîne encore sur place)
+    (select count(*) from public.team_routes o
+     where o.game_id = v_game_id and o.step_id = tr.step_id
+       and o.validated_at is not null and o.validated_at > now() - interval '8 minutes'),
+    -- 3) départage propre à l'équipe : deux équipes qui choisissent à la même
+    --    seconde ne partent pas sur la même étape
+    md5(p_team_id::text || tr.step_id::text)
+  limit 1;
+
+  if v_best.id is not null then return v_best; end if;
+  return v_lowest;
+end $$;
+
+-- Jamais appelable par un joueur : elle révélerait la prochaine étape.
+revoke all on function public.next_route_for(uuid) from public, anon, authenticated;
+
 -- ----------------------------------------------------------------------------
 -- RLS
 -- ----------------------------------------------------------------------------
@@ -441,6 +529,7 @@ declare
   v_starts  uuid[];
   v_slot    jsonb;
   v_blk     jsonb;
+  v_perm    int[];   -- ordre de visite des blocs, mélangé une fois pour la partie
   v_t       int;
   v_b       int;
   v_k       int;
@@ -517,11 +606,33 @@ begin
   select coalesce(array_agg(id order by order_hint, created_at), '{}') into v_starts
   from public.steps where game_id = p_game_id and is_start and not is_final;
 
+  -- ANTI-PELOTON — deux réglages indissociables :
+  --
+  -- 1. v_perm : l'ordre dans lequel les RANGS piochent dans le pool est mélangé
+  --    (une fois, pour toute la partie, identique pour toutes les équipes).
+  --    Sans lui, toutes les équipes parcourent le pool dans le même ordre
+  --    cyclique : une équipe une étape derrière une autre tombe alors
+  --    MÉCANIQUEMENT sur la même énigme (le peloton était garanti). Avec un
+  --    ordre mélangé, l'écart entre deux rangs consécutifs varie sans cesse :
+  --    les rencontres deviennent des coïncidences isolées.
+  --    La propriété « jamais deux équipes sur le même bloc au même rang » est
+  --    conservée (les décalages restent distincts).
+  --
+  -- 2. v_offset réparti sur TOUT le pool : l'ancien pas (k × floor(b/t)) valait
+  --    1 dès que le pool dépassait le nombre d'équipes — les blocs au-delà du
+  --    t-ième n'étaient attribués à personne au départ (énigmes désertes).
+  if v_b > 0 then
+    select coalesce(array_agg(i::int order by random()), array[]::int[]) into v_perm
+    from generate_series(0, v_b - 1) i;
+  else
+    v_perm := array[]::int[];
+  end if;
+
   -- Nettoyage au cas où (relance après erreur)
   delete from public.team_routes where game_id = p_game_id;
 
   for v_k in 1..v_t loop
-    v_offset := case when v_b > 0 then ((v_k - 1) * greatest(1, v_b / v_t)) % v_b else 0 end;
+    v_offset := case when v_b > 0 then (((v_k - 1) * v_b) / v_t) % v_b else 0 end;
     v_pos := 0;
     v_m := 0;
 
@@ -544,8 +655,9 @@ begin
                 case when v_pos = 0 then 'current' else 'locked' end::public.route_status);
         v_pos := v_pos + 1;
       else
-        -- Emplacement mobile : le bloc (décalé) est inséré en entier, dans l'ordre
-        v_blk := v_blocks -> ((v_m + v_offset) % v_b);
+        -- Emplacement mobile : le bloc (rang mélangé + décalage de l'équipe)
+        -- est inséré en entier, dans l'ordre
+        v_blk := v_blocks -> ((v_perm[v_m + 1] + v_offset) % v_b);
         for v_j in 0 .. jsonb_array_length(v_blk) - 1 loop
           v_step_id := (v_blk->>v_j)::uuid;
           insert into public.team_routes (game_id, team_id, step_id, position, status)
@@ -637,9 +749,8 @@ begin
 
   update public.team_routes set status = 'done', validated_at = now() where id = v_route.id;
 
-  select * into v_next from public.team_routes
-  where team_id = p_team_id and status = 'locked' order by position limit 1;
-  if found then
+  v_next := public.next_route_for(p_team_id);
+  if v_next.id is not null then
     update public.team_routes set status = 'current' where id = v_next.id;
   else
     update public.teams
@@ -1111,16 +1222,15 @@ set search_path = public
 as $$
 declare
   v_team_id uuid;
-  v_urls text[];
+  v_next    public.team_routes%rowtype;
+  v_urls    text[];
 begin
   v_team_id := public.my_team_id();
   if v_team_id is null then return '[]'::jsonb; end if;
-  select s.media_urls into v_urls
-  from public.team_routes tr
-  join public.steps s on s.id = tr.step_id
-  where tr.team_id = v_team_id and tr.status = 'locked'
-  order by tr.position
-  limit 1;
+  -- Même choix que l'avancement réel (anti-peloton) : on précharge le bon média
+  v_next := public.next_route_for(v_team_id);
+  if v_next.id is null then return '[]'::jsonb; end if;
+  select media_urls into v_urls from public.steps where id = v_next.step_id;
   return coalesce(to_jsonb(v_urls), '[]'::jsonb);
 end $$;
 
@@ -1257,9 +1367,8 @@ begin
 
   update public.team_routes set status = 'done', validated_at = now() where id = v_route.id;
 
-  select * into v_next from public.team_routes
-  where team_id = v_team.id and status = 'locked' order by position limit 1;
-  if found then
+  v_next := public.next_route_for(v_team.id);
+  if v_next.id is not null then
     update public.team_routes set status = 'current' where id = v_next.id;
   else
     v_finished := true;
@@ -1535,9 +1644,8 @@ begin
   update public.team_routes set status = 'done', validated_at = now()
   where id = v_route.id;
 
-  select * into v_next from public.team_routes
-  where team_id = v_team.id and status = 'locked' order by position limit 1;
-  if found then
+  v_next := public.next_route_for(v_team.id);
+  if v_next.id is not null then
     update public.team_routes set status = 'current' where id = v_next.id;
     insert into public.events (game_id, team_id, type, payload)
     values (v_game.id, v_team.id, 'step_validated',
@@ -1599,9 +1707,8 @@ begin
       for update;
       if found then
         update public.team_routes set status = 'done', validated_at = now() where id = v_route.id;
-        select * into v_next from public.team_routes
-        where team_id = v_sub.team_id and status = 'locked' order by position limit 1;
-        if found then
+        v_next := public.next_route_for(v_sub.team_id);
+        if v_next.id is not null then
           update public.team_routes set status = 'current' where id = v_next.id;
         else
           update public.teams
@@ -1929,9 +2036,8 @@ begin
     update public.teams set penalty_seconds = penalty_seconds + v_total_pen where id = v_team.id;
   end if;
 
-  select * into v_next from public.team_routes
-  where team_id = v_team.id and status = 'locked' order by position limit 1;
-  if found then
+  v_next := public.next_route_for(v_team.id);
+  if v_next.id is not null then
     update public.team_routes set status = 'current' where id = v_next.id;
   else
     v_finished := true;
@@ -2158,9 +2264,8 @@ begin
   update public.team_routes set status = 'done', validated_at = now(), timed_out = true
   where id = v_route.id;
 
-  select * into v_next from public.team_routes
-  where team_id = v_team.id and status = 'locked' order by position limit 1;
-  if found then
+  v_next := public.next_route_for(v_team.id);
+  if v_next.id is not null then
     update public.team_routes set status = 'current' where id = v_next.id;
   else
     v_finished := true;
@@ -2221,9 +2326,8 @@ begin
     v_count := v_count + 1;
 
     if v_route.status = 'current' then
-      select * into v_next from public.team_routes
-      where team_id = v_route.team_id and status = 'locked' order by position limit 1;
-      if found then
+      v_next := public.next_route_for(v_route.team_id);
+      if v_next.id is not null then
         update public.team_routes set status = 'current' where id = v_next.id;
       else
         update public.teams
