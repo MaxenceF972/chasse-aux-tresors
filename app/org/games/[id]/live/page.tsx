@@ -544,6 +544,23 @@ export default function LiveDashboardPage() {
   // Récompenses proposées par l'app : montant par défaut sensé, et le motif
   // sert de clé « déjà attribué » (voir AwardsDialog).
   const trophyAmount = game.settings.scoring === "points" ? 100 : 1;
+  // Un record de vitesse ne récompense la RÉFLEXION que sur une énigme ou un
+  // mini-jeu. Sur une balise ou une étape GPS, « le plus rapide » mesure la
+  // course à pied et la chance du tirage — on ne le propose donc pas.
+  const isPuzzle = (stepId: string) => {
+    const t = stepMap.get(stepId)?.type;
+    return t === "minigame" || t === "text";
+  };
+  // Le meilleur temps toutes énigmes confondues (≠ funStats.flash, qui balaie
+  // aussi les balises et le GPS et sert seulement de statistique).
+  let puzzleFlash: { stepId: string; teamId: string; ms: number } | null = null;
+  for (const [stepId, b] of funStats?.bestByStep ?? []) {
+    if (!isPuzzle(stepId)) continue;
+    if (!puzzleFlash || b.ms < puzzleFlash.ms) {
+      puzzleFlash = { stepId, teamId: b.teamId, ms: b.ms };
+    }
+  }
+
   const trophies: Trophy[] = [];
   if (funStats?.firstFinisher) {
     trophies.push({
@@ -555,14 +572,14 @@ export default function LiveDashboardPage() {
       amount: trophyAmount,
     });
   }
-  if (funStats?.flash) {
+  if (puzzleFlash) {
     trophies.push({
       key: "flash",
       icon: "⚡",
-      label: "Étape éclair de la partie",
-      detail: `${stepMap.get(funStats.flash.stepId)?.title ?? "?"} en ${formatDuration(funStats.flash.ms)}`,
-      teamId: funStats.flash.teamId,
-      reason: "étape éclair de la partie",
+      label: "Énigme éclair de la partie",
+      detail: `${stepMap.get(puzzleFlash.stepId)?.title ?? "?"} en ${formatDuration(puzzleFlash.ms)}`,
+      teamId: puzzleFlash.teamId,
+      reason: "énigme éclair de la partie",
       amount: trophyAmount,
     });
   }
@@ -577,11 +594,12 @@ export default function LiveDashboardPage() {
       amount: trophyAmount,
     });
   }
-  // Détentrice du plus grand nombre de records de vitesse : une récompense
-  // forte tirée des stats, sans avoir à parcourir les épreuves une à une.
-  if (funStats && funStats.bestByStep.size > 1) {
+  // Détentrice du plus grand nombre de records : une récompense forte tirée
+  // des stats, sans avoir à parcourir les épreuves une à une.
+  if (funStats) {
     const counts = new Map<string, number>();
-    for (const b of funStats.bestByStep.values()) {
+    for (const [stepId, b] of funStats.bestByStep) {
+      if (!isPuzzle(stepId)) continue;
       counts.set(b.teamId, (counts.get(b.teamId) ?? 0) + 1);
     }
     const [topId, topCount] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? [];
@@ -589,25 +607,26 @@ export default function LiveDashboardPage() {
       trophies.push({
         key: "records",
         icon: "👑",
-        label: "Reine des records de vitesse",
-        detail: `${topCount} épreuves bouclées plus vite que tout le monde`,
+        label: "Reine des méninges",
+        detail: `${topCount} énigmes résolues plus vite que tout le monde`,
         teamId: topId,
-        reason: "reine des records de vitesse",
+        reason: "reine des méninges",
         amount: trophyAmount,
       });
     }
   }
-  // Records par épreuve (liste repliée dans l'écran Récompenses)
+  // Records par énigme / mini-jeu (liste repliée dans l'écran Récompenses)
   const stepRecords: StepRecord[] = steps
     .slice()
     .sort((a, b) => a.order_hint - b.order_hint)
     .flatMap((step) => {
       const best = funStats?.bestByStep.get(step.id);
-      if (!best) return [];
+      if (!best || !isPuzzle(step.id)) return [];
       return [
         {
           stepId: step.id,
           stepTitle: step.title,
+          icon: step.type === "minigame" ? "🎮" : "❓",
           teamId: best.teamId,
           time: formatDuration(best.ms),
           reason: `plus rapide sur « ${step.title} »`,

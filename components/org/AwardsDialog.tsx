@@ -24,10 +24,11 @@ export interface AwardItem {
   reason: string;
 }
 
-/** Record de vitesse sur une épreuve précise (liste repliée par défaut). */
+/** Record de vitesse sur une énigme ou un mini-jeu (liste repliée par défaut). */
 export interface StepRecord {
   stepId: string;
   stepTitle: string;
+  icon: string;
   teamId: string;
   time: string;
   reason: string;
@@ -275,13 +276,13 @@ export default function AwardsDialog({
               variant="outline"
               onClick={() => setRecordsOpen((v) => !v)}
             >
-              {recordsOpen ? "➖ MASQUER" : "⚡ RÉCOMPENSER UN RECORD"} ({stepRecords.length}{" "}
-              épreuve{stepRecords.length > 1 ? "s" : ""})
+              {recordsOpen ? "➖ MASQUER" : "⚡ RÉCOMPENSER UN RECORD"} ({stepRecords.length})
             </Button>
             {recordsOpen && (
               <div className="space-y-1.5 mt-2">
                 <p className="font-bold text-ink/50 text-xs">
-                  L&apos;équipe la plus rapide sur chaque épreuve.
+                  L&apos;équipe la plus rapide sur chaque énigme et mini-jeu — là où la
+                  vitesse récompense la réflexion, pas les jambes.
                 </p>
                 {stepRecords.map((rec) => {
                   const done = awardedReasons.has(rec.reason);
@@ -292,6 +293,9 @@ export default function AwardsDialog({
                         done ? "opacity-60" : ""
                       }`}
                     >
+                      <span className="text-lg shrink-0" aria-hidden>
+                        {rec.icon}
+                      </span>
                       <span className="flex-1 min-w-0">
                         <span className="block font-bold text-sm truncate">{rec.stepTitle}</span>
                         <span
