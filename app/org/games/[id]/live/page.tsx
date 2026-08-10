@@ -18,6 +18,11 @@ import TeamMap from "@/components/org/TeamMap";
 import { showToast } from "@/components/ui/Toaster";
 import { useConfirm } from "@/components/ui/Confirm";
 
+type LiveTab = "teams" | "sos" | "photos" | "journal" | "map";
+
+/** Une équipe est « bloquée » si elle piétine depuis 10 min sur la même étape. */
+const STUCK_MS = 10 * 60000;
+
 const START_ERRORS: Record<string, string> = {
   AUCUNE_EQUIPE: "Aucune équipe n'a rejoint le lobby.",
   AUCUNE_ETAPE: "Le parcours est vide — ajoute des étapes dans l'éditeur.",
@@ -91,6 +96,11 @@ export default function LiveDashboardPage() {
   const [journalFilter, setJournalFilter] = useState<"all" | "sos" | "valid" | "warn" | "photo">("all");
   const [seenMsgId, setSeenMsgId] = useState(0);
   const [teamQuery, setTeamQuery] = useState("");
+  // Tour de contrôle : un onglet = une tâche (fini la page fleuve et les
+  // zones de défilement imbriquées qui piégeaient le doigt sur téléphone).
+  const [tab, setTab] = useState<LiveTab>("teams");
+  const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
+  const [urgentFirst, setUrgentFirst] = useState(false);
   const [bonusTarget, setBonusTarget] = useState<{ teamId: string; teamName: string; reason: string } | null>(null);
   const [bonusAmount, setBonusAmount] = useState("50");
   const [bonusListOpen, setBonusListOpen] = useState(false);
@@ -99,8 +109,6 @@ export default function LiveDashboardPage() {
   // Modification d'un bonus existant : l'event d'origine est annulé au moment
   // de ré-attribuer le nouveau montant
   const [bonusEditEventId, setBonusEditEventId] = useState<number | null>(null);
-  const sosRef = useRef<HTMLDivElement>(null);
-  const photosRef = useRef<HTMLHeadingElement>(null);
   const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
@@ -537,22 +545,31 @@ export default function LiveDashboardPage() {
   // Vue d'ensemble pour les grosses chasses (20-30 équipes) : compteurs dans
   // la barre d'actions collante, recherche dans le classement.
   const finishedCount = teams.filter((t) => t.finished_at).length;
-  const stuckCount =
-    game.status === "running"
-      ? ranking.filter(
-          (l) =>
-            !l.team.finished_at &&
-            l.current?.since &&
-            Date.now() - new Date(l.current.since).getTime() >= 10 * 60000
-        ).length
-      : 0;
+  const isStuck = (l: TeamLive) =>
+    game.status === "running" &&
+    !l.team.finished_at &&
+    !!l.current?.since &&
+    Date.now() - new Date(l.current.since).getTime() >= STUCK_MS;
+  const stuckCount = ranking.filter(isStuck).length;
   const rankIndex = new Map(ranking.map((l, i) => [l.team.id, i]));
-  const shownRanking = teamQuery.trim()
+  const filteredRanking = teamQuery.trim()
     ? ranking.filter((l) => l.team.name.toLowerCase().includes(teamQuery.trim().toLowerCase()))
     : ranking;
+  // « Qui a besoin de moi ? » — les équipes bloquées remontent en tête
+  const shownRanking = urgentFirst
+    ? [...filteredRanking].sort((a, b) => Number(isStuck(b)) - Number(isStuck(a)))
+    : filteredRanking;
+
+  const TABS: { key: LiveTab; label: string; badge: number }[] = [
+    { key: "teams", label: "🏁 Équipes", badge: stuckCount },
+    { key: "sos", label: "🆘 SOS", badge: unreadCount },
+    { key: "photos", label: "📸 Photos", badge: submissions.length },
+    { key: "journal", label: "📜 Journal", badge: 0 },
+    { key: "map", label: "📍 Carte", badge: 0 },
+  ];
 
   return (
-    <main className="min-h-dvh px-5 py-6 pt-safe-page max-w-3xl mx-auto pb-24">
+    <main className="min-h-dvh px-5 py-6 pt-safe-page max-w-3xl xl:max-w-6xl mx-auto pb-24">
       <header className="mb-6">
         <nav className="flex gap-2 flex-wrap">
           <Link href="/org/dashboard" className="contents">
@@ -583,37 +600,38 @@ export default function LiveDashboardPage() {
               <p className="text-parchment/50 font-bold text-xs uppercase">
                 {game.status === "paused" ? "⏸️ Chrono figé" : "Chrono de partie"}
               </p>
+              {game.status !== "lobby" && (
+                <p className="font-bold text-xs text-parchment/60 mt-0.5">
+                  🏁 {finishedCount}/{teams.length} arrivées
+                </p>
+              )}
             </div>
           )}
         </div>
       </header>
 
-      {/* Actions globales : barre collante avec compteurs d'état (grosses chasses) */}
+      {/* Tour de contrôle collante : onglets (l'urgence se lit dans les badges)
+          + actions globales. Toujours à portée de pouce. */}
       <div className="sticky top-[env(safe-area-inset-top)] z-40 -mx-5 px-5 py-2.5 mb-4 bg-ink/95 backdrop-blur-sm border-b-2 border-parchment/10">
         {game.status !== "lobby" && (
-          <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2 font-bold text-xs text-parchment/70">
-            <span>🏁 {finishedCount}/{teams.length} arrivées</span>
-            {stuckCount > 0 && <span className="text-crimson">⚠️ {stuckCount} bloquée{stuckCount > 1 ? "s" : ""}</span>}
-            {unreadCount > 0 && (
-              <Button
-                size="sm"
-                variant="gold"
-                className="!min-h-7 !py-0.5 !px-2.5 !text-xs"
-                onClick={() => sosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          <div className="flex gap-1.5 mb-2 overflow-x-auto no-scrollbar -mx-1 px-1">
+            {TABS.map(({ key, label, badge }) => (
+              <button
+                key={key}
+                onClick={() => setTab(key)}
+                aria-current={tab === key}
+                className={`shrink-0 min-h-10 px-3 rounded-xl border-2 border-ink font-display text-sm inline-flex items-center gap-1.5 ${
+                  tab === key ? "bg-gold text-ink" : "bg-parchment/10 text-parchment/70"
+                }`}
               >
-                🆘 {unreadCount} message{unreadCount > 1 ? "s" : ""} non lu{unreadCount > 1 ? "s" : ""}
-              </Button>
-            )}
-            {submissions.length > 0 && (
-              <Button
-                size="sm"
-                variant="gold"
-                className="!min-h-7 !py-0.5 !px-2.5 !text-xs"
-                onClick={() => photosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              >
-                📸 {submissions.length} photo{submissions.length > 1 ? "s" : ""} à juger
-              </Button>
-            )}
+                {label}
+                {badge > 0 && (
+                  <span className="text-xs font-bold rounded-full px-1.5 border-2 border-ink bg-crimson text-parchment animate-pulse">
+                    {badge}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
         )}
         <div className="flex flex-wrap gap-2">
@@ -720,8 +738,8 @@ export default function LiveDashboardPage() {
         </Card>
       )}
 
-      {/* Classement live */}
-      {game.status !== "lobby" && (
+      {/* Onglet ÉQUIPES : le classement, en lignes compactes dépliables */}
+      {game.status !== "lobby" && tab === "teams" && (
         <>
           <h2 className="font-display text-2xl text-parchment mb-1">
             Classement live
@@ -730,28 +748,48 @@ export default function LiveDashboardPage() {
             )}
           </h2>
           <p className="font-bold text-parchment/50 text-xs mb-3">
-            Une case par étape — couleur de l&apos;équipe : validée · 🟡 clignotante : en cours ·
-            🔴 : passée avec pénalité · 🟢 : rattrapée · grise : temps écoulé · blanche : à venir.
-            Touche une case pour voir le nom de l&apos;étape.
+            Touche une équipe pour ses actions. Une case par étape — couleur de
+            l&apos;équipe : validée · 🟡 : en cours · 🔴 : passée avec pénalité · 🟢 : rattrapée ·
+            grise : temps écoulé · blanche : à venir.
           </p>
-          {teams.length > 6 && (
-            <div className="mb-3">
+          <div className="flex gap-2 mb-3 flex-wrap items-center">
+            {teams.length > 6 && (
               <Input
                 value={teamQuery}
                 onChange={(e) => setTeamQuery(e.target.value)}
                 placeholder="🔎 Chercher une équipe…"
-                className="h-11"
+                className="h-11 flex-1 min-w-[12rem]"
               />
-            </div>
-          )}
-          <div className="space-y-2 mb-8 max-h-[30rem] overflow-y-auto overscroll-contain pr-1">
+            )}
+            {stuckCount > 0 && (
+              <Button
+                size="sm"
+                variant={urgentFirst ? "crimson" : "ghost"}
+                onClick={() => setUrgentFirst((v) => !v)}
+              >
+                ⚠️ BLOQUÉES D&apos;ABORD ({stuckCount})
+              </Button>
+            )}
+          </div>
+          <div className="space-y-2 mb-8 xl:grid xl:grid-cols-2 xl:gap-2 xl:space-y-0">
             {shownRanking.length === 0 && (
               <p className="font-bold text-parchment/50 text-sm">Aucune équipe ne correspond.</p>
             )}
             {shownRanking.map((live) => {
               const i = rankIndex.get(live.team.id) ?? 0;
+              const stuck = isStuck(live);
+              const open = expandedTeam === live.team.id;
               return (
-              <Card key={live.team.id} className="p-3">
+              <Card
+                key={live.team.id}
+                className={`p-2.5 ${stuck ? "ring-4 ring-crimson" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="w-full text-left"
+                  aria-expanded={open}
+                  onClick={() => setExpandedTeam(open ? null : live.team.id)}
+                >
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="font-display text-lg w-7 shrink-0">
                     {i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `${i + 1}.`}
@@ -771,6 +809,14 @@ export default function LiveDashboardPage() {
                   )}
                   <span className="font-bold text-ink/60 text-sm tabular-nums shrink-0">
                     {live.done}/{live.total}
+                  </span>
+                  <span
+                    aria-hidden
+                    className={`font-display text-ink/40 shrink-0 transition-transform ${
+                      open ? "rotate-90" : ""
+                    }`}
+                  >
+                    ›
                   </span>
                 </div>
 
@@ -825,8 +871,7 @@ export default function LiveDashboardPage() {
                     })}
                 </div>
 
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="font-bold text-sm text-ink/70 min-w-0">
+                  <p className="font-bold text-sm text-ink/70 min-w-0 truncate">
                     {live.team.finished_at ? (
                       <>
                         🏆 Terminé en{" "}
@@ -848,15 +893,15 @@ export default function LiveDashboardPage() {
                         const min = cur.since
                           ? Math.floor((Date.now() - new Date(cur.since).getTime()) / 60000)
                           : null;
-                        const stuck = min != null && min >= 10 && game.status === "running";
+                        const late = min != null && min >= 10 && game.status === "running";
                         return (
                           <>
                             ➡️ {cur.step.title}
                             {min != null && (
-                              <span className={stuck ? "text-crimson" : "text-ink/45"}>
+                              <span className={late ? "text-crimson" : "text-ink/45"}>
                                 {" "}
                                 · depuis {min < 1 ? "moins d'une min" : `${min} min`}
-                                {stuck && " ⚠️ bloquée ? Envoie un indice !"}
+                                {late && " ⚠️ bloquée ?"}
                               </span>
                             )}
                           </>
@@ -866,25 +911,28 @@ export default function LiveDashboardPage() {
                       "En attente…"
                     )}
                   </p>
-                  <div className="flex gap-1.5">
-                    {/* Détail de l'équipe : toujours accessible, même partie terminée */}
+                </button>
+
+                {/* Actions dépliées au tap : la liste reste dense au repos */}
+                {open && (
+                  <div className="flex gap-1.5 flex-wrap mt-2 pt-2 border-t-2 border-ink/10">
                     <Button size="sm" variant="parchment" onClick={() => setManageTeam(live.team)}>
-                      👥
+                      👥 DÉTAIL
                     </Button>
                     {!live.team.finished_at && game.status !== "finished" && (
                       <>
                         <Button size="sm" variant="parchment" onClick={() => setHintTarget(live.team)}>
-                          💡 Indice
+                          💡 INDICE
                         </Button>
                         {live.current && (
                           <Button size="sm" variant="leaf" onClick={() => forceValidate(live)}>
-                            ✅ Valider
+                            ✅ VALIDER
                           </Button>
                         )}
                       </>
                     )}
                   </div>
-                </div>
+                )}
               </Card>
               );
             })}
@@ -892,10 +940,20 @@ export default function LiveDashboardPage() {
         </>
       )}
 
-      {/* Messages des équipes : panneau dédié pour ne jamais rater un SOS */}
-      {teamMessages.length > 0 && (
+      {/* Onglet SOS : les appels au maître du jeu */}
+      {game.status !== "lobby" && tab === "sos" && teamMessages.length === 0 && (
+        <Card className="p-6 text-center mb-8">
+          <div className="text-4xl mb-2">🆘</div>
+          <p className="font-display text-lg">Aucun message</p>
+          <p className="font-bold text-ink/55 text-sm mt-1">
+            Les équipes peuvent t&apos;écrire depuis leur écran de jeu — leurs messages
+            arriveront ici, et tu pourras répondre en un tap.
+          </p>
+        </Card>
+      )}
+      {game.status !== "lobby" && tab === "sos" && teamMessages.length > 0 && (
         <>
-          <div ref={sosRef} className="flex items-center justify-between gap-3 mb-3 flex-wrap scroll-mt-24">
+          <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
             <h2 className="font-display text-2xl text-gold">
               🆘 Messages des équipes
               {unreadCount > 0 && (
@@ -910,7 +968,7 @@ export default function LiveDashboardPage() {
               </Button>
             )}
           </div>
-          <div className="space-y-2 mb-8 max-h-80 overflow-y-auto overscroll-contain pr-1">
+          <div className="space-y-2 mb-8">
             {teamMessages.slice(0, 30).map((msg) => {
               const team = msg.team_id ? teamMap.get(msg.team_id) : undefined;
               const isNew = msg.id > seenMsgId;
@@ -943,7 +1001,10 @@ export default function LiveDashboardPage() {
         </>
       )}
 
-      {/* Log d'événements */}
+      {/* Onglet JOURNAL : le déroulé complet de la partie.
+          Avant le lancement il n'y a pas d'onglets → on l'affiche d'office. */}
+      {(tab === "journal" || game.status === "lobby") && (
+      <>
       <h2 className="font-display text-2xl text-parchment mb-3">Journal</h2>
       <div className="flex gap-1.5 mb-3 flex-wrap">
         {(
@@ -966,7 +1027,7 @@ export default function LiveDashboardPage() {
           </button>
         ))}
       </div>
-      <Card dark className="p-4 max-h-96 overflow-y-auto">
+      <Card dark className="p-4 mb-8">
         {(() => {
           const FILTER_TYPES: Record<string, string[]> = {
             sos: ["team_message"],
@@ -1000,11 +1061,27 @@ export default function LiveDashboardPage() {
           );
         })()}
       </Card>
+      </>
+      )}
 
-      {/* Photos à valider */}
-      {submissions.length > 0 && (
+      {/* Onglet PHOTOS : la file d'attente de jugement */}
+      {tab === "photos" && submissions.length === 0 && (
+        <Card className="p-6 text-center mb-8">
+          <div className="text-4xl mb-2">📸</div>
+          <p className="font-display text-lg">Aucune photo en attente</p>
+          <p className="font-bold text-ink/55 text-sm mt-1">
+            Tout est jugé ! Les photos déjà validées restent dans la galerie.
+          </p>
+          <Link href={`/org/games/${gameId}/photos`} className="contents">
+            <Button size="sm" variant="gold" className="mt-3">
+              🖼️ OUVRIR LA GALERIE
+            </Button>
+          </Link>
+        </Card>
+      )}
+      {tab === "photos" && submissions.length > 0 && (
         <>
-          <h2 ref={photosRef} className="font-display text-2xl text-gold mb-3 mt-8 animate-pulse scroll-mt-24">
+          <h2 className="font-display text-2xl text-gold mb-3">
             📸 Photos à valider ({submissions.length})
           </h2>
           <div className="space-y-4 mb-8">
@@ -1044,10 +1121,10 @@ export default function LiveDashboardPage() {
         </>
       )}
 
-      {/* Carte de suivi GPS */}
-      {game.status !== "lobby" && (
+      {/* Onglet CARTE : positions partagées par les joueurs */}
+      {game.status !== "lobby" && tab === "map" && (
         <>
-          <h2 className="font-display text-2xl text-parchment mb-3 mt-8">📍 Sur le terrain</h2>
+          <h2 className="font-display text-2xl text-parchment mb-3">📍 Sur le terrain</h2>
           <div className="mb-3">
             <TeamMap players={players} teams={teams} />
           </div>
@@ -1062,21 +1139,34 @@ export default function LiveDashboardPage() {
                     : null;
                   return (
                     <li key={p.id} className="flex items-center gap-2 font-bold text-sm text-parchment/80">
-                      <span
-                        className="w-3 h-3 rounded-full border border-parchment/40 shrink-0"
-                        style={{ backgroundColor: teamMap.get(p.team_id)?.color }}
-                      />
-                      <span className="truncate">{p.nickname}</span>
-                      <span className="text-parchment/45">
-                        {ageMin != null ? (ageMin < 1 ? "à l'instant" : `il y a ${ageMin} min`) : ""}
-                      </span>
+                      {/* Un tap sur le joueur ouvre la fiche de son équipe */}
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 min-w-0 flex-1 text-left py-1"
+                        onClick={() => {
+                          const t = teamMap.get(p.team_id);
+                          if (t) setManageTeam(t);
+                        }}
+                      >
+                        <span
+                          className="w-3 h-3 rounded-full border border-parchment/40 shrink-0"
+                          style={{ backgroundColor: teamMap.get(p.team_id)?.color }}
+                        />
+                        <span className="truncate">{p.nickname}</span>
+                        <span className="text-parchment/45 truncate">
+                          {teamMap.get(p.team_id)?.name}
+                        </span>
+                        <span className="text-parchment/45 shrink-0">
+                          {ageMin != null ? (ageMin < 1 ? "à l'instant" : `il y a ${ageMin} min`) : ""}
+                        </span>
+                      </button>
                       <a
                         className="contents"
                         href={`https://maps.google.com/?q=${p.last_lat},${p.last_lng}`}
                         target="_blank"
                         rel="noreferrer"
                       >
-                        <Button size="sm" variant="ghost" className="ml-auto !min-h-8 !py-0.5 !px-2.5 !text-xs">
+                        <Button size="sm" variant="ghost" className="shrink-0 !min-h-8 !py-0.5 !px-2.5 !text-xs">
                           🗺️ MAPS
                         </Button>
                       </a>
