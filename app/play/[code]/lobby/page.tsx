@@ -15,7 +15,7 @@ import Dialog from "@/components/ui/Dialog";
 import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
-import HowToPlay from "@/components/play/HowToPlay";
+import Briefing from "@/components/play/Briefing";
 import { showToast } from "@/components/ui/Toaster";
 import { charterRules } from "@/lib/game/charter";
 import { renderRich } from "@/lib/game/rich";
@@ -293,7 +293,7 @@ export default function LobbyPage() {
           <p className="text-center font-bold text-parchment/50 text-sm">
             Garde cette page ouverte : la chasse démarre automatiquement ! 🏴‍☠️
           </p>
-          <HowToPlay />
+          <Briefing briefing={settings.briefing} charter={settings.charter} />
         </>
       ) : invitedTeamCode ? (
         <Card className="p-5 text-center">
@@ -387,7 +387,7 @@ export default function LobbyPage() {
           >
             🔑 J&apos;AI DÉJÀ UN CODE ÉQUIPE
           </Button>
-          <HowToPlay />
+          <Briefing briefing={settings.briefing} charter={settings.charter} />
         </>
       )}
 
