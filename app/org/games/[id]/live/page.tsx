@@ -15,6 +15,7 @@ import Dialog from "@/components/ui/Dialog";
 import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import TeamMap from "@/components/org/TeamMap";
+import AwardsDialog, { type AwardItem, type Trophy } from "@/components/org/AwardsDialog";
 import { showToast } from "@/components/ui/Toaster";
 import { useConfirm } from "@/components/ui/Confirm";
 
@@ -101,14 +102,9 @@ export default function LiveDashboardPage() {
   const [tab, setTab] = useState<LiveTab>("teams");
   const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
   const [urgentFirst, setUrgentFirst] = useState(false);
-  const [bonusTarget, setBonusTarget] = useState<{ teamId: string; teamName: string; reason: string } | null>(null);
-  const [bonusAmount, setBonusAmount] = useState("50");
-  const [bonusListOpen, setBonusListOpen] = useState(false);
+  const [awardsOpen, setAwardsOpen] = useState(false);
   // Tous les bonus de la partie (requête dédiée, hors fenêtre du journal)
   const [bonusEvents, setBonusEvents] = useState<GameEvent[]>([]);
-  // Modification d'un bonus existant : l'event d'origine est annulé au moment
-  // de ré-attribuer le nouveau montant
-  const [bonusEditEventId, setBonusEditEventId] = useState<number | null>(null);
   const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
@@ -400,74 +396,55 @@ export default function LiveDashboardPage() {
     void load();
   }
 
-  // Bonus organisateur : +points (mode points) ou temps rendu (mode chrono),
-  // montant au choix via un petit dialog.
-  function awardBonus(teamId: string, teamName: string, reason: string) {
-    // Mode chrono : le bonus s'applique au temps final — pour une équipe qui
-    // n'a pas fini une partie déjà terminée, il n'aurait aucun effet.
-    if (
-      game?.settings.scoring !== "points" &&
-      game?.status === "finished" &&
-      !teams.find((t) => t.id === teamId)?.finished_at
-    ) {
-      showToast(
-        `Sans effet : « ${teamName} » n'a pas terminé le parcours (mode chrono). Passe la partie en mode points ou récompense-la à l'oral !`,
-        "info"
-      );
-      return;
-    }
-    setBonusAmount(game?.settings.scoring === "points" ? "50" : "1");
-    setBonusTarget({ teamId, teamName, reason });
-  }
-
-  async function sendBonus() {
-    if (!bonusTarget) return;
+  // Attribue une ou plusieurs récompenses d'un coup (podium, trophée, libre).
+  // Montant = points (mode points) ou minutes rendues (mode chrono).
+  async function awardMany(items: AwardItem[]) {
     const isPoints = game?.settings.scoring === "points";
-    const amount = Math.max(1, Math.round(Number(bonusAmount) || 0));
-    if (!amount) return;
+    // Mode chrono : un bonus de temps n'a d'effet que sur une équipe arrivée.
+    const sansEffet = !isPoints
+      ? items.filter((it) => !teams.find((t) => t.id === it.teamId)?.finished_at)
+      : [];
     try {
-      // Modification : on annule d'abord l'ancien bonus, puis on ré-attribue
-      if (bonusEditEventId != null) {
-        const res = await rpc<{ ok: boolean; error?: string }>("org_revoke_bonus", {
-          p_event_id: bonusEditEventId,
+      for (const it of items) {
+        await rpc("org_award_bonus", {
+          p_team_id: it.teamId,
+          p_points: isPoints ? it.amount : 0,
+          p_seconds: isPoints ? 0 : -it.amount * 60,
+          p_reason: it.reason,
         });
-        if (!res.ok && res.error !== "DEJA_ANNULE") {
-          throw new Error(res.error ?? "Annulation impossible");
-        }
       }
-      await rpc("org_award_bonus", {
-        p_team_id: bonusTarget.teamId,
-        p_points: isPoints ? amount : 0,
-        p_seconds: isPoints ? 0 : -amount * 60,
-        p_reason: bonusTarget.reason,
-      });
       showToast(
-        `Bonus ${isPoints ? `+${amount} pts` : `−${amount} min`} ${
-          bonusEditEventId != null ? "modifié" : "attribué"
-        } pour « ${bonusTarget.teamName} »`,
+        items.length > 1
+          ? `🏅 ${items.length} récompenses attribuées !`
+          : `🏅 Récompense attribuée à « ${
+              teams.find((t) => t.id === items[0].teamId)?.name ?? "?"
+            } »`,
         "success"
       );
-      setBonusTarget(null);
-      setBonusEditEventId(null);
+      if (sansEffet.length > 0) {
+        showToast(
+          `⚠️ ${sansEffet.length} équipe(s) n'ont pas terminé : en mode chrono, le temps rendu ne change pas leur classement.`,
+          "info"
+        );
+      }
       await load();
     } catch (err) {
-      showToast(`Bonus impossible : ${frError(err, "erreur")}`, "error");
+      showToast(`Récompense impossible : ${frError(err, "erreur")}`, "error");
     }
   }
 
-  // Annule un bonus depuis la liste « Bonus attribués »
-  async function revokeBonus(ev: GameEvent) {
-    const teamName = ev.team_id ? (teamMap.get(ev.team_id)?.name ?? "?") : "?";
+  async function revokeBonusById(eventId: number) {
+    // Un tap malheureux en pleine remise des prix, ça ne pardonne pas
     const ok = await confirm({
-      title: "↩️ Annuler ce bonus ?",
-      message: `Le bonus de « ${teamName} » sera repris (montants reversés). L'opération reste visible dans le journal.`,
-      confirmLabel: "Annuler le bonus",
+      title: "↩️ Annuler cette récompense ?",
+      message: "Les montants seront repris. L'opération reste tracée dans le journal.",
+      confirmLabel: "Annuler la récompense",
       danger: true,
     });
     if (!ok) return;
     try {
       const res = await rpc<{ ok: boolean; error?: string }>("org_revoke_bonus", {
-        p_event_id: ev.id,
+        p_event_id: eventId,
       });
       if (!res.ok) {
         showToast(
@@ -476,7 +453,7 @@ export default function LiveDashboardPage() {
         );
         return;
       }
-      showToast(`↩️ Bonus annulé pour « ${teamName} »`, "success");
+      showToast("↩️ Récompense annulée — montants reversés", "success");
       await load();
     } catch (err) {
       showToast(`Annulation impossible : ${frError(err, "erreur")}`, "error");
@@ -559,6 +536,45 @@ export default function LiveDashboardPage() {
   const shownRanking = urgentFirst
     ? [...filteredRanking].sort((a, b) => Number(isStuck(b)) - Number(isStuck(a)))
     : filteredRanking;
+
+  // Récompenses proposées par l'app : montant par défaut sensé, et le motif
+  // sert de clé « déjà attribué » (voir AwardsDialog).
+  const trophyAmount = game.settings.scoring === "points" ? 100 : 1;
+  const trophies: Trophy[] = [];
+  if (funStats?.firstFinisher) {
+    trophies.push({
+      key: "first",
+      icon: "🏁",
+      label: "Premier arrivé au trésor",
+      teamId: funStats.firstFinisher.id,
+      reason: "premier arrivé au trésor",
+      amount: trophyAmount,
+    });
+  }
+  if (funStats?.flash) {
+    trophies.push({
+      key: "flash",
+      icon: "⚡",
+      label: "Étape éclair de la partie",
+      detail: `${stepMap.get(funStats.flash.stepId)?.title ?? "?"} en ${formatDuration(funStats.flash.ms)}`,
+      teamId: funStats.flash.teamId,
+      reason: "étape éclair de la partie",
+      amount: trophyAmount,
+    });
+  }
+  if (funStats?.bestAvg) {
+    trophies.push({
+      key: "regular",
+      icon: "🎯",
+      label: "L'équipe la plus régulière",
+      detail: `${formatDuration(funStats.bestAvg.ms)} de moyenne par étape`,
+      teamId: funStats.bestAvg.teamId,
+      reason: "équipe la plus régulière",
+      amount: trophyAmount,
+    });
+  }
+  // Classement officiel, pour le podium
+  const rankedTeams = ranking.map((l) => l.team);
 
   const TABS: { key: LiveTab; label: string; badge: number }[] = [
     { key: "teams", label: "🏁 Équipes", badge: stuckCount },
@@ -655,9 +671,9 @@ export default function LiveDashboardPage() {
             <Button variant="parchment" disabled={busy} onClick={() => setStatsOpen(true)}>
               📈 Stats
             </Button>
-            {/* Accessible aussi partie terminée : corriger les bonus après coup */}
-            <Button variant="parchment" disabled={busy} onClick={() => setBonusListOpen(true)}>
-              🎁 Bonus
+            {/* Accessible aussi partie terminée : la remise des prix se fait après */}
+            <Button variant="gold" disabled={busy} onClick={() => setAwardsOpen(true)}>
+              🏅 Récompenses
               {bonusEvents.filter((e) => !e.payload.revoked).length > 0 &&
                 ` (${bonusEvents.filter((e) => !e.payload.revoked).length})`}
             </Button>
@@ -1232,127 +1248,19 @@ export default function LiveDashboardPage() {
         )}
       </Dialog>
 
-      {/* Dialog Bonus : montant au choix — élevé pour passer au-dessus de Stats */}
-      <Dialog
-        open={!!bonusTarget}
-        onClose={() => {
-          setBonusTarget(null);
-          setBonusEditEventId(null);
-        }}
-        title={`${bonusEditEventId != null ? "✏️ Modifier le bonus de" : "Bonus pour"} « ${bonusTarget?.teamName ?? ""} »`}
-        elevated
-      >
-        {bonusTarget && (
-          <div className="space-y-4">
-            <p className="font-bold text-ink/70 text-sm">Motif : {bonusTarget.reason}</p>
-            <div>
-              <Label>
-                {game.settings.scoring === "points" ? "Points bonus" : "Minutes rendues (chrono)"}
-              </Label>
-              <div className="flex gap-2 items-center">
-                <Input
-                  value={bonusAmount}
-                  onChange={(e) => setBonusAmount(e.target.value.replace(/\D/g, ""))}
-                  inputMode="numeric"
-                  className="w-24 text-center font-mono"
-                />
-                {(game.settings.scoring === "points" ? [25, 50, 100] : [1, 2, 5]).map((preset) => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => setBonusAmount(String(preset))}
-                    className={`h-11 px-3 rounded-lg border-2 border-ink font-bold text-sm ${
-                      Number(bonusAmount) === preset ? "bg-gold" : "bg-white"
-                    }`}
-                  >
-                    {game.settings.scoring === "points" ? `+${preset}` : `−${preset} min`}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <Button full size="lg" onClick={sendBonus} disabled={!Number(bonusAmount)}>
-              {bonusEditEventId != null ? "💾 ENREGISTRER LA MODIFICATION" : "ATTRIBUER LE BONUS"}
-            </Button>
-          </div>
-        )}
-      </Dialog>
-
-      {/* Dialog gestion des bonus : liste, annulation, modification */}
-      <Dialog open={bonusListOpen} onClose={() => setBonusListOpen(false)} title="🎁 Bonus attribués">
-        {bonusEvents.length === 0 ? (
-          <p className="font-bold text-ink/60">
-            Aucun bonus attribué pour l&apos;instant. Attribue-les depuis le classement ou les
-            stats — tu pourras les annuler ou les modifier ici.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {bonusEvents
-              .map((ev) => {
-                const pts = Number(ev.payload.points ?? 0);
-                const sec = Number(ev.payload.seconds ?? 0);
-                const revoked = !!ev.payload.revoked;
-                const team = ev.team_id ? teamMap.get(ev.team_id) : undefined;
-                const amount =
-                  pts !== 0
-                    ? `+${pts} pts`
-                    : `${sec > 0 ? "+" : "−"}${Math.abs(Math.round(sec / 60))} min`;
-                return (
-                  <div
-                    key={ev.id}
-                    className={`rounded-xl border-2 border-ink/20 px-3 py-2 ${revoked ? "opacity-50" : ""}`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="w-3 h-3 rounded-full border border-ink shrink-0"
-                        style={{ backgroundColor: team?.color }}
-                      />
-                      <span className="font-bold text-sm flex-1 min-w-0 truncate">
-                        {team?.name ?? "Équipe supprimée"}
-                      </span>
-                      <span className={`font-display text-sm shrink-0 ${revoked ? "line-through" : ""}`}>
-                        {amount}
-                      </span>
-                    </div>
-                    <p className="font-bold text-ink/55 text-xs mt-0.5">
-                      {formatClock(ev.created_at)} — {String(ev.payload.reason ?? "")}
-                      {revoked && " · ↩️ annulé"}
-                    </p>
-                    {!revoked && team && (
-                      <div className="flex gap-2 mt-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="flex-1"
-                          onClick={() => {
-                            setBonusEditEventId(ev.id);
-                            setBonusAmount(
-                              String(pts !== 0 ? pts : Math.max(1, Math.abs(Math.round(sec / 60))))
-                            );
-                            setBonusTarget({
-                              teamId: team.id,
-                              teamName: team.name,
-                              reason: String(ev.payload.reason ?? ""),
-                            });
-                          }}
-                        >
-                          ✏️ MODIFIER
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline-crimson"
-                          className="flex-1"
-                          onClick={() => void revokeBonus(ev)}
-                        >
-                          ↩️ ANNULER
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-          </div>
-        )}
-      </Dialog>
+      {/* Récompenses : tout au même endroit — ce qui est déjà donné, le podium
+          en un geste, les trophées, un bonus libre et l'historique annulable. */}
+      <AwardsDialog
+        open={awardsOpen}
+        onClose={() => setAwardsOpen(false)}
+        scoring={game.settings.scoring === "points" ? "points" : "time"}
+        teams={teams}
+        ranked={rankedTeams}
+        trophies={trophies}
+        bonusEvents={bonusEvents}
+        onAward={awardMany}
+        onRevoke={revokeBonusById}
+      />
 
       {/* Dialog Stats : records par épreuve + infos fun */}
       <Dialog open={statsOpen} onClose={() => setStatsOpen(false)} title="📈 Stats de la partie">
@@ -1363,9 +1271,8 @@ export default function LiveDashboardPage() {
         ) : (
           <div className="space-y-4">
             <p className="font-bold text-ink/55 text-xs">
-              « BONUS » récompense l&apos;équipe du record —{" "}
-              {game.settings.scoring === "points" ? "points" : "minutes rendues"} au montant de
-              ton choix.
+              Les records de la partie, à lire et à raconter. Pour récompenser, tout se passe
+              dans « 🏅 Récompenses ».
             </p>
             {/* Infos fun */}
             <div className="space-y-2">
@@ -1377,15 +1284,6 @@ export default function LiveDashboardPage() {
                       {funStats.firstFinisher.name}
                     </span>
                   </span>
-                  <Button
-                    size="sm"
-                    variant="gold"
-                    onClick={() =>
-                      awardBonus(funStats.firstFinisher!.id, funStats.firstFinisher!.name, "premier arrivé au trésor")
-                    }
-                  >
-                    BONUS
-                  </Button>
                 </div>
               )}
               {funStats.flash && (
@@ -1400,19 +1298,6 @@ export default function LiveDashboardPage() {
                     </span>{" "}
                     en {formatDuration(funStats.flash.ms)} !
                   </span>
-                  <Button
-                    size="sm"
-                    variant="gold"
-                    onClick={() =>
-                      awardBonus(
-                        funStats.flash!.teamId,
-                        teamMap.get(funStats.flash!.teamId)?.name ?? "?",
-                        "étape éclair de la partie"
-                      )
-                    }
-                  >
-                    BONUS
-                  </Button>
                 </div>
               )}
               {funStats.bestAvg && (
@@ -1427,19 +1312,6 @@ export default function LiveDashboardPage() {
                     </span>{" "}
                     — {formatDuration(funStats.bestAvg.ms)} de moyenne par étape
                   </span>
-                  <Button
-                    size="sm"
-                    variant="gold"
-                    onClick={() =>
-                      awardBonus(
-                        funStats.bestAvg!.teamId,
-                        teamMap.get(funStats.bestAvg!.teamId)?.name ?? "?",
-                        "équipe la plus régulière"
-                      )
-                    }
-                  >
-                    BONUS
-                  </Button>
                 </div>
               )}
               {funStats.hardest && funStats.bestByStep.size > 1 && (
@@ -1476,15 +1348,6 @@ export default function LiveDashboardPage() {
                             <span className="tabular-nums text-ink/60">
                               {formatDuration(best.ms)}
                             </span>
-                            <button
-                              className="h-8 px-2 rounded-lg border-2 border-ink bg-gold shrink-0 text-[10px] font-bold"
-                              aria-label={`Bonus pour ${team.name}`}
-                              onClick={() =>
-                                awardBonus(team.id, team.name, `plus rapide sur « ${step.title} »`)
-                              }
-                            >
-                              BONUS
-                            </button>
                           </>
                         ) : (
                           <span className="text-ink/40">—</span>
@@ -1502,22 +1365,9 @@ export default function LiveDashboardPage() {
         )}
       </Dialog>
 
-      {/* Dialog Outils : bonus + neutraliser une étape */}
+      {/* Dialog Outils : neutraliser une étape */}
       <Dialog open={toolsOpen} onClose={() => setToolsOpen(false)} title="🛠️ Outils de secours">
         <div className="space-y-3">
-          <Button
-            full
-            variant="gold"
-            size="md"
-            onClick={() => {
-              setToolsOpen(false);
-              setBonusListOpen(true);
-            }}
-          >
-            🎁 GÉRER LES BONUS ATTRIBUÉS
-            {bonusEvents.length > 0 &&
-              ` (${bonusEvents.filter((e) => !e.payload.revoked).length})`}
-          </Button>
           <p className="font-bold text-ink/70 text-sm">
             Balise cassée, lieu inaccessible ? Neutralise l&apos;étape : elle sera validée pour
             toutes les équipes qui ne l&apos;ont pas encore faite.
