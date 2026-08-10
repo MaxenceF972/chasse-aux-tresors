@@ -294,6 +294,17 @@ export interface RankedTeam {
   bonus_points?: number;
 }
 
+/** Récompense attribuée par l'organisateur, avec son motif (visible des joueurs). */
+export interface AwardedBonus {
+  team_id: string;
+  /** Points gagnés (mode points) */
+  points: number;
+  /** Secondes ajoutées au chrono — négatif = temps rendu (mode chrono) */
+  seconds: number;
+  reason: string;
+  created_at: string;
+}
+
 export interface RankingData {
   error?: string;
   game: {
@@ -307,6 +318,8 @@ export interface RankingData {
     elapsed_ms: number;
   };
   teams: RankedTeam[];
+  /** Récompenses de l'organisateur avec leur motif — absent tant que le SQL n'est pas ré-appliqué */
+  bonuses?: AwardedBonus[];
   /** Photos à l'honneur (servies par get_ranking : la RLS submissions ne laisse pas les autres équipes les lire) */
   winner_photos?: { url: string; team_id: string }[];
   /** Compat ancien schéma : première photo à l'honneur */

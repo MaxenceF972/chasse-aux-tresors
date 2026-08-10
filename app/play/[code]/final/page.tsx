@@ -5,10 +5,10 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ensureAnonSession, rpc, sb } from "@/lib/supabase/client";
-import type { RankedTeam, RankingData } from "@/lib/types";
+import type { AwardedBonus, RankedTeam, RankingData } from "@/lib/types";
 import { clearPlayerSession, getPlayerSession } from "@/lib/game/session";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
-import { formatDuration } from "@/lib/game/format";
+import { bonusLabel, formatDuration } from "@/lib/game/format";
 import { showToast } from "@/components/ui/Toaster";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
@@ -129,6 +129,15 @@ export default function FinalPage() {
   }, [data?.game?.status]);
 
   const awards = useMemo(() => (data ? computeAwards(data.teams) : []), [data]);
+  // Récompenses de l'organisateur, regroupées par équipe : les joueurs doivent
+  // pouvoir relier chaque point gagné à ce qu'il récompense.
+  const bonusesByTeam = useMemo(() => {
+    const map = new Map<string, AwardedBonus[]>();
+    for (const b of data?.bonuses ?? []) {
+      map.set(b.team_id, [...(map.get(b.team_id) ?? []), b]);
+    }
+    return map;
+  }, [data]);
 
   if (!data) {
     return (
@@ -245,6 +254,14 @@ export default function FinalPage() {
                     ` · +${Math.round(entry.penalty_seconds / 60)} min pénalité`}
                   {isPoints && entry.time_ms != null && ` · ${formatDuration(entry.time_ms)}`}
                 </p>
+                {/* Les récompenses reçues, avec leur motif : on comprend d'où
+                    viennent les points sans avoir à demander */}
+                {(bonusesByTeam.get(entry.id) ?? []).map((b, bi) => (
+                  <p key={bi} className="text-sm font-bold text-leaf leading-snug">
+                    🏅 {bonusLabel(b.points, b.seconds)}
+                    {b.reason && <span className="text-ink/55"> — {b.reason}</span>}
+                  </p>
+                ))}
               </div>
               <span className="font-display text-lg tabular-nums">
                 {entry.time_ms == null && !isPoints ? "⏳" : scoreLabel(entry)}
@@ -253,6 +270,21 @@ export default function FinalPage() {
           </Card>
         ))}
       </div>
+
+      {/* Comment le score se calcule : sans ça, un classement se conteste */}
+      <p className="font-bold text-parchment/45 text-xs text-center mt-3 leading-relaxed">
+        {isPoints ? (
+          <>
+            Score = points des étapes validées <span className="text-leaf">+ récompenses 🏅</span>{" "}
+            − pénalités (indices, étapes passées).
+          </>
+        ) : (
+          <>
+            Classement au chrono : temps de parcours + pénalités (indices, étapes passées){" "}
+            <span className="text-leaf">− le temps offert par les récompenses 🏅</span>.
+          </>
+        )}
+      </p>
 
       {/* Photos à l'honneur */}
       {finished && winnerPhotos.length > 0 && (
@@ -281,9 +313,12 @@ export default function FinalPage() {
       {/* Récompenses */}
       {finished && awards.length > 0 && (
         <>
-          <h2 className="font-display text-2xl text-gold text-center mt-10 mb-4 -rotate-1">
-            🎖️ RÉCOMPENSES
+          <h2 className="font-display text-2xl text-gold text-center mt-10 mb-1 -rotate-1">
+            🎖️ TROPHÉES D&apos;HONNEUR
           </h2>
+          <p className="text-center font-bold text-parchment/50 text-xs mb-4">
+            Les exploits de la partie — pour la gloire, pas pour les points !
+          </p>
           <div className="space-y-3">
             {awards.map((award, i) => (
               <motion.div

@@ -1867,6 +1867,23 @@ begin
                                'finished_at', v_game.finished_at, 'scoring', v_scoring,
                                'elapsed_ms', public.game_elapsed_ms(v_game)),
     'teams', v_teams,
+    -- Récompenses de l'organisateur AVEC leur motif : sans ça, les joueurs
+    -- voient des points tomber sans comprendre pourquoi. Servies ici (security
+    -- definer) car la RLS d'events ne montre à un joueur que sa propre équipe.
+    'bonuses', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'team_id', e.team_id,
+               'points',  coalesce((e.payload->>'points')::int, 0),
+               'seconds', coalesce((e.payload->>'seconds')::int, 0),
+               'reason',  coalesce(e.payload->>'reason', ''),
+               'created_at', e.created_at)
+             order by e.id)
+      from public.events e
+      where e.game_id = v_game.id
+        and e.type = 'bonus_awarded'
+        and e.team_id is not null
+        and not coalesce((e.payload->>'revoked')::boolean, false)
+    ), '[]'::jsonb),
     -- Servies ici (security definer) car la RLS de submissions ne permet pas
     -- aux autres équipes de lire les photos à l'honneur en direct.
     'winner_photos', coalesce((

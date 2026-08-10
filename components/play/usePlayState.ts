@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ensureAnonSession, isNetworkError, rpc, sb } from "@/lib/supabase/client";
 import type { PlayState, ValidateKind, ValidateResult } from "@/lib/types";
 import { enqueueValidation, flushQueue, listQueued } from "@/lib/game/offline-queue";
+import { bonusLabel } from "@/lib/game/format";
 import { precacheUrls } from "@/lib/pwa";
 
 export type SubmitOutcome =
@@ -15,6 +16,8 @@ export type SubmitOutcome =
 export interface OrgMessage {
   id: number;
   message: string;
+  /** "bonus" = récompense du maître du jeu (célébrée), "hint" = message */
+  kind: "hint" | "bonus";
 }
 
 const STATE_CACHE_KEY = "toyah:playstate";
@@ -121,9 +124,22 @@ export function usePlayState(expectedCode?: string) {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "events", filter: `team_id=eq.${teamId}` },
         (payload) => {
-          const row = payload.new as { id: number; type: string; payload: { message?: string } };
+          const row = payload.new as {
+            id: number;
+            type: string;
+            payload: { message?: string; points?: number; seconds?: number; reason?: string };
+          };
           if (row.type === "hint_sent" && row.payload?.message) {
-            setOrgMessage({ id: row.id, message: row.payload.message });
+            setOrgMessage({ id: row.id, message: row.payload.message, kind: "hint" });
+          } else if (row.type === "bonus_awarded") {
+            // L'équipe doit comprendre POURQUOI elle gagne : montant + motif
+            const label = bonusLabel(Number(row.payload?.points ?? 0), Number(row.payload?.seconds ?? 0));
+            const reason = String(row.payload?.reason ?? "").trim();
+            setOrgMessage({
+              id: row.id,
+              message: reason ? `${label} — ${reason}` : label,
+              kind: "bonus",
+            });
           }
           void refetch();
         }

@@ -88,9 +88,13 @@ export default function GameScreen() {
     if (state.game.status === "finished") router.replace(`/play/${code}/final`);
   }, [state, code, router]);
 
-  // Message de l'organisateur → vibration + son
+  // Message de l'organisateur → vibration + son ; une récompense, elle, se fête
   useEffect(() => {
-    if (orgMessage) {
+    if (!orgMessage) return;
+    if (orgMessage.kind === "bonus") {
+      sfx.fanfare();
+      haptics.success();
+    } else {
       sfx.pop();
       haptics.scan();
     }
@@ -638,11 +642,23 @@ export default function GameScreen() {
             exit={{ y: 120, opacity: 0 }}
             transition={{ type: "spring", stiffness: 300, damping: 24 }}
             onClick={clearOrgMessage}
-            className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-4 z-50 max-w-lg mx-auto rounded-2xl border-[3px] border-ink bg-gold p-4 text-left shadow-[5px_5px_0_0_#111111]"
+            className={`fixed bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-4 z-50 max-w-lg mx-auto rounded-2xl border-[3px] border-ink p-4 text-left shadow-[5px_5px_0_0_#111111] ${
+              orgMessage.kind === "bonus" ? "bg-leaf text-parchment" : "bg-gold"
+            }`}
           >
-            <p className="font-display text-sm mb-0.5">📨 MESSAGE DE L&apos;ORGANISATEUR</p>
-            <p className="font-bold text-ink/85">{orgMessage.message}</p>
-            <p className="text-xs font-bold text-ink/50 mt-1">(toucher pour fermer)</p>
+            {orgMessage.kind === "bonus" ? (
+              <>
+                <p className="font-display text-lg mb-0.5">🏅 RÉCOMPENSE DU MAÎTRE DU JEU !</p>
+                <p className="font-bold">{orgMessage.message}</p>
+                <p className="text-xs font-bold text-parchment/60 mt-1">(toucher pour fermer)</p>
+              </>
+            ) : (
+              <>
+                <p className="font-display text-sm mb-0.5">📨 MESSAGE DE L&apos;ORGANISATEUR</p>
+                <p className="font-bold text-ink/85">{orgMessage.message}</p>
+                <p className="text-xs font-bold text-ink/50 mt-1">(toucher pour fermer)</p>
+              </>
+            )}
           </motion.button>
         )}
       </AnimatePresence>

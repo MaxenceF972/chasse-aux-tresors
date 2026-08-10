@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { rpc } from "@/lib/supabase/client";
-import { formatDuration } from "@/lib/game/format";
+import { bonusLabel, formatDuration } from "@/lib/game/format";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import type { RankedTeam, RankingData } from "@/lib/types";
 import { sfx } from "@/lib/game/sounds";
@@ -168,6 +168,15 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
                   {t.finished_at && (
                     <span className="block text-xs font-bold text-leaf">Arrivés ! 🏁</span>
                   )}
+                  {/* Récompenses reçues, avec leur motif */}
+                  {(data?.bonuses ?? [])
+                    .filter((b) => b.team_id === t.id)
+                    .map((b, bi) => (
+                      <span key={bi} className="block text-xs font-bold text-leaf leading-snug">
+                        🏅 {bonusLabel(b.points, b.seconds)}
+                        {b.reason && <span className="text-ink/50"> — {b.reason}</span>}
+                      </span>
+                    ))}
                 </span>
                 <span className="font-display tabular-nums shrink-0 text-right">{scoreOf(t)}</span>
               </div>
