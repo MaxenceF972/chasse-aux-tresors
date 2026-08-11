@@ -23,7 +23,7 @@ const RULES = [
   {
     icon: "🏷️",
     title: "Scanner les balises",
-    text: "Sur place, posez le haut du téléphone sur la puce NFC, écran allumé : la validation s'ouvre toute seule. Balise abîmée ou introuvable ? Saisissez le code imprimé à côté.",
+    text: "Sur place, posez le haut du téléphone sur la puce NFC, écran allumé : la validation s'ouvre toute seule. Balise abîmée ou introuvable ? Contactez le maître du jeu.",
   },
   {
     icon: "🧩",
@@ -116,6 +116,15 @@ export default function Briefing({ charter }: BriefingProps) {
 
       <Dialog open={open} onClose={() => setOpen(false)} title="📋 Briefing">
         <div className="space-y-5">
+          {/* 0. Le réflexe qui évite 90 % des « on n'avait pas vu » : scroller.
+              Vrai pour ce briefing comme pour chaque écran de la partie. */}
+          <p className="rounded-xl border-[3px] border-ink bg-gold/15 p-3 font-bold text-sm leading-relaxed">
+            ⬇️ <strong>Faites défiler chaque écran jusqu&apos;en bas</strong> — ce briefing comme
+            toutes les pages de la partie. Les énoncés, les indices et les boutons continuent
+            souvent sous ce que l&apos;écran affiche : c&apos;est comme ça qu&apos;on rate une
+            information.
+          </p>
+
           {/* 1. Le principe (la présentation de l'organisateur est déjà
               affichée en clair sur le lobby : inutile de la répéter ici) */}
           <section>
