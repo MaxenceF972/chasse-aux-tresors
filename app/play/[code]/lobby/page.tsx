@@ -328,6 +328,8 @@ export default function LobbyPage() {
         </Card>
       ) : (
         <>
+          {/* À lire AVANT de choisir son équipage */}
+          <Briefing charter={settings.charter} />
           <h2 className="font-display text-xl text-parchment -mb-2">Choisis ton équipage :</h2>
           <div className="space-y-3">
             {(lobby.teams ?? []).map((team) => {
@@ -364,8 +366,6 @@ export default function LobbyPage() {
               );
             })}
           </div>
-          {/* À lire AVANT de s'engager dans une équipe */}
-          <Briefing charter={settings.charter} />
           <Button
             size="lg"
             variant="gold"
