@@ -293,7 +293,7 @@ export default function LobbyPage() {
           <p className="text-center font-bold text-parchment/50 text-sm">
             Garde cette page ouverte : la chasse démarre automatiquement ! 🏴‍☠️
           </p>
-          <Briefing briefing={settings.briefing} charter={settings.charter} />
+          <Briefing charter={settings.charter} />
         </>
       ) : invitedTeamCode ? (
         <Card className="p-5 text-center">
@@ -364,6 +364,8 @@ export default function LobbyPage() {
               );
             })}
           </div>
+          {/* À lire AVANT de s'engager dans une équipe */}
+          <Briefing charter={settings.charter} />
           <Button
             size="lg"
             variant="gold"
@@ -387,7 +389,6 @@ export default function LobbyPage() {
           >
             🔑 J&apos;AI DÉJÀ UN CODE ÉQUIPE
           </Button>
-          <Briefing briefing={settings.briefing} charter={settings.charter} />
         </>
       )}
 

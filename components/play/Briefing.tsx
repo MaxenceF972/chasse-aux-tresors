@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { charterRules } from "@/lib/game/charter";
-import { renderRich } from "@/lib/game/rich";
 import { getGeoConsent, isMuted, setGeoConsent, setMuted, type GeoConsent } from "@/lib/game/prefs";
 import { enablePush, isPushEnabled, pushSupported } from "@/lib/push";
 import { sfx } from "@/lib/game/sounds";
@@ -11,8 +10,6 @@ import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 
 interface BriefingProps {
-  /** Présentation écrite par l'organisateur (settings.briefing) */
-  briefing?: string;
   /** Charte personnalisée (settings.charter), sinon la charte par défaut */
   charter?: string[];
 }
@@ -65,7 +62,7 @@ const RULES = [
  * charte, et surtout un vrai réglage du téléphone — les permissions se
  * demandent ICI, au calme, plutôt qu'en pleine course sur le terrain.
  */
-export default function Briefing({ briefing, charter }: BriefingProps) {
+export default function Briefing({ charter }: BriefingProps) {
   const [open, setOpen] = useState(false);
   const [muted, setMutedState] = useState(false);
   const [geo, setGeo] = useState<GeoConsent>(null);
@@ -119,17 +116,8 @@ export default function Briefing({ briefing, charter }: BriefingProps) {
 
       <Dialog open={open} onClose={() => setOpen(false)} title="📋 Briefing">
         <div className="space-y-5">
-          {/* 1. Le concept, par l'organisateur puis en général */}
-          {briefing && (
-            <section className="rounded-xl border-[3px] border-ink bg-gold/20 p-3">
-              <h3 className="font-display text-lg mb-1">📜 Le mot du maître du jeu</h3>
-              <div
-                className="font-bold text-ink/85 leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: renderRich(briefing) }}
-              />
-            </section>
-          )}
-
+          {/* 1. Le principe (la présentation de l'organisateur est déjà
+              affichée en clair sur le lobby : inutile de la répéter ici) */}
           <section>
             <h3 className="font-display text-lg mb-2">🧭 Le principe</h3>
             <p className="font-bold text-ink/75 text-sm leading-relaxed">
@@ -159,7 +147,7 @@ export default function Briefing({ briefing, charter }: BriefingProps) {
                   <span className="flex-1 min-w-0 font-bold text-sm">
                     🔊 Sons &amp; vibrations
                     <span className="block text-ink/50 text-xs">
-                      Ils confirment chaque validation — et réveillent l&apos;audio du téléphone.
+                      Ils confirment chaque validation et chaque récompense.
                     </span>
                   </span>
                   <Button
@@ -180,17 +168,25 @@ export default function Briefing({ briefing, charter }: BriefingProps) {
                   </Button>
                 </div>
                 {!muted && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="mt-1.5"
-                    onClick={() => {
-                      sfx.success();
-                      haptics.success();
-                    }}
-                  >
-                    ▶️ TESTER LE SON
-                  </Button>
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-1.5"
+                      onClick={() => {
+                        sfx.success();
+                        haptics.success();
+                      }}
+                    >
+                      ▶️ TESTER LE SON
+                    </Button>
+                    <p className="font-bold text-crimson text-xs mt-1.5 leading-snug">
+                      ⚠️ Tu n&apos;entends rien ? Ton téléphone est en <strong>mode silencieux</strong> :
+                      sur iPhone, bascule le petit bouton sur la tranche gauche ; sur Android,
+                      monte le volume « multimédia ». Sans ça, tu rateras les sons de toute la
+                      partie.
+                    </p>
+                  </>
                 )}
               </div>
 
