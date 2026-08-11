@@ -134,6 +134,19 @@ export default function AntisechePage() {
                     </span>
                   </p>
                 )}
+                {step.type !== "gps" &&
+                  (step.content.gps_guidance === "compass" ||
+                    step.content.gps_guidance === "hotcold") &&
+                  secrets?.gps_lat != null && (
+                    <p>
+                      {step.content.gps_guidance === "compass" ? "🧭 Guidage boussole" : "🔥 Guidage chaud/froid"}{" "}
+                      (sans carte) :{" "}
+                      <span className="font-mono bg-parchment px-1.5 py-0.5 rounded border border-ink/30">
+                        {secrets.gps_lat}, {secrets.gps_lng}
+                      </span>{" "}
+                      · arrivée {secrets.gps_radius_m ?? 20} m
+                    </p>
+                  )}
                 {step.type === "gps" && secrets?.gps_lat != null && (
                   <p>
                     📍 Cible GPS :{" "}

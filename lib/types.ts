@@ -57,7 +57,9 @@ export interface Game {
 export interface StepContent {
   body?: string;
   minigame?: { kind: MinigameKind; config: Record<string, unknown> };
-  /** Point de rendez-vous GPS public : affiché aux joueurs (« rendez-vous ici ») */
+  /** Point de rendez-vous GPS public : affiché aux joueurs (« rendez-vous ici »).
+      Renseigné uniquement en guidage « map » — les autres modes gardent le
+      point secret dans step_secrets pour ne rien divulguer au client. */
   rdv?: { lat: number; lng: number };
   /** Épreuve photo : bonus (avance direct, jugée après) ou gate (bloquante, l'orga valide pour avancer) */
   photo_mode?: "bonus" | "gate";
@@ -67,9 +69,13 @@ export interface StepContent {
   /** L'épreuve peut être sautée PUIS rattrapée plus tard — réussir le rattrapage
       annule la pénalité du skip et rend le gain (défaut : vrai pour les mini-jeux) */
   redeemable?: boolean;
-  /** Balise GPS : "compass" (boussole + distance live), "hotcold" (thermomètre)
-      ou "none" (aucun indice — validation silencieuse à l'arrivée) */
-  gps_guidance?: "compass" | "hotcold" | "none";
+  /** Guidage vers le point de l'étape.
+      Balise GPS (type "gps", l'arrivée VALIDE) : "compass" (boussole + distance
+      live), "hotcold" (thermomètre) ou "none" (aucun indice, validation
+      silencieuse à l'arrivée).
+      Autres types (l'arrivée guide seulement, la validation reste l'épreuve) :
+      "map" (carte + itinéraire, défaut), "compass" ou "hotcold". */
+  gps_guidance?: "compass" | "hotcold" | "none" | "map";
   /** Chaud/froid : 6 seuils en m (FROID→BRÛLANT, décroissants ; au-delà = glacial) */
   gps_hotcold_thresholds?: number[];
   /** Compat : ancienne portée unique (au-delà = glacial) — remplacée par les seuils */
@@ -97,8 +103,17 @@ export interface Step {
   created_at: string;
 }
 
+/** Nature d'un indice : simple texte, média (photo/son/vidéo) ou lieu sur la carte */
+export type HintKind = "text" | "media" | "gps";
+
 export interface Hint {
   text: string;
+  /** Défaut « text » (indices créés avant les indices riches) */
+  kind?: HintKind;
+  /** Indice média : photo, enregistrement audio ou vidéo révélé au déblocage */
+  media_url?: string | null;
+  /** Indice lieu : le point s'affiche sur une carte au déblocage */
+  gps?: { lat: number; lng: number } | null;
   penalty_sec?: number | null;
   unlock_after_sec?: number | null;
 }
@@ -209,6 +224,11 @@ export interface HintMeta {
   available_in_sec: number;
   unlocked: boolean;
   text: string | null;
+  /** Nature de l'indice — connue AVANT déblocage (« indice photo », « indice lieu ») */
+  kind?: HintKind;
+  /** Renseignés uniquement une fois l'indice débloqué */
+  media_url?: string | null;
+  gps?: { lat: number; lng: number } | null;
 }
 
 export interface PublicStep {
@@ -225,7 +245,8 @@ export interface PublicStep {
   chain_group?: string | null;
   points: number;
   time_limit_sec: number | null;
-  /** Balise GPS en mode boussole : cible révélée pour l'étape courante uniquement */
+  /** Guidage boussole (balise GPS ou point d'une autre épreuve) : cible révélée
+      pour l'étape courante uniquement */
   gps_target?: { lat: number; lng: number; radius: number } | null;
 }
 

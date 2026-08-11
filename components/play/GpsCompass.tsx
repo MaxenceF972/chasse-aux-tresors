@@ -6,6 +6,8 @@ interface GpsCompassProps {
   target: { lat: number; lng: number; radius: number };
   /** Position live remontée au parent (pour la validation serveur) */
   onUpdate: (lat: number, lng: number, distanceM: number) => void;
+  /** Message d'arrivée — différent quand la boussole ne fait que guider */
+  withinLabel?: string;
 }
 
 function distanceM(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
@@ -46,7 +48,11 @@ interface OrientationEventLike extends Event {
 }
 
 /** Boussole de géocaching : distance live + flèche qui pointe vers la cible. */
-export default function GpsCompass({ target, onUpdate }: GpsCompassProps) {
+export default function GpsCompass({
+  target,
+  onUpdate,
+  withinLabel = "Vous y êtes ! Validez ci-dessous 🎉",
+}: GpsCompassProps) {
   const [pos, setPos] = useState<{ lat: number; lng: number } | null>(null);
   const [acc, setAcc] = useState<number | null>(null);
   const [heading, setHeading] = useState<number | null>(null);
@@ -164,7 +170,7 @@ export default function GpsCompass({ target, onUpdate }: GpsCompassProps) {
         {dist != null ? fmtDist(dist) : "…"}
       </p>
       {within ? (
-        <p className="font-bold text-leaf text-sm mt-1">Vous y êtes ! Validez ci-dessous 🎉</p>
+        <p className="font-bold text-leaf text-sm mt-1">{withinLabel}</p>
       ) : brg != null ? (
         <p className="font-bold text-ink/60 text-sm mt-1">
           {arrowDeg != null

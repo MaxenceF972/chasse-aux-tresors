@@ -1130,7 +1130,13 @@ begin
           'available_in_sec', case when v_after is null then 0
                                    else greatest(0, ceil(v_after - v_elapsed))::int end,
           'unlocked', v_unlocked,
-          'text', case when v_unlocked then v_h->>'text' else null end
+          -- La NATURE de l'indice est publique (« indice photo », « indice
+          -- lieu ») : elle aide à choisir sans rien divulguer. Le contenu
+          -- (texte, média, coordonnées) n'arrive qu'une fois débloqué.
+          'kind', coalesce(nullif(v_h->>'kind', ''), 'text'),
+          'text', case when v_unlocked then v_h->>'text' else null end,
+          'media_url', case when v_unlocked then nullif(v_h->>'media_url', '') else null end,
+          'gps', case when v_unlocked then v_h->'gps' else null end
         );
         v_idx := v_idx + 1;
       end loop;
@@ -1145,11 +1151,12 @@ begin
         -- Groupe d'enchaînement : le client prévient qu'un skip saute tout le groupe
         'chain_group', nullif(trim(coalesce(v_step.chain_group, '')), ''),
         'points', v_step.points, 'time_limit_sec', v_step.time_limit_sec,
-        -- Balise GPS en mode boussole UNIQUEMENT : on révèle la cible de l'étape
-        -- EN COURS (chaud/froid et « aucun indice » ne divulguent jamais rien).
+        -- Guidage BOUSSOLE uniquement : on révèle la cible de l'étape EN COURS
+        -- (chaud/froid et « aucun indice » ne divulguent jamais rien). Vaut
+        -- pour la balise GPS comme pour le point d'une énigme / balise NFC :
+        -- là, l'arrivée guide seulement, la validation reste l'épreuve.
         'gps_target', case
-          when v_step.type = 'gps'
-               and coalesce(v_step.content->>'gps_guidance', 'compass') = 'compass'
+          when coalesce(v_step.content->>'gps_guidance', 'compass') = 'compass'
                and v_secret.gps_lat is not null and v_secret.gps_lng is not null
           then jsonb_build_object('lat', v_secret.gps_lat, 'lng', v_secret.gps_lng,
                                   'radius', coalesce(v_secret.gps_radius_m, 30))
@@ -1197,8 +1204,7 @@ begin
                'id', s.id, 'title', s.title, 'type', s.type, 'content', s.content,
                'media_urls', to_jsonb(s.media_urls),
                'gps_target', case
-                 when s.type = 'gps'
-                      and coalesce(s.content->>'gps_guidance', 'compass') = 'compass'
+                 when coalesce(s.content->>'gps_guidance', 'compass') = 'compass'
                       and sec.gps_lat is not null and sec.gps_lng is not null
                  then jsonb_build_object('lat', sec.gps_lat, 'lng', sec.gps_lng,
                                          'radius', coalesce(sec.gps_radius_m, 30))

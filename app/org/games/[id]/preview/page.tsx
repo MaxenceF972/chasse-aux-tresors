@@ -203,6 +203,32 @@ export default function PreviewPage() {
                 </div>
               )}
 
+              {/* Guidage sans carte : la position reste secrète côté joueur */}
+              {step.type !== "gps" &&
+                (step.content.gps_guidance === "compass" ||
+                  step.content.gps_guidance === "hotcold") && (
+                  <div className="rounded-2xl border-[3px] border-ink bg-gold p-3 space-y-1">
+                    <p className="font-display text-lg">
+                      {step.content.gps_guidance === "compass"
+                        ? "🧭 GUIDAGE BOUSSOLE"
+                        : "🔥 GUIDAGE CHAUD / FROID"}
+                    </p>
+                    <p className="font-bold text-ink/70 text-sm">
+                      Sur le terrain, les joueurs voient{" "}
+                      {step.content.gps_guidance === "compass"
+                        ? "une flèche et la distance"
+                        : "un thermomètre qui chauffe"}{" "}
+                      — jamais la carte. Arriver ne valide pas l&apos;épreuve : ça les amène au
+                      bon endroit, et ils cherchent sur place.
+                    </p>
+                    <p className="font-mono text-sm text-ink/70">
+                      {secrets?.gps_lat != null
+                        ? `${secrets.gps_lat}, ${secrets.gps_lng} · arrivée à ${secrets.gps_radius_m ?? 20} m`
+                        : "⚠️ aucun point enregistré"}
+                    </p>
+                  </div>
+                )}
+
               {/* Validation simulée selon le type */}
               {step.type === "text" && (
                 <div className={wrong ? "animate-shake" : ""}>

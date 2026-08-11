@@ -7,7 +7,7 @@ import { usePlayState } from "@/components/play/usePlayState";
 import { useWakeLock } from "@/lib/hooks/useWakeLock";
 import { useGeoShare } from "@/lib/hooks/useGeoShare";
 import { isAudioUrl, isVideoUrl } from "@/lib/game/media";
-import RdvMap from "@/components/play/RdvMap";
+import StepGuidance from "@/components/play/StepGuidance";
 import { renderRich } from "@/lib/game/rich";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
@@ -451,28 +451,10 @@ export default function GameScreen() {
                 />
               )}
 
-              {/* Point de rendez-vous GPS : carte intégrée (guidage, pas la validation) */}
-              {current.step.content.rdv && (
-                <div className="rounded-2xl border-[3px] border-ink bg-gold p-3 shadow-[4px_4px_0_0_#111111] space-y-2">
-                  <p className="font-display text-lg">📍 POINT DE RENDEZ-VOUS</p>
-                  <RdvMap lat={current.step.content.rdv.lat} lng={current.step.content.rdv.lng} />
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-bold text-ink/70 text-sm">
-                      L&apos;épreuve se joue à cet endroit — cherchez sur place !
-                    </p>
-                    <a
-                      href={`https://maps.google.com/?q=${current.step.content.rdv.lat},${current.step.content.rdv.lng}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="contents"
-                    >
-                      <Button size="sm" variant="outline" className="shrink-0">
-                        🧭 ITINÉRAIRE
-                      </Button>
-                    </a>
-                  </div>
-                </div>
-              )}
+              {/* Guidage vers le lieu (carte, boussole ou chaud/froid) — l'arrivée
+                  amène l'équipe au bon endroit, elle ne valide pas l'épreuve */}
+              <StepGuidance step={current.step} />
+
 
               {/* Validation */}
               <ValidationZone

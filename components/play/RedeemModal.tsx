@@ -12,6 +12,7 @@ import { showToast } from "@/components/ui/Toaster";
 import GpsCompass from "./GpsCompass";
 import GpsHotCold from "./GpsHotCold";
 import GpsSilent from "./GpsSilent";
+import StepGuidance from "./StepGuidance";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
@@ -152,6 +153,9 @@ export default function RedeemModal({ step, gameId, onClose, onDone }: RedeemMod
             dangerouslySetInnerHTML={{ __html: renderRich(step.content.body) }}
           />
         )}
+
+        {/* Le lieu de l'épreuve : il faut y retourner pour la rattraper */}
+        <StepGuidance step={step} />
 
         {step.type === "text" && (
           <form

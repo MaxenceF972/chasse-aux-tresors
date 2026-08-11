@@ -15,6 +15,8 @@ interface GpsHotColdProps {
   onPosition: (lat: number, lng: number) => void;
   /** Appelé UNE fois à l'entrée dans le rayon (le composant re-arme à la sortie) */
   onWithin: (lat: number, lng: number) => void;
+  /** Message d'arrivée — différent quand le thermomètre ne fait que guider */
+  withinLabel?: string;
 }
 
 interface PingResult {
@@ -53,6 +55,7 @@ export default function GpsHotCold({
   thresholds = HOTCOLD_DEFAULT_THRESHOLDS,
   onPosition,
   onWithin,
+  withinLabel = "Vous y êtes ! Validez ci-dessous 🎉",
 }: GpsHotColdProps) {
   const [dist, setDist] = useState<number | null>(null);
   const [within, setWithin] = useState(false);
@@ -214,7 +217,7 @@ export default function GpsHotCold({
 
       {/* Tendance chaud / froid */}
       {within ? (
-        <p className="font-bold text-leaf text-sm mt-2">Vous y êtes ! Validez ci-dessous 🎉</p>
+        <p className="font-bold text-leaf text-sm mt-2">{withinLabel}</p>
       ) : ready ? (
         <p
           className="font-bold text-sm mt-2"

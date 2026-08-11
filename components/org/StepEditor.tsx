@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { frError, sb } from "@/lib/supabase/client";
-import type { Hint, MinigameKind, Step, StepSecrets, StepType } from "@/lib/types";
+import type { Hint, HintKind, MinigameKind, Step, StepSecrets, StepType } from "@/lib/types";
 import { newTagId, randomCode, tagUrl } from "@/lib/game/codes";
 import { HOTCOLD_DEFAULT_THRESHOLDS, HOTCOLD_TIERS, normalizeThresholds } from "@/lib/game/hotcold";
 import { MINIGAMES, MINIGAME_LIST } from "@/components/minigames/registry";
@@ -13,6 +13,12 @@ import Dialog from "@/components/ui/Dialog";
 import { Input, Label, TextArea } from "@/components/ui/Input";
 
 type Placement = "start" | "pool" | "common" | "final";
+
+const HINT_KINDS: { kind: HintKind; icon: string; label: string }[] = [
+  { kind: "text", icon: "💬", label: "Texte" },
+  { kind: "media", icon: "🖼️", label: "Média" },
+  { kind: "gps", icon: "📍", label: "Lieu" },
+];
 
 /**
  * Détecte un couple « lat, lng » collé d'un bloc (format Google Maps :
@@ -109,10 +115,20 @@ export default function StepEditor({
   const [hints, setHints] = useState<Hint[]>(secrets?.hints ?? []);
   const [gpsLat, setGpsLat] = useState<string>(secrets?.gps_lat != null ? String(secrets.gps_lat) : "");
   const [gpsLng, setGpsLng] = useState<string>(secrets?.gps_lng != null ? String(secrets.gps_lng) : "");
-  const [gpsRadius, setGpsRadius] = useState<string>(String(secrets?.gps_radius_m ?? 2));
-  const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold" | "none">(
-    step?.content?.gps_guidance ?? "compass"
+  // Balise GPS : rayon serré (la position VALIDE). Autre épreuve : le point
+  // sert juste à amener l'équipe sur place → rayon d'arrivée large.
+  const [gpsRadius, setGpsRadius] = useState<string>(
+    String(secrets?.gps_radius_m ?? (type === "gps" ? 2 : 20))
   );
+  const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold" | "none">(
+    (step?.content?.gps_guidance as "compass" | "hotcold" | "none") ?? "compass"
+  );
+  // Guidage vers le point d'une épreuve NON-GPS : carte (défaut), boussole ou
+  // chaud/froid. La validation, elle, reste l'épreuve (balise, énigme…).
+  const [rdvGuidance, setRdvGuidance] = useState<"map" | "compass" | "hotcold">(() => {
+    const g = step?.content?.gps_guidance;
+    return g === "compass" || g === "hotcold" ? g : "map";
+  });
   // 6 seuils chaud/froid (FROID→BRÛLANT), édités palier par palier
   const [gpsThresholds, setGpsThresholds] = useState<string[]>(() =>
     normalizeThresholds(step?.content?.gps_hotcold_thresholds, step?.content?.gps_hotcold_range).map(String)
@@ -129,6 +145,8 @@ export default function StepEditor({
   const [rdvLocating, setRdvLocating] = useState(false);
   const [gpsMapOpen, setGpsMapOpen] = useState(false);
   const [rdvMapOpen, setRdvMapOpen] = useState(false);
+  /** Index de l'indice « lieu » dont la carte est ouverte (un seul à la fois) */
+  const [hintMapOpen, setHintMapOpen] = useState<number | null>(null);
   const [photoMode, setPhotoMode] = useState<"bonus" | "gate">(
     step?.content?.photo_mode ?? "bonus"
   );
@@ -152,6 +170,33 @@ export default function StepEditor({
 
   const minigameDef = MINIGAMES[minigameKind];
   const showAnswers = type === "text" || (type === "minigame" && minigameDef.needsAnswer);
+  // Un point est posé sur une épreuve non-GPS → guidage réglable
+  const hasRdvPoint = type !== "gps" && rdvLat.trim() !== "" && rdvLng.trim() !== "";
+  // Le point de l'étape, s'il existe : sert de raccourci aux indices « lieu »
+  const stepPoint = (() => {
+    const raw = type === "gps" ? { lat: gpsLat, lng: gpsLng } : { lat: rdvLat, lng: rdvLng };
+    const lat = parseCoord(raw.lat);
+    const lng = parseCoord(raw.lng);
+    if (!raw.lat.trim() || !raw.lng.trim() || Number.isNaN(lat) || Number.isNaN(lng)) return null;
+    return { lat, lng };
+  })();
+  // Le thermomètre est-il actif (balise GPS ou point d'une autre épreuve) ?
+  const hotcoldActive =
+    type === "gps" ? gpsGuidance === "hotcold" : hasRdvPoint && rdvGuidance === "hotcold";
+
+  /** Paliers chaud/froid : décroissants et ≥ 1 m. Renvoie l'erreur, ou null. */
+  function thresholdError(): string | null {
+    const th = gpsThresholds.map(Number);
+    if (th.some((n) => !Number.isFinite(n) || n < 1)) {
+      return "Chaud/froid : chaque palier doit être un nombre de mètres (≥ 1).";
+    }
+    for (let i = 1; i < th.length; i++) {
+      if (th[i] >= th[i - 1]) {
+        return "Chaud/froid : les paliers doivent décroître de FROID (le plus loin) à BRÛLANT (le plus près).";
+      }
+    }
+    return null;
+  }
 
   async function save() {
     setError(null);
@@ -192,16 +237,10 @@ export default function StepEditor({
         return;
       }
       if (gpsGuidance === "hotcold") {
-        const th = gpsThresholds.map(Number);
-        if (th.some((n) => !Number.isFinite(n) || n < 1)) {
-          setError("Chaud/froid : chaque palier doit être un nombre de mètres (≥ 1).");
+        const err = thresholdError();
+        if (err) {
+          setError(err);
           return;
-        }
-        for (let i = 1; i < th.length; i++) {
-          if (th[i] >= th[i - 1]) {
-            setError("Chaud/froid : les paliers doivent décroître de FROID (le plus loin) à BRÛLANT (le plus près).");
-            return;
-          }
         }
       }
     }
@@ -211,8 +250,15 @@ export default function StepEditor({
       const lng = parseCoord(rdvLng);
       if (!rdvLat.trim() || !rdvLng.trim() || Number.isNaN(lat) || Number.isNaN(lng)
           || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-        setError("Point de rendez-vous : coordonnées invalides (remplis latitude ET longitude, ou laisse les deux vides).");
+        setError("Point de l'épreuve : coordonnées invalides (remplis latitude ET longitude, ou laisse les deux vides).");
         return;
+      }
+      if (rdvGuidance === "hotcold") {
+        const err = thresholdError();
+        if (err) {
+          setError(err);
+          return;
+        }
       }
     }
 
@@ -225,14 +271,16 @@ export default function StepEditor({
         content: {
           body: body.trim() || undefined,
           minigame: type === "minigame" ? { kind: minigameKind, config: minigameConfig } : undefined,
+          // Le point n'est PUBLIC (donc affichable sur une carte) qu'en guidage
+          // « carte » : boussole et chaud/froid le gardent côté serveur.
           rdv:
-            type !== "gps" && rdvLat.trim() && rdvLng.trim()
+            hasRdvPoint && rdvGuidance === "map"
               ? { lat: parseCoord(rdvLat), lng: parseCoord(rdvLng) }
               : undefined,
           photo_mode: type === "photo" ? photoMode : undefined,
-          gps_guidance: type === "gps" ? gpsGuidance : undefined,
-          gps_hotcold_thresholds:
-            type === "gps" && gpsGuidance === "hotcold" ? gpsThresholds.map(Number) : undefined,
+          gps_guidance:
+            type === "gps" ? gpsGuidance : hasRdvPoint ? rdvGuidance : undefined,
+          gps_hotcold_thresholds: hotcoldActive ? gpsThresholds.map(Number) : undefined,
           // Conserve la clé de l'AUTRE mode (au cas où la partie change de score)
           skip_penalty_sec:
             scoring === "points"
@@ -278,9 +326,16 @@ export default function StepEditor({
         nfc_tag_id: type === "nfc" ? nfcTagId : null,
         manual_code: type === "nfc" ? manualCode : null,
         hints,
-        gps_lat: type === "gps" ? parseCoord(gpsLat) : null,
-        gps_lng: type === "gps" ? parseCoord(gpsLng) : null,
-        gps_radius_m: type === "gps" ? Math.max(1, Number(gpsRadius) || 2) : null,
+        // Le point vit TOUJOURS dans les secrets : c'est lui qui alimente le
+        // thermomètre (gps_ping) et la boussole sans transiter par le client.
+        gps_lat: type === "gps" ? parseCoord(gpsLat) : hasRdvPoint ? parseCoord(rdvLat) : null,
+        gps_lng: type === "gps" ? parseCoord(gpsLng) : hasRdvPoint ? parseCoord(rdvLng) : null,
+        gps_radius_m:
+          type === "gps"
+            ? Math.max(1, Number(gpsRadius) || 2)
+            : hasRdvPoint
+              ? Math.max(1, Number(gpsRadius) || 20)
+              : null,
       });
       if (secErr) throw new Error(secErr.message);
 
@@ -300,6 +355,56 @@ export default function StepEditor({
 
   function updateHint(i: number, patch: Partial<Hint>) {
     setHints((h) => h.map((hint, j) => (j === i ? { ...hint, ...patch } : hint)));
+  }
+
+  /** Éditeur des 6 paliers du thermomètre — partagé balise GPS / point d'épreuve. */
+  function thresholdsEditor() {
+    return (
+      <div className="mt-3 rounded-xl border-[3px] border-ink/20 p-3 space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <Label className="!mb-0">Paliers du thermomètre (mètres)</Label>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0 !min-h-8 !py-0.5 !px-2.5 !text-xs"
+            onClick={() => setGpsThresholds(HOTCOLD_DEFAULT_THRESHOLDS.map(String))}
+          >
+            🔄 RÉINITIALISER
+          </Button>
+        </div>
+        <p className="text-xs font-bold text-ink/55">
+          Distance max de chaque palier, du plus loin (froid) au plus près (brûlant). Les valeurs
+          doivent décroître ; garde le plus grand supérieur au rayon d&apos;arrivée.
+        </p>
+        <div className="space-y-1.5">
+          {HOTCOLD_TIERS.slice(1).map((t, i) => (
+            <div key={t.label} className="flex items-center gap-2">
+              <span className="flex-1 font-bold text-sm">
+                {t.emoji} {t.label}
+              </span>
+              <span className="font-bold text-ink/45 text-sm">≤</span>
+              <Input
+                value={gpsThresholds[i] ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value.replace(/\D/g, "");
+                  setGpsThresholds((prev) => prev.map((x, j) => (j === i ? v : x)));
+                }}
+                inputMode="numeric"
+                className="w-20 text-center"
+              />
+              <span className="font-bold text-ink/45 text-sm w-4">m</span>
+            </div>
+          ))}
+          <div className="flex items-center gap-2 pt-1 text-ink/55">
+            <span className="flex-1 font-bold text-sm">
+              {HOTCOLD_TIERS[0].emoji} {HOTCOLD_TIERS[0].label}
+            </span>
+            <span className="font-bold text-sm">au-delà de {gpsThresholds[0] || "—"} m</span>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   const meta = TYPE_META[type];
@@ -563,52 +668,7 @@ export default function StepEditor({
                 </button>
               </div>
 
-              {gpsGuidance === "hotcold" && (
-                <div className="mt-3 rounded-xl border-[3px] border-ink/20 p-3 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <Label className="!mb-0">Paliers du thermomètre (mètres)</Label>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="shrink-0 !min-h-8 !py-0.5 !px-2.5 !text-xs"
-                      onClick={() => setGpsThresholds(HOTCOLD_DEFAULT_THRESHOLDS.map(String))}
-                    >
-                      🔄 RÉINITIALISER
-                    </Button>
-                  </div>
-                  <p className="text-xs font-bold text-ink/55">
-                    Distance max de chaque palier, du plus loin (froid) au plus près (brûlant). Les
-                    valeurs doivent décroître ; garde le plus grand supérieur au rayon de validation.
-                  </p>
-                  <div className="space-y-1.5">
-                    {HOTCOLD_TIERS.slice(1).map((t, i) => (
-                      <div key={t.label} className="flex items-center gap-2">
-                        <span className="flex-1 font-bold text-sm">
-                          {t.emoji} {t.label}
-                        </span>
-                        <span className="font-bold text-ink/45 text-sm">≤</span>
-                        <Input
-                          value={gpsThresholds[i] ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value.replace(/\D/g, "");
-                            setGpsThresholds((prev) => prev.map((x, j) => (j === i ? v : x)));
-                          }}
-                          inputMode="numeric"
-                          className="w-20 text-center"
-                        />
-                        <span className="font-bold text-ink/45 text-sm w-4">m</span>
-                      </div>
-                    ))}
-                    <div className="flex items-center gap-2 pt-1 text-ink/55">
-                      <span className="flex-1 font-bold text-sm">
-                        {HOTCOLD_TIERS[0].emoji} {HOTCOLD_TIERS[0].label}
-                      </span>
-                      <span className="font-bold text-sm">au-delà de {gpsThresholds[0] || "—"} m</span>
-                    </div>
-                  </div>
-                </div>
-              )}
+              {gpsGuidance === "hotcold" && thresholdsEditor()}
             </div>
           </div>
         )}
@@ -654,11 +714,12 @@ export default function StepEditor({
 
         {type !== "gps" && (
           <div className="space-y-3 rounded-xl border-[3px] border-ink/20 p-3">
-            <Label>📍 Point de rendez-vous GPS (optionnel)</Label>
+            <Label>📍 Emmener l&apos;équipe sur place (optionnel)</Label>
             <p className="text-xs font-bold text-ink/55 -mt-1">
-              Affiché aux joueurs avec un bouton « Itinéraire » : « Rendez-vous à ce point et
-              cherchez-y ! ». La validation reste {type === "nfc" ? "la balise" : type === "photo" ? "la photo" : "l'épreuve"} —
-              le point GPS sert juste à les amener au bon endroit.
+              Pose le lieu de l&apos;épreuve, puis choisis comment les joueurs y sont guidés :
+              carte, boussole ou chaud/froid. Arriver ne valide rien — la validation reste{" "}
+              {type === "nfc" ? "la balise" : type === "photo" ? "la photo" : "l'épreuve"} : le
+              guidage dit seulement « vous êtes au bon endroit, cherchez ! ».
             </p>
             <div className="flex gap-2">
               <div className="flex-1">
@@ -745,6 +806,72 @@ export default function StepEditor({
               Astuce : colle « lat, lng » copié depuis Google Maps directement dans le champ
               Latitude, les deux se remplissent.
             </p>
+
+            {hasRdvPoint && (
+              <div className="border-t-[3px] border-ink/10 pt-3">
+                <Label>Guidage des joueurs vers ce point</Label>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setRdvGuidance("map")}
+                    className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                      rdvGuidance === "map" ? "bg-gold" : "bg-white"
+                    }`}
+                  >
+                    <span className="font-display">🗺️ Carte du lieu</span>
+                    <span className="block text-xs font-bold text-ink/60">
+                      La carte s&apos;affiche dans l&apos;épreuve, avec un bouton « Itinéraire ».
+                      Le plus simple : personne ne se perd.
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRdvGuidance("compass")}
+                    className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                      rdvGuidance === "compass" ? "bg-gold" : "bg-white"
+                    }`}
+                  >
+                    <span className="font-display">🧭 Boussole + distance</span>
+                    <span className="block text-xs font-bold text-ink/60">
+                      Pas de carte : une flèche pointe le lieu et la distance défile. L&apos;équipe
+                      doit lever le nez et s&apos;orienter.
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRdvGuidance("hotcold")}
+                    className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                      rdvGuidance === "hotcold" ? "bg-gold" : "bg-white"
+                    }`}
+                  >
+                    <span className="font-display">🔥 Chaud / froid</span>
+                    <span className="block text-xs font-bold text-ink/60">
+                      Ni carte ni direction : le thermomètre chauffe en approchant. Idéal pour
+                      faire chercher une balise dans un périmètre.
+                    </span>
+                  </button>
+                </div>
+
+                {rdvGuidance !== "map" && (
+                  <div className="mt-3">
+                    <Label>Rayon d&apos;arrivée (mètres)</Label>
+                    <Input
+                      value={gpsRadius}
+                      onChange={(e) => setGpsRadius(e.target.value.replace(/\D/g, ""))}
+                      inputMode="numeric"
+                      className="w-28"
+                    />
+                    <p className="text-xs font-bold text-ink/55 mt-1">
+                      À cette distance, l&apos;app annonce « vous y êtes, cherchez sur place ! » et
+                      le guidage s&apos;arrête. Vise large (15 à 30 m) : c&apos;est la précision
+                      réelle d&apos;un téléphone, et c&apos;est à l&apos;équipe de fouiller la zone.
+                    </p>
+                  </div>
+                )}
+
+                {rdvGuidance === "hotcold" && thresholdsEditor()}
+              </div>
+            )}
           </div>
         )}
 
@@ -770,24 +897,119 @@ export default function StepEditor({
         {/* Indices */}
         <div>
           <Label>Indices progressifs</Label>
+          <p className="text-xs font-bold text-ink/55 -mt-1 mb-2">
+            Un indice peut être un simple texte, un média (photo, enregistrement vocal, vidéo) ou
+            un lieu qui se dévoile sur une carte.
+          </p>
           <div className="space-y-3">
-            {hints.map((hint, i) => (
+            {hints.map((hint, i) => {
+              const hintKind: HintKind = hint.kind ?? "text";
+              return (
               <div key={i} className="rounded-xl border-[3px] border-ink/20 p-3 space-y-2">
-                <div className="flex gap-2">
-                  <Input
-                    value={hint.text}
-                    onChange={(e) => updateHint(i, { text: e.target.value })}
-                    placeholder={`Indice ${i + 1}…`}
-                  />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-display">💡 Indice {i + 1}</span>
                   <Button
                     variant="crimson"
-                    size="md"
+                    size="sm"
                     onClick={() => setHints((h) => h.filter((_, j) => j !== i))}
                     aria-label="Supprimer l'indice"
                   >
                     🗑️
                   </Button>
                 </div>
+
+                {/* Nature de l'indice */}
+                <div className="flex gap-2">
+                  {HINT_KINDS.map((o) => (
+                    <button
+                      key={o.kind}
+                      type="button"
+                      onClick={() => updateHint(i, { kind: o.kind })}
+                      className={`flex-1 min-h-11 px-1 rounded-lg border-2 border-ink font-bold text-sm leading-tight ${
+                        hintKind === o.kind ? "bg-gold text-ink" : "bg-white text-ink/60"
+                      }`}
+                    >
+                      {o.icon} {o.label}
+                    </button>
+                  ))}
+                </div>
+
+                <Input
+                  value={hint.text}
+                  onChange={(e) => updateHint(i, { text: e.target.value })}
+                  placeholder={
+                    hintKind === "text"
+                      ? `Indice ${i + 1}…`
+                      : hintKind === "media"
+                        ? "Texte qui accompagne le média (optionnel)"
+                        : "Texte qui accompagne le lieu (optionnel)"
+                  }
+                />
+
+                {hintKind === "media" && (
+                  <MediaUpload
+                    gameId={gameId}
+                    urls={hint.media_url ? [hint.media_url] : []}
+                    onChange={(urls) => updateHint(i, { media_url: urls[urls.length - 1] ?? null })}
+                  />
+                )}
+
+                {hintKind === "gps" && (
+                  <div className="rounded-lg border-2 border-ink/20 p-2.5 space-y-2">
+                    <p className="font-mono text-sm text-ink/80">
+                      {hint.gps
+                        ? `${hint.gps.lat.toFixed(6)}, ${hint.gps.lng.toFixed(6)}`
+                        : "Aucun lieu choisi"}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="parchment"
+                        onClick={() => {
+                          if (!navigator.geolocation) return;
+                          navigator.geolocation.getCurrentPosition(
+                            (pos) => {
+                              updateHint(i, {
+                                gps: {
+                                  lat: Number(pos.coords.latitude.toFixed(6)),
+                                  lng: Number(pos.coords.longitude.toFixed(6)),
+                                },
+                              });
+                              setHintMapOpen(i);
+                            },
+                            () => setError("Position introuvable — choisis le lieu sur la carte."),
+                            { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+                          );
+                        }}
+                      >
+                        📍 Ma position
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="parchment"
+                        onClick={() => setHintMapOpen(hintMapOpen === i ? null : i)}
+                      >
+                        {hintMapOpen === i ? "🗺️ Fermer la carte" : "🗺️ Choisir sur la carte"}
+                      </Button>
+                      {stepPoint && (
+                        <Button size="sm" variant="parchment" onClick={() => updateHint(i, { gps: stepPoint })}>
+                          🎯 Le point de l&apos;étape
+                        </Button>
+                      )}
+                    </div>
+                    {hintMapOpen === i && (
+                      <MapPicker
+                        lat={hint.gps?.lat ?? stepPoint?.lat ?? null}
+                        lng={hint.gps?.lng ?? stepPoint?.lng ?? null}
+                        onPick={(la, ln) => updateHint(i, { gps: { lat: la, lng: ln } })}
+                      />
+                    )}
+                    <p className="text-xs font-bold text-ink/50">
+                      Débloqué, cet indice affiche la carte du lieu et un bouton « Itinéraire ».
+                    </p>
+                  </div>
+                )}
+
                 <div className="flex gap-3 items-center flex-wrap text-sm font-bold text-ink/70">
                   <label className="flex items-center gap-1.5">
                     Pénalité
@@ -825,11 +1047,17 @@ export default function StepEditor({
                   </label>
                 </div>
               </div>
-            ))}
+              );
+            })}
             <Button
               variant="parchment"
               size="sm"
-              onClick={() => setHints((h) => [...h, { text: "", penalty_sec: 120, unlock_after_sec: null }])}
+              onClick={() =>
+                setHints((h) => [
+                  ...h,
+                  { text: "", kind: "text", penalty_sec: 120, unlock_after_sec: null },
+                ])
+              }
             >
               💡 Ajouter un indice
             </Button>

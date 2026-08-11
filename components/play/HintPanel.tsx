@@ -3,6 +3,15 @@
 import { useEffect, useState } from "react";
 import type { HintMeta } from "@/lib/types";
 import { sfx } from "@/lib/game/sounds";
+import { isAudioUrl, isVideoUrl } from "@/lib/game/media";
+import Button from "@/components/ui/Button";
+import RdvMap from "./RdvMap";
+
+/** Étiquette de la nature d'un indice — connue avant même de le débloquer. */
+const KIND_LABEL: Record<string, string> = {
+  media: "🖼️ média",
+  gps: "📍 lieu",
+};
 
 interface HintPanelProps {
   hints: HintMeta[];
@@ -32,13 +41,53 @@ export default function HintPanel({ hints, onUnlock }: HintPanelProps) {
     <div className="space-y-2.5">
       <h3 className="font-display text-lg text-ink/70">💡 Indices</h3>
       {hints.map((hint) => {
-        if (hint.unlocked && hint.text) {
+        // Débloqué : texte, média (photo / son / vidéo) et/ou lieu sur la carte
+        if (hint.unlocked && (hint.text || hint.media_url || hint.gps)) {
           return (
             <div
               key={hint.index}
-              className="parchment-texture rounded-xl border-[3px] border-leaf p-3 font-bold text-ink/85"
+              className="parchment-texture rounded-xl border-[3px] border-leaf p-3 space-y-2.5"
             >
-              💡 {hint.text}
+              {hint.text && <p className="font-bold text-ink/85">💡 {hint.text}</p>}
+
+              {hint.media_url &&
+                (isAudioUrl(hint.media_url) ? (
+                  <div className="rounded-xl border-[3px] border-ink bg-white/70 p-2.5">
+                    <p className="font-display text-sm mb-1.5">🎵 INDICE SONORE — écoutez bien !</p>
+                    <audio src={hint.media_url} controls preload="metadata" className="w-full" />
+                  </div>
+                ) : isVideoUrl(hint.media_url) ? (
+                  <video
+                    src={hint.media_url}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="w-full rounded-xl border-[3px] border-ink bg-ink"
+                  />
+                ) : (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={hint.media_url}
+                    alt="Indice"
+                    className="w-full rounded-xl border-[3px] border-ink"
+                  />
+                ))}
+
+              {hint.gps && (
+                <div className="space-y-2">
+                  <RdvMap lat={hint.gps.lat} lng={hint.gps.lng} />
+                  <a
+                    href={`https://maps.google.com/?q=${hint.gps.lat},${hint.gps.lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="contents"
+                  >
+                    <Button full size="sm" variant="outline">
+                      🧭 ITINÉRAIRE VERS CE LIEU
+                    </Button>
+                  </a>
+                </div>
+              )}
             </div>
           );
         }
@@ -97,7 +146,12 @@ export default function HintPanel({ hints, onUnlock }: HintPanelProps) {
                   }
                 }}
               >
-                <span>🔒 Indice {hint.index + 1}</span>
+                <span>
+                  🔒 Indice {hint.index + 1}
+                  {hint.kind && KIND_LABEL[hint.kind] ? (
+                    <span className="text-ink/50"> · {KIND_LABEL[hint.kind]}</span>
+                  ) : null}
+                </span>
                 <span className="text-sm">
                   {freeNow
                     ? "GRATUIT — toucher pour révéler"
