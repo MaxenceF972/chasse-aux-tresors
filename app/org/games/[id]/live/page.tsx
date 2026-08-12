@@ -17,6 +17,8 @@ import Spinner from "@/components/ui/Spinner";
 import TeamMap from "@/components/org/TeamMap";
 import AwardsDialog, {
   type AwardItem,
+  type RecordFamily,
+  type RecordMeasure,
   type StepRecord,
   type Trophy,
 } from "@/components/org/AwardsDialog";
@@ -34,6 +36,13 @@ const START_ERRORS: Record<string, string> = {
   POOL_TROP_PETIT:
     "Pas assez d'énigmes dans le pool aléatoire : il en faut au moins autant que d'équipes pour garantir que personne ne se suive.",
 };
+
+/** Durée réelle d'un mini-jeu joué par une équipe (table minigame_results). */
+interface MinigameTime {
+  team_id: string;
+  step_id: string;
+  duration_ms: number | null;
+}
 
 function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: string): string {
   const team = teamName ?? "—";
@@ -109,10 +118,11 @@ export default function LiveDashboardPage() {
   const [awardsOpen, setAwardsOpen] = useState(false);
   // Tous les bonus de la partie (requête dédiée, hors fenêtre du journal)
   const [bonusEvents, setBonusEvents] = useState<GameEvent[]>([]);
+  const [minigameTimes, setMinigameTimes] = useState<MinigameTime[]>([]);
   const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
-    const [g, t, p, s, r, e, sub, bev] = await Promise.all([
+    const [g, t, p, s, r, e, sub, bev, mg] = await Promise.all([
       sb().from("games").select("*").eq("id", gameId).single(),
       sb().from("teams").select("*").eq("game_id", gameId).order("created_at"),
       sb().from("players").select("*").eq("game_id", gameId),
@@ -123,6 +133,9 @@ export default function LiveDashboardPage() {
       // Bonus chargés à part : la fenêtre de 250 events du journal ne suffit
       // pas sur une grosse partie, et la gestion doit TOUS les voir.
       sb().from("events").select("*").eq("game_id", gameId).eq("type", "bonus_awarded").order("id", { ascending: false }),
+      // Durée RÉELLE de jeu des mini-jeux (chrono interne au jeu) : la seule
+      // mesure de vitesse qui ne soit pas polluée par le temps de marche.
+      sb().from("minigame_results").select("team_id, step_id, duration_ms").eq("game_id", gameId),
     ]);
     if (g.data) {
       setGame(g.data as Game);
@@ -137,6 +150,7 @@ export default function LiveDashboardPage() {
     setEvents((e.data as GameEvent[]) ?? []);
     setSubmissions((sub.data as Submission[]) ?? []);
     setBonusEvents((bev.data as GameEvent[]) ?? []);
+    setMinigameTimes((mg.data as MinigameTime[]) ?? []);
   }, [gameId]);
 
   useEffect(() => {
@@ -255,6 +269,9 @@ export default function LiveDashboardPage() {
     const byTeam = new Map<string, TeamRoute[]>();
     for (const r of routes) byTeam.set(r.team_id, [...(byTeam.get(r.team_id) ?? []), r]);
     const bestByStep = new Map<string, { teamId: string; ms: number }>();
+    // Toutes les équipes par étape (et pas seulement la meilleure) : c'est ce
+    // qui permet le podium 🥇🥈🥉 des records de vitesse.
+    const allByStep = new Map<string, { teamId: string; ms: number }[]>();
     let flash: { teamId: string; stepId: string; ms: number } | null = null;
     const perTeam = new Map<string, { totalMs: number; count: number }>();
     for (const [teamId, rs] of byTeam) {
@@ -267,6 +284,7 @@ export default function LiveDashboardPage() {
         if (r.skipped || r.timed_out || ms <= 0) continue;
         const best = bestByStep.get(r.step_id);
         if (!best || ms < best.ms) bestByStep.set(r.step_id, { teamId, ms });
+        allByStep.set(r.step_id, [...(allByStep.get(r.step_id) ?? []), { teamId, ms }]);
         if (!flash || ms < flash.ms) flash = { teamId, stepId: r.step_id, ms };
         const agg = perTeam.get(teamId) ?? { totalMs: 0, count: 0 };
         agg.totalMs += ms;
@@ -288,7 +306,7 @@ export default function LiveDashboardPage() {
     const firstFinisher = teams
       .filter((t) => t.finished_at)
       .sort((a, b) => (a.finished_at! < b.finished_at! ? -1 : 1))[0];
-    return { bestByStep, flash, hardest, firstFinisher, bestAvg };
+    return { bestByStep, allByStep, flash, hardest, firstFinisher, bestAvg };
   }, [routes, teams, game?.started_at]);
 
   async function doStart() {
@@ -615,25 +633,55 @@ export default function LiveDashboardPage() {
       });
     }
   }
-  // Records par énigme / mini-jeu (liste repliée dans l'écran Récompenses)
+  // Podium de vitesse 🥇🥈🥉 de CHAQUE épreuve, rangé par famille.
+  //
+  // Mini-jeu : on classe sur la durée RÉELLE de jeu (minigame_results), la
+  // seule mesure qui exclut la marche — c'est ce qui rend le barème à 100
+  // défendable. Partout ailleurs on n'a que le délai entre deux validations
+  // (marche comprise), d'où la valeur symbolique sur le déplacement.
+  //
+  // Moins de 3 équipes passées sur l'épreuve → pas de record : à deux, « le
+  // plus rapide » ne veut encore rien dire.
   const stepRecords: StepRecord[] = steps
     .slice()
     .sort((a, b) => a.order_hint - b.order_hint)
     .flatMap((step) => {
-      const best = funStats?.bestByStep.get(step.id);
-      if (!best || !isPuzzle(step.id)) return [];
-      return [
-        {
+      let times: { teamId: string; ms: number }[] = [];
+      let measure: RecordMeasure = "gap";
+      if (step.type === "minigame") {
+        const durations = minigameTimes
+          .filter((m) => m.step_id === step.id && (m.duration_ms ?? 0) > 0)
+          .map((m) => ({ teamId: m.team_id, ms: m.duration_ms as number }));
+        if (durations.length >= 3) {
+          times = durations;
+          measure = "play";
+        }
+      }
+      // Repli (mini-jeu sans durée enregistrée, et tous les autres types)
+      if (!times.length) times = funStats?.allByStep.get(step.id) ?? [];
+      if (times.length < 3) return [];
+
+      return times
+        .slice()
+        .sort((a, b) => a.ms - b.ms)
+        .slice(0, 3)
+        .map((t, i) => ({
+          key: `${step.id}:${i + 1}`,
           stepId: step.id,
           stepTitle: step.title,
-          icon: step.type === "minigame" ? "🎮" : "❓",
-          teamId: best.teamId,
-          time: formatDuration(best.ms),
-          reason: `plus rapide sur « ${step.title} »`,
-          amount: Math.max(1, Math.round(trophyAmount / 2)),
-        },
-      ];
+          family: step.type as RecordFamily,
+          measure,
+          rank: (i + 1) as 1 | 2 | 3,
+          teamId: t.teamId,
+          time: formatDuration(t.ms),
+          reason:
+            i === 0
+              ? `plus rapide sur « ${step.title} »`
+              : `${i + 1}e plus rapide sur « ${step.title} »`,
+        }));
     });
+  // Base de points de la partie : sert à afficher le poids des bonus
+  const basePoints = steps.reduce((sum, s) => sum + (s.points || 0), 0);
   // Classement officiel, pour le podium
   const rankedTeams = ranking.map((l) => l.team);
 
@@ -1319,6 +1367,7 @@ export default function LiveDashboardPage() {
         ranked={rankedTeams}
         trophies={trophies}
         stepRecords={stepRecords}
+        basePoints={basePoints}
         bonusEvents={bonusEvents}
         onAward={awardMany}
         onRevoke={revokeBonusById}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameEvent, Team } from "@/lib/types";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
@@ -24,16 +24,48 @@ export interface AwardItem {
   reason: string;
 }
 
-/** Record de vitesse sur une énigme ou un mini-jeu (liste repliée par défaut). */
+/** Famille d'épreuve : elle porte la valeur du record (le type de l'étape). */
+export type RecordFamily = "minigame" | "text" | "nfc" | "gps" | "photo";
+
+/** Ce qu'on a chronométré : la partie jouée, ou le délai entre 2 validations. */
+export type RecordMeasure = "play" | "gap";
+
+/** Une place du podium de vitesse d'une épreuve. */
 export interface StepRecord {
+  /** stepId:rang — clé React et clé de sélection */
+  key: string;
   stepId: string;
   stepTitle: string;
-  icon: string;
+  family: RecordFamily;
+  measure: RecordMeasure;
+  rank: 1 | 2 | 3;
   teamId: string;
   time: string;
+  /** Texte enregistré avec le bonus — sert aussi de clé « déjà attribué ». */
   reason: string;
-  amount: number;
 }
+
+/** Barème par défaut : la valeur suit la QUALITÉ de la mesure, pas l'effort
+    ressenti. Un mini-jeu se chronomètre au vrai temps de jeu (100), une
+    énigme mélange réflexion et trajet (100 aussi : c'est de la tête), une
+    balise ne mesure que la marche et le tirage du parcours (25, symbolique). */
+const FAMILIES: {
+  key: RecordFamily;
+  icon: string;
+  label: string;
+  help: string;
+  points: number;
+  seconds: number;
+}[] = [
+  { key: "minigame", icon: "🎮", label: "Mini-jeux", help: "Durée réelle de jeu — la marche ne compte pas.", points: 100, seconds: 60 },
+  { key: "text", icon: "❓", label: "Énigmes", help: "Temps entre deux validations : réflexion et trajet.", points: 100, seconds: 60 },
+  { key: "nfc", icon: "🏷️", label: "Balises", help: "Surtout de la marche : valeur symbolique.", points: 25, seconds: 15 },
+  { key: "gps", icon: "📍", label: "Balises GPS", help: "Surtout de la marche : valeur symbolique.", points: 25, seconds: 15 },
+  { key: "photo", icon: "📸", label: "Photos", help: "Surtout de la marche : valeur symbolique.", points: 25, seconds: 15 },
+];
+
+/** Podium d'une épreuve : le 1er touche le plein, le 2e 60 %, le 3e 30 %. */
+const RANK_RATIO = [1, 0.6, 0.3];
 
 interface AwardsDialogProps {
   open: boolean;
@@ -43,8 +75,10 @@ interface AwardsDialogProps {
   /** Classement officiel, dans l'ordre (1er en tête). */
   ranked: Team[];
   trophies: Trophy[];
-  /** Records par épreuve — repliés : on ne récompense pas 26 fois. */
+  /** Podiums de vitesse de toutes les épreuves, groupés par famille ici. */
   stepRecords: StepRecord[];
+  /** Somme des points d'étape de la partie : sert à afficher le poids des bonus. */
+  basePoints: number;
   /** Tous les événements bonus_awarded de la partie (révoqués compris). */
   bonusEvents: GameEvent[];
   onAward: (items: AwardItem[]) => Promise<void>;
@@ -66,14 +100,27 @@ export default function AwardsDialog({
   ranked,
   trophies,
   stepRecords,
+  basePoints,
   bonusEvents,
   onAward,
   onRevoke,
 }: AwardsDialogProps) {
   const isPoints = scoring === "points";
   const unit = isPoints ? "pts" : "min";
+  // Les records se règlent en points, ou en SECONDES rendues en mode chrono :
+  // un 3e de podium vaut moins d'une minute, la minute serait trop grossière.
+  const recUnit = isPoints ? "pts" : "s";
   const [busy, setBusy] = useState(false);
-  const [recordsOpen, setRecordsOpen] = useState(false);
+  const [recordsOpen, setRecordsOpen] = useState(true);
+  const [famValue, setFamValue] = useState<Record<RecordFamily, string>>(() =>
+    Object.fromEntries(
+      FAMILIES.map((f) => [f.key, String(isPoints ? f.points : f.seconds)])
+    ) as Record<RecordFamily, string>
+  );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // La sélection par défaut (les 🥇) ne se pose qu'UNE fois par ouverture :
+  // sinon un rafraîchissement temps réel effacerait les cases décochées.
+  const seeded = useRef(false);
   const [podium, setPodium] = useState<string[]>(
     isPoints ? ["300", "200", "100"] : ["3", "2", "1"]
   );
@@ -104,6 +151,81 @@ export default function AwardsDialog({
 
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? "?";
   const teamColor = (id: string) => teams.find((t) => t.id === id)?.color;
+
+  // --- Records de vitesse ----------------------------------------------------
+
+  /** Montant d'une place : points entiers, ou minutes (saisies en secondes). */
+  function recordAmount(family: RecordFamily, rank: 1 | 2 | 3): number {
+    const base = Math.max(0, Number(famValue[family]) || 0);
+    const raw = Math.round(base * RANK_RATIO[rank - 1]);
+    return isPoints ? raw : raw / 60;
+  }
+  /** Affichage d'un montant dans l'unité de saisie (pts ou s). */
+  const amountLabel = (a: number) => (isPoints ? `${a}` : `${Math.round(a * 60)}`);
+
+  /** Les épreuves regroupées par famille, chacune avec son podium. */
+  const grouped = useMemo(() => {
+    return FAMILIES.map((fam) => {
+      const byStep = new Map<string, StepRecord[]>();
+      for (const r of stepRecords) {
+        if (r.family !== fam.key) continue;
+        byStep.set(r.stepId, [...(byStep.get(r.stepId) ?? []), r]);
+      }
+      return {
+        fam,
+        steps: [...byStep.values()].map((list) => ({
+          id: list[0].stepId,
+          title: list[0].stepTitle,
+          measure: list[0].measure,
+          list: list.slice().sort((a, b) => a.rank - b.rank),
+        })),
+      };
+    }).filter((g) => g.steps.length > 0);
+  }, [stepRecords]);
+
+  useEffect(() => {
+    if (!open) {
+      seeded.current = false;
+      return;
+    }
+    if (seeded.current || stepRecords.length === 0) return;
+    seeded.current = true;
+    // Départ raisonnable : les 1res places non encore attribuées. Le podium
+    // complet se coche famille par famille, en connaissance de cause.
+    setSelected(
+      new Set(
+        stepRecords
+          .filter((r) => r.rank === 1 && !awardedReasons.has(r.reason))
+          .map((r) => r.key)
+      )
+    );
+  }, [open, stepRecords, awardedReasons]);
+
+  const pendingRecords = stepRecords.filter(
+    (r) => selected.has(r.key) && !awardedReasons.has(r.reason)
+  );
+  const recordItems: AwardItem[] = pendingRecords
+    .map((r) => ({
+      teamId: r.teamId,
+      amount: recordAmount(r.family, r.rank),
+      reason: r.reason,
+    }))
+    .filter((it) => it.amount > 0);
+  const recordTotal = recordItems.reduce((s, it) => s + it.amount, 0);
+  const recordShare =
+    isPoints && basePoints > 0 ? Math.round((recordTotal / basePoints) * 100) : null;
+
+  function setFamilySelection(fam: RecordFamily, ranks: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const r of stepRecords) {
+        if (r.family !== fam) continue;
+        if (r.rank <= ranks) next.add(r.key);
+        else next.delete(r.key);
+      }
+      return next;
+    });
+  }
 
   async function run(items: AwardItem[]) {
     if (!items.length) return;
@@ -266,66 +388,164 @@ export default function AwardsDialog({
           </section>
         )}
 
-        {/* 3 bis. Records par épreuve — repliés : c'est du détail, pas la
-            liste d'actions principale. */}
-        {stepRecords.length > 0 && (
+        {/* 3 bis. Records de vitesse : toutes les épreuves, par famille, avec
+            leur podium. C'est ici que se joue ce qui départage vraiment. */}
+        {grouped.length > 0 && (
           <section>
-            <Button
-              full
-              size="md"
-              variant="outline"
-              onClick={() => setRecordsOpen((v) => !v)}
-            >
-              {recordsOpen ? "➖ MASQUER" : "⚡ RÉCOMPENSER UN RECORD"} ({stepRecords.length})
-            </Button>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <h3 className="font-display text-lg">⚡ Records de vitesse</h3>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0 !min-h-8 !py-0.5 !px-2.5 !text-xs"
+                onClick={() => setRecordsOpen((v) => !v)}
+              >
+                {recordsOpen ? "➖ REPLIER" : `➕ VOIR (${stepRecords.length})`}
+              </Button>
+            </div>
+
             {recordsOpen && (
-              <div className="space-y-1.5 mt-2">
+              <div className="space-y-3">
                 <p className="font-bold text-ink/50 text-xs">
-                  L&apos;équipe la plus rapide sur chaque énigme et mini-jeu — là où la
-                  vitesse récompense la réflexion, pas les jambes.
+                  Chaque épreuve a son podium 🥇🥈🥉. La valeur suit la qualité de la mesure :
+                  ajuste-la par famille, coche ce que tu donnes, le total s&apos;affiche en bas.
                 </p>
-                {stepRecords.map((rec) => {
-                  const done = awardedReasons.has(rec.reason);
-                  return (
-                    <div
-                      key={rec.stepId}
-                      className={`flex items-center gap-2 rounded-xl border-2 border-ink/15 px-2.5 py-1.5 ${
-                        done ? "opacity-60" : ""
-                      }`}
-                    >
-                      <span className="text-lg shrink-0" aria-hidden>
-                        {rec.icon}
+
+                {grouped.map(({ fam, steps }) => (
+                  <div key={fam.key} className="rounded-xl border-[3px] border-ink/20 p-2.5 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <span className="text-xl shrink-0" aria-hidden>
+                        {fam.icon}
                       </span>
                       <span className="flex-1 min-w-0">
-                        <span className="block font-bold text-sm truncate">{rec.stepTitle}</span>
-                        <span
-                          className="block font-display text-xs truncate"
-                          style={{ color: teamColor(rec.teamId) }}
-                        >
-                          {teamName(rec.teamId)}
-                          <span className="font-bold text-ink/45"> · {rec.time}</span>
+                        <span className="block font-display leading-tight">{fam.label}</span>
+                        <span className="block font-bold text-ink/50 text-xs leading-tight">
+                          {fam.help}
                         </span>
                       </span>
-                      {done ? (
-                        <span className="font-bold text-leaf text-sm shrink-0">✅</span>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="gold"
-                          className="shrink-0 !min-h-8 !py-0.5 !px-2 !text-xs"
-                          disabled={busy}
-                          onClick={() =>
-                            run([
-                              { teamId: rec.teamId, amount: rec.amount, reason: rec.reason },
-                            ])
-                          }
-                        >
-                          +{rec.amount}
-                        </Button>
-                      )}
+                      <span className="flex items-center gap-1 shrink-0">
+                        <span className="w-16">
+                          <Input
+                            value={famValue[fam.key]}
+                            onChange={(e) =>
+                              setFamValue((v) => ({
+                                ...v,
+                                [fam.key]: e.target.value.replace(/\D/g, ""),
+                              }))
+                            }
+                            inputMode="numeric"
+                            className="!h-9 !px-1 !text-base text-center font-mono"
+                            aria-label={`Valeur du 1er — ${fam.label}`}
+                          />
+                        </span>
+                        <span className="font-bold text-ink/50 text-xs">{recUnit}</span>
+                      </span>
                     </div>
-                  );
-                })}
+
+                    <div className="flex gap-1.5">
+                      {[
+                        { label: "🥇 1res", ranks: 1 },
+                        { label: "🏅 Podium", ranks: 3 },
+                        { label: "✕ Aucune", ranks: 0 },
+                      ].map((opt) => (
+                        <button
+                          key={opt.ranks}
+                          type="button"
+                          onClick={() => setFamilySelection(fam.key, opt.ranks)}
+                          className="flex-1 min-h-9 rounded-lg border-2 border-ink bg-white font-bold text-xs active:bg-gold"
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {steps.map((st) => (
+                      <div key={st.id} className="rounded-lg border-2 border-ink/15 px-2 py-1.5">
+                        <p className="font-bold text-sm truncate">
+                          {st.title}
+                          {st.measure === "play" && (
+                            <span className="font-bold text-ink/40 text-xs"> · temps de jeu</span>
+                          )}
+                        </p>
+                        {st.list.map((rec) => {
+                          const done = awardedReasons.has(rec.reason);
+                          const amount = recordAmount(rec.family, rec.rank);
+                          return (
+                            <label
+                              key={rec.key}
+                              className={`flex items-center gap-2 min-h-9 ${
+                                done ? "opacity-55" : "cursor-pointer"
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                className="w-5 h-5 shrink-0 accent-[#2E5E3A]"
+                                checked={!done && selected.has(rec.key)}
+                                disabled={done || busy}
+                                onChange={(e) =>
+                                  setSelected((prev) => {
+                                    const next = new Set(prev);
+                                    if (e.target.checked) next.add(rec.key);
+                                    else next.delete(rec.key);
+                                    return next;
+                                  })
+                                }
+                              />
+                              <span className="shrink-0" aria-hidden>
+                                {MEDALS[rec.rank - 1]}
+                              </span>
+                              <span
+                                className="flex-1 min-w-0 truncate font-display text-sm"
+                                style={{ color: teamColor(rec.teamId) }}
+                              >
+                                {teamName(rec.teamId)}
+                              </span>
+                              <span className="shrink-0 font-bold text-ink/45 text-xs tabular-nums">
+                                {rec.time}
+                              </span>
+                              <span className="shrink-0 w-12 text-right font-display text-sm">
+                                {done ? "✅" : `+${amountLabel(amount)}`}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+
+                <div className="rounded-xl border-[3px] border-ink bg-gold/15 p-3">
+                  <p className="font-bold text-sm">
+                    {recordItems.length} récompense{recordItems.length > 1 ? "s" : ""} sélectionnée
+                    {recordItems.length > 1 ? "s" : ""} ·{" "}
+                    <span className="font-display">
+                      {isPoints
+                        ? `${recordTotal} pts`
+                        : `${Math.round(recordTotal * 60)} s rendues`}
+                    </span>
+                    {recordShare != null && (
+                      <span className="text-ink/55"> · {recordShare} % du score de base</span>
+                    )}
+                  </p>
+                  {recordShare != null && recordShare > 60 && (
+                    <p className="font-bold text-crimson text-xs mt-1">
+                      ⚠️ À ce niveau, les bonus pèsent plus lourd que le parcours lui-même :
+                      c&apos;est la vitesse qui fera le classement, pas les épreuves.
+                    </p>
+                  )}
+                  <Button
+                    full
+                    size="md"
+                    variant="gold"
+                    className="mt-2"
+                    disabled={busy || recordItems.length === 0}
+                    onClick={() => run(recordItems)}
+                  >
+                    {recordItems.length === 0
+                      ? "AUCUNE SÉLECTION"
+                      : `⚡ ATTRIBUER LA SÉLECTION (${recordItems.length})`}
+                  </Button>
+                </div>
               </div>
             )}
           </section>

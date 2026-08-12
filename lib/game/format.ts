@@ -20,6 +20,10 @@ export function formatClock(iso: string): string {
  */
 export function bonusLabel(points: number, seconds: number): string {
   if (points !== 0) return `${points > 0 ? "+" : ""}${points} points`;
-  const min = Math.max(1, Math.abs(Math.round(seconds / 60)));
+  const abs = Math.abs(Math.round(seconds));
+  // Sous la minute (un 3e de podium sur une balise, par exemple), arrondir à
+  // « 1 min » mentirait sur la récompense : on l'annonce en secondes.
+  if (abs < 60) return seconds < 0 ? `${abs} s offertes` : `+${abs} s de pénalité`;
+  const min = Math.round(abs / 60);
   return seconds < 0 ? `${min} min offertes` : `+${min} min de pénalité`;
 }
