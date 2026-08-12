@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GameEvent, Team } from "@/lib/types";
+import { formatDuration } from "@/lib/game/format";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 import { Input, Label } from "@/components/ui/Input";
@@ -74,8 +75,8 @@ interface AwardsDialogProps {
   onClose: () => void;
   scoring: "time" | "points";
   teams: Team[];
-  /** Classement officiel, dans l'ordre (1er en tête). */
-  ranked: Team[];
+  /** Équipes ARRIVÉES au trésor, dans l'ordre d'arrivée (la 1re en tête). */
+  arrived: Team[];
   trophies: Trophy[];
   /** Podiums de vitesse de toutes les épreuves, groupés par famille ici. */
   stepRecords: StepRecord[];
@@ -99,7 +100,7 @@ export default function AwardsDialog({
   onClose,
   scoring,
   teams,
-  ranked,
+  arrived,
   trophies,
   stepRecords,
   basePoints,
@@ -245,12 +246,14 @@ export default function AwardsDialog({
     }
   }
 
-  const top3 = ranked.slice(0, 3);
+  const top3 = arrived.slice(0, 3);
+  /** Motif du podium d'arrivée — visible des joueurs, donc explicite. */
+  const arrivalReason = (i: number) => `${i + 1}${i === 0 ? "re" : "e"} arrivée au trésor`;
   const podiumItems: AwardItem[] = top3
     .map((t, i) => ({
       teamId: t.id,
       amount: Math.max(0, Math.round(Number(podium[i]) || 0)),
-      reason: `podium — ${i + 1}${i === 0 ? "re" : "e"} place`,
+      reason: arrivalReason(i),
     }))
     .filter((it) => it.amount > 0 && !awardedReasons.has(it.reason));
 
@@ -290,13 +293,13 @@ export default function AwardsDialog({
         {/* 2. Le podium en un seul geste */}
         {top3.length > 0 && (
           <section className="rounded-xl border-[3px] border-ink bg-gold/15 p-3">
-            <h3 className="font-display text-lg mb-1">🏆 Podium</h3>
+            <h3 className="font-display text-lg mb-1">🏁 Podium d&apos;arrivée</h3>
             <p className="font-bold text-ink/55 text-xs mb-2">
-              Les trois premières du classement, récompensées d&apos;un coup.
+              Les trois premières équipes rentrées au trésor, dans leur ordre d&apos;arrivée.
             </p>
             <div className="space-y-1.5">
               {top3.map((t, i) => {
-                const reason = `podium — ${i + 1}${i === 0 ? "re" : "e"} place`;
+                const reason = arrivalReason(i);
                 const done = awardedReasons.has(reason);
                 return (
                   <div key={t.id} className="flex items-center gap-2">
@@ -305,7 +308,14 @@ export default function AwardsDialog({
                       className="w-3 h-3 rounded-full border-2 border-ink shrink-0"
                       style={{ backgroundColor: t.color }}
                     />
-                    <span className="font-display flex-1 min-w-0 truncate">{t.name}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block font-display truncate leading-tight">{t.name}</span>
+                      {t.final_time_ms != null && (
+                        <span className="block font-bold text-ink/45 text-xs tabular-nums">
+                          {formatDuration(t.final_time_ms)}
+                        </span>
+                      )}
+                    </span>
                     {done ? (
                       <span className="font-bold text-leaf text-sm shrink-0">✅</span>
                     ) : (
@@ -342,7 +352,7 @@ export default function AwardsDialog({
             >
               {podiumItems.length === 0
                 ? "✅ PODIUM DÉJÀ RÉCOMPENSÉ"
-                : `🏆 ATTRIBUER LE PODIUM (${podiumItems.length})`}
+                : `🏁 ATTRIBUER LE PODIUM (${podiumItems.length})`}
             </Button>
           </section>
         )}

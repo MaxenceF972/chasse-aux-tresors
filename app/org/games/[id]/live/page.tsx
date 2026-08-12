@@ -580,16 +580,9 @@ export default function LiveDashboardPage() {
   }
 
   const trophies: Trophy[] = [];
-  if (funStats?.firstFinisher) {
-    trophies.push({
-      key: "first",
-      icon: "🏁",
-      label: "Premier arrivé au trésor",
-      teamId: funStats.firstFinisher.id,
-      reason: "premier arrivé au trésor",
-      amount: trophyAmount,
-    });
-  }
+  // Pas de trophée « premier arrivé » ici : c'est exactement la 1re place du
+  // podium d'arrivée. Deux récompenses pour la même chose, c'est le genre de
+  // doublon qui rend le classement illisible.
   if (puzzleFlash) {
     trophies.push({
       key: "flash",
@@ -683,7 +676,13 @@ export default function LiveDashboardPage() {
   // Base de points de la partie : sert à afficher le poids des bonus
   const basePoints = steps.reduce((sum, s) => sum + (s.points || 0), 0);
   // Classement officiel, pour le podium
-  const rankedTeams = ranking.map((l) => l.team);
+  // Podium D'ARRIVÉE : les premières rentrées au trésor, dans l'ordre où
+  // elles sont rentrées — pas les premières du classement. Récompenser la
+  // tête du classement ne changerait rien (on ajoute une suite décroissante
+  // à une suite décroissante) ; l'ordre d'arrivée, lui, est autre chose.
+  const arrivedTeams = teams
+    .filter((t) => t.finished_at)
+    .sort((a, b) => (a.finished_at! < b.finished_at! ? -1 : 1));
 
   const TABS: { key: LiveTab; label: string; badge: number }[] = [
     { key: "teams", label: "🏁 Équipes", badge: stuckCount },
@@ -1364,7 +1363,7 @@ export default function LiveDashboardPage() {
         onClose={() => setAwardsOpen(false)}
         scoring={game.settings.scoring === "points" ? "points" : "time"}
         teams={teams}
-        ranked={rankedTeams}
+        arrived={arrivedTeams}
         trophies={trophies}
         stepRecords={stepRecords}
         basePoints={basePoints}
