@@ -45,10 +45,12 @@ export interface StepRecord {
   reason: string;
 }
 
-/** Barème par défaut : la valeur suit la QUALITÉ de la mesure, pas l'effort
-    ressenti. Un mini-jeu se chronomètre au vrai temps de jeu (100), une
-    énigme mélange réflexion et trajet (100 aussi : c'est de la tête), une
-    balise ne mesure que la marche et le tirage du parcours (25, symbolique). */
+/** Barème par défaut : la valeur suit la QUALITÉ de la mesure.
+    Un mini-jeu se chronomètre au vrai temps de jeu (100), une énigme mélange
+    réflexion et trajet (100 : ça reste de la tête). Sur une balise en
+    revanche, chaque équipe arrive d'une étape différente : les chronos ne sont
+    pas comparables, donc 0 — la liste reste affichée pour le débriefing, et
+    l'organisateur peut toujours saisir un montant s'il le souhaite. */
 const FAMILIES: {
   key: RecordFamily;
   icon: string;
@@ -59,9 +61,9 @@ const FAMILIES: {
 }[] = [
   { key: "minigame", icon: "🎮", label: "Mini-jeux", help: "Durée réelle de jeu — la marche ne compte pas.", points: 100, seconds: 60 },
   { key: "text", icon: "❓", label: "Énigmes", help: "Temps entre deux validations : réflexion et trajet.", points: 100, seconds: 60 },
-  { key: "nfc", icon: "🏷️", label: "Balises", help: "Surtout de la marche : valeur symbolique.", points: 25, seconds: 15 },
-  { key: "gps", icon: "📍", label: "Balises GPS", help: "Surtout de la marche : valeur symbolique.", points: 25, seconds: 15 },
-  { key: "photo", icon: "📸", label: "Photos", help: "Surtout de la marche : valeur symbolique.", points: 25, seconds: 15 },
+  { key: "nfc", icon: "🏷️", label: "Balises", help: "Info seulement : chaque équipe arrive d'un endroit différent.", points: 0, seconds: 0 },
+  { key: "gps", icon: "📍", label: "Balises GPS", help: "Info seulement : chaque équipe arrive d'un endroit différent.", points: 0, seconds: 0 },
+  { key: "photo", icon: "📸", label: "Photos", help: "Info seulement : chaque équipe arrive d'un endroit différent.", points: 0, seconds: 0 },
 ];
 
 /** Podium d'une épreuve : le 1er touche le plein, le 2e 60 %, le 3e 30 %. */
@@ -190,16 +192,22 @@ export default function AwardsDialog({
     }
     if (seeded.current || stepRecords.length === 0) return;
     seeded.current = true;
-    // Départ raisonnable : les 1res places non encore attribuées. Le podium
-    // complet se coche famille par famille, en connaissance de cause.
+    // Départ raisonnable : les 1res places non encore attribuées, et seulement
+    // dans les familles qui rapportent quelque chose. Le podium complet se
+    // coche famille par famille, en connaissance de cause.
     setSelected(
       new Set(
         stepRecords
-          .filter((r) => r.rank === 1 && !awardedReasons.has(r.reason))
+          .filter(
+            (r) =>
+              r.rank === 1 &&
+              !awardedReasons.has(r.reason) &&
+              (Number(famValue[r.family]) || 0) > 0
+          )
           .map((r) => r.key)
       )
     );
-  }, [open, stepRecords, awardedReasons]);
+  }, [open, stepRecords, awardedReasons, famValue]);
 
   const pendingRecords = stepRecords.filter(
     (r) => selected.has(r.key) && !awardedReasons.has(r.reason)
@@ -504,7 +512,7 @@ export default function AwardsDialog({
                                 {rec.time}
                               </span>
                               <span className="shrink-0 w-12 text-right font-display text-sm">
-                                {done ? "✅" : `+${amountLabel(amount)}`}
+                                {done ? "✅" : amount > 0 ? `+${amountLabel(amount)}` : "—"}
                               </span>
                             </label>
                           );
