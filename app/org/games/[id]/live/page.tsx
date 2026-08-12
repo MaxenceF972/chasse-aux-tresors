@@ -420,6 +420,22 @@ export default function LiveDashboardPage() {
 
   // Attribue une ou plusieurs récompenses d'un coup (podium, trophée, libre).
   // Montant = points (mode points) ou minutes rendues (mode chrono).
+  /** Partage le classement en accès libre (spectateurs, familles, collègues). */
+  async function sharePublicRanking() {
+    if (!game) return;
+    const url = `${window.location.origin}/r/${game.code}`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: `Classement — ${game.name}`, url });
+      } else {
+        await navigator.clipboard.writeText(url);
+        showToast("🔗 Lien du classement copié !", "success");
+      }
+    } catch {
+      /* partage annulé */
+    }
+  }
+
   async function awardMany(items: AwardItem[]) {
     const isPoints = game?.settings.scoring === "points";
     // Mode chrono : un bonus de temps n'a d'effet que sur une équipe arrivée.
@@ -667,10 +683,10 @@ export default function LiveDashboardPage() {
           rank: (i + 1) as 1 | 2 | 3,
           teamId: t.teamId,
           time: formatDuration(t.ms),
-          reason:
-            i === 0
-              ? `plus rapide sur « ${step.title} »`
-              : `${i + 1}e plus rapide sur « ${step.title} »`,
+          // Motif court : il s'affiche dans le classement des joueurs, où une
+          // équipe peut en cumuler huit. « 🥇 Le coffre » se lit d'un coup
+          // d'œil là où « plus rapide sur « Le coffre » » prend trois lignes.
+          reason: `${["🥇", "🥈", "🥉"][i]} ${step.title}`,
         }));
     });
   // Base de points de la partie : sert à afficher le poids des bonus
@@ -784,6 +800,11 @@ export default function LiveDashboardPage() {
               🏅 Récompenses
               {bonusEvents.filter((e) => !e.payload.revoked).length > 0 &&
                 ` (${bonusEvents.filter((e) => !e.payload.revoked).length})`}
+            </Button>
+            {/* Lien public : les proches qui ne jouent pas suivent le
+                classement sans compte ni application */}
+            <Button variant="parchment" onClick={sharePublicRanking}>
+              🔗 Lien classement
             </Button>
           </>
         )}

@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { rpc } from "@/lib/supabase/client";
-import { bonusLabel, formatDuration } from "@/lib/game/format";
+import { formatDuration } from "@/lib/game/format";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import type { RankedTeam, RankingData } from "@/lib/types";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
 import { showToast } from "@/components/ui/Toaster";
 import Dialog from "@/components/ui/Dialog";
+import TeamBonuses from "./TeamBonuses";
 
 interface LiveRankProps {
   code: string;
@@ -160,7 +161,7 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
                   className="w-4 h-4 rounded-full border-2 border-ink shrink-0"
                   style={{ backgroundColor: t.color }}
                 />
-                <span className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0">
                   <span className="block font-display truncate">
                     {t.name}
                     {mine && " ⭐"}
@@ -168,16 +169,9 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
                   {t.finished_at && (
                     <span className="block text-xs font-bold text-leaf">Arrivés ! 🏁</span>
                   )}
-                  {/* Récompenses reçues, avec leur motif */}
-                  {(data?.bonuses ?? [])
-                    .filter((b) => b.team_id === t.id)
-                    .map((b, bi) => (
-                      <span key={bi} className="block text-xs font-bold text-leaf leading-snug">
-                        🏅 {bonusLabel(b.points, b.seconds)}
-                        {b.reason && <span className="text-ink/50"> — {b.reason}</span>}
-                      </span>
-                    ))}
-                </span>
+                  {/* Récompenses reçues : total replié, détail au doigt */}
+                  <TeamBonuses bonuses={(data?.bonuses ?? []).filter((b) => b.team_id === t.id)} />
+                </div>
                 <span className="font-display tabular-nums shrink-0 text-right">{scoreOf(t)}</span>
               </div>
             );

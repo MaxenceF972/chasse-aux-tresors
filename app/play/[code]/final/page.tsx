@@ -8,12 +8,13 @@ import { ensureAnonSession, rpc, sb } from "@/lib/supabase/client";
 import type { AwardedBonus, RankedTeam, RankingData } from "@/lib/types";
 import { clearPlayerSession, getPlayerSession } from "@/lib/game/session";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
-import { bonusLabel, formatDuration } from "@/lib/game/format";
+import { formatDuration } from "@/lib/game/format";
 import { showToast } from "@/components/ui/Toaster";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
+import TeamBonuses from "@/components/play/TeamBonuses";
 
 interface Award {
   icon: string;
@@ -165,9 +166,12 @@ export default function FinalPage() {
     const lines = teams
       .slice(0, 3)
       .map((t, i) => `${["🥇", "🥈", "🥉"][i]} ${t.name} — ${scoreLabel(t)}`);
-    const text = `🏴‍☠️ ${game.name} — TOYAH GAMES\n${lines.join("\n")}`;
+    // Le lien accompagne le résultat : le destinataire voit le classement
+    // complet, sans compte ni application.
+    const url = `${window.location.origin}/r/${code}`;
+    const text = `🏴‍☠️ ${game.name} — TOYAH GAMES\n${lines.join("\n")}\n\nLe classement complet : ${url}`;
     try {
-      if (navigator.share) await navigator.share({ text });
+      if (navigator.share) await navigator.share({ text, url });
       else {
         await navigator.clipboard.writeText(text);
         showToast("Classement copié !", "success");
@@ -254,14 +258,9 @@ export default function FinalPage() {
                     ` · +${Math.round(entry.penalty_seconds / 60)} min pénalité`}
                   {isPoints && entry.time_ms != null && ` · ${formatDuration(entry.time_ms)}`}
                 </p>
-                {/* Les récompenses reçues, avec leur motif : on comprend d'où
-                    viennent les points sans avoir à demander */}
-                {(bonusesByTeam.get(entry.id) ?? []).map((b, bi) => (
-                  <p key={bi} className="text-sm font-bold text-leaf leading-snug">
-                    🏅 {bonusLabel(b.points, b.seconds)}
-                    {b.reason && <span className="text-ink/55"> — {b.reason}</span>}
-                  </p>
-                ))}
+                {/* Les récompenses reçues : le total en clair, le détail au
+                    doigt — on comprend l'écart sans noyer le classement */}
+                <TeamBonuses bonuses={bonusesByTeam.get(entry.id) ?? []} />
               </div>
               <span className="font-display text-lg tabular-nums">
                 {entry.time_ms == null && !isPoints ? "⏳" : scoreLabel(entry)}
