@@ -31,6 +31,9 @@ type LiveTab = "teams" | "sos" | "photos" | "journal" | "map";
 /** Une équipe est « bloquée » si elle piétine depuis 10 min sur la même étape. */
 const STUCK_MS = 10 * 60000;
 
+/** Nombre d'équipes classées par épreuve (barème dégressif 100, 90, 80…). */
+const RECORD_RANKS = 10;
+
 const START_ERRORS: Record<string, string> = {
   AUCUNE_EQUIPE: "Aucune équipe n'a rejoint le lobby.",
   AUCUNE_ETAPE: "Le parcours est vide — ajoute des étapes dans l'éditeur.",
@@ -728,20 +731,23 @@ export default function LiveDashboardPage() {
       return times
         .slice()
         .sort((a, b) => a.ms - b.ms)
-        .slice(0, 3)
+        .slice(0, RECORD_RANKS)
         .map((t, i) => ({
           key: `${step.id}:${i + 1}`,
           stepId: step.id,
           stepTitle: step.title,
           family: step.type as RecordFamily,
           measure,
-          rank: (i + 1) as 1 | 2 | 3,
+          rank: i + 1,
           teamId: t.teamId,
           time: formatDuration(t.ms),
           // Motif court : il s'affiche dans le classement des joueurs, où une
-          // équipe peut en cumuler huit. « 🥇 Le coffre » se lit d'un coup
+          // équipe peut en cumuler beaucoup. « 🥇 Le coffre » se lit d'un coup
           // d'œil là où « plus rapide sur « Le coffre » » prend trois lignes.
-          reason: `${["🥇", "🥈", "🥉"][i]} ${step.title}`,
+          reason:
+            i < 3
+              ? `${["🥇", "🥈", "🥉"][i]} ${step.title}`
+              : `${i + 1}e · ${step.title}`,
         }));
     });
   // Base de points de la partie : sert à afficher le poids des bonus

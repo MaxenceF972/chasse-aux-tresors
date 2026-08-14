@@ -39,7 +39,8 @@ export interface StepRecord {
   stepTitle: string;
   family: RecordFamily;
   measure: RecordMeasure;
-  rank: 1 | 2 | 3;
+  /** 1 à 10 : 1 = le plus rapide */
+  rank: number;
   teamId: string;
   time: string;
   /** Texte enregistré avec le bonus — sert aussi de clé « déjà attribué ». */
@@ -67,8 +68,12 @@ const FAMILIES: {
   { key: "photo", icon: "📸", label: "Photos", help: "Info seulement : chaque équipe arrive d'un endroit différent.", points: 0, seconds: 0 },
 ];
 
-/** Podium d'une épreuve : le 1er touche le plein, le 2e 60 %, le 3e 30 %. */
-const RANK_RATIO = [1, 0.6, 0.3];
+/** Classement d'une épreuve : chaque rang perd 10 % du plein (100, 90, 80…
+    jusqu'au 10e à 10 %). Tout le monde marque selon sa place au lieu que le
+    plus rapide rafle tout — la régularité devient payante. */
+const RANK_RATIO = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1];
+/** Rangs affichés d'emblée ; les suivants se déplient à la demande. */
+const RANKS_SHOWN = 3;
 
 interface AwardsDialogProps {
   open: boolean;
@@ -121,6 +126,8 @@ export default function AwardsDialog({
     ) as Record<RecordFamily, string>
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  /** Épreuves dont les rangs 4+ sont dépliés */
+  const [openSteps, setOpenSteps] = useState<Set<string>>(new Set());
   // La sélection par défaut (les 🥇) ne se pose qu'UNE fois par ouverture :
   // sinon un rafraîchissement temps réel effacerait les cases décochées.
   const seeded = useRef(false);
@@ -160,9 +167,9 @@ export default function AwardsDialog({
   // --- Records de vitesse ----------------------------------------------------
 
   /** Montant d'une place : points entiers, ou minutes (saisies en secondes). */
-  function recordAmount(family: RecordFamily, rank: 1 | 2 | 3): number {
+  function recordAmount(family: RecordFamily, rank: number): number {
     const base = Math.max(0, Number(famValue[family]) || 0);
-    const raw = Math.round(base * RANK_RATIO[rank - 1]);
+    const raw = Math.round(base * (RANK_RATIO[rank - 1] ?? 0));
     return isPoints ? raw : raw / 60;
   }
   /** Affichage d'un montant dans l'unité de saisie (pts ou s). */
@@ -223,8 +230,16 @@ export default function AwardsDialog({
     }))
     .filter((it) => it.amount > 0);
   const recordTotal = recordItems.reduce((s, it) => s + it.amount, 0);
+  // Ce qui compte n'est pas la masse distribuée (elle se répartit sur dix
+  // équipes) mais ce qu'une SEULE équipe peut encaisser : c'est ça qui bouge
+  // le classement.
+  const perTeamTotal = new Map<string, number>();
+  for (const it of recordItems) {
+    perTeamTotal.set(it.teamId, (perTeamTotal.get(it.teamId) ?? 0) + it.amount);
+  }
+  const bestTeamTotal = Math.max(0, ...perTeamTotal.values());
   const recordShare =
-    isPoints && basePoints > 0 ? Math.round((recordTotal / basePoints) * 100) : null;
+    isPoints && basePoints > 0 ? Math.round((bestTeamTotal / basePoints) * 100) : null;
 
   function setFamilySelection(fam: RecordFamily, ranks: number) {
     setSelected((prev) => {
@@ -429,8 +444,10 @@ export default function AwardsDialog({
             {recordsOpen && (
               <div className="space-y-3">
                 <p className="font-bold text-ink/50 text-xs">
-                  Chaque épreuve a son podium 🥇🥈🥉. La valeur suit la qualité de la mesure :
-                  ajuste-la par famille, coche ce que tu donnes, le total s&apos;affiche en bas.
+                  Sur chaque épreuve, les 10 plus rapides marquent selon leur rang : la 1re
+                  touche le plein, puis <strong>−10 % par place</strong> (100, 90, 80… jusqu&apos;à
+                  10). Ajuste la valeur par famille, coche ce que tu donnes, le total s&apos;affiche
+                  en bas.
                 </p>
 
                 {grouped.map(({ fam, steps }) => (
@@ -467,7 +484,7 @@ export default function AwardsDialog({
                     <div className="flex gap-1.5">
                       {[
                         { label: "🥇 1res", ranks: 1 },
-                        { label: "🏅 Podium", ranks: 3 },
+                        { label: "🏅 Top 10", ranks: RANK_RATIO.length },
                         { label: "✕ Aucune", ranks: 0 },
                       ].map((opt) => (
                         <button
@@ -481,7 +498,15 @@ export default function AwardsDialog({
                       ))}
                     </div>
 
-                    {steps.map((st) => (
+                    {steps.map((st) => {
+                      const stepOpen = openSteps.has(st.id);
+                      const hidden = st.list.filter((r) => r.rank > RANKS_SHOWN);
+                      const shown = stepOpen ? st.list : st.list.slice(0, RANKS_SHOWN);
+                      const hiddenTotal = hidden.reduce(
+                        (s, r) => s + recordAmount(r.family, r.rank),
+                        0
+                      );
+                      return (
                       <div key={st.id} className="rounded-lg border-2 border-ink/15 px-2 py-1.5">
                         <p className="font-bold text-sm truncate">
                           {st.title}
@@ -489,7 +514,7 @@ export default function AwardsDialog({
                             <span className="font-bold text-ink/40 text-xs"> · temps de jeu</span>
                           )}
                         </p>
-                        {st.list.map((rec) => {
+                        {shown.map((rec) => {
                           const done = awardedReasons.has(rec.reason);
                           const amount = recordAmount(rec.family, rec.rank);
                           return (
@@ -513,8 +538,12 @@ export default function AwardsDialog({
                                   })
                                 }
                               />
-                              <span className="shrink-0" aria-hidden>
-                                {MEDALS[rec.rank - 1]}
+                              {/* Médaille jusqu'au 3e, puis le rang en clair */}
+                              <span
+                                className="shrink-0 w-5 text-center font-bold text-ink/50 text-xs"
+                                aria-hidden
+                              >
+                                {MEDALS[rec.rank - 1] ?? rec.rank}
                               </span>
                               <span
                                 className="flex-1 min-w-0 truncate font-display text-sm"
@@ -531,8 +560,30 @@ export default function AwardsDialog({
                             </label>
                           );
                         })}
+                        {hidden.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setOpenSteps((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(st.id)) next.delete(st.id);
+                                else next.add(st.id);
+                                return next;
+                              })
+                            }
+                            className="w-full min-h-8 text-left font-bold text-ink/50 text-xs"
+                            aria-expanded={stepOpen}
+                          >
+                            {stepOpen
+                              ? "▴ masquer les autres équipes"
+                              : `▾ ${hidden.length} autre${hidden.length > 1 ? "s" : ""} équipe${
+                                  hidden.length > 1 ? "s" : ""
+                                }${hiddenTotal > 0 ? ` (+${amountLabel(hiddenTotal)} ${recUnit})` : ""}`}
+                          </button>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 ))}
 
@@ -545,10 +596,18 @@ export default function AwardsDialog({
                         ? `${recordTotal} pts`
                         : `${Math.round(recordTotal * 60)} s rendues`}
                     </span>
-                    {recordShare != null && (
-                      <span className="text-ink/55"> · {recordShare} % du score de base</span>
-                    )}
                   </p>
+                  {bestTeamTotal > 0 && (
+                    <p className="font-bold text-ink/55 text-xs mt-0.5">
+                      L&apos;équipe la mieux servie encaisse{" "}
+                      <strong>
+                        {isPoints
+                          ? `${bestTeamTotal} pts`
+                          : `${Math.round(bestTeamTotal * 60)} s`}
+                      </strong>
+                      {recordShare != null && ` — ${recordShare} % de son score de parcours`}.
+                    </p>
+                  )}
                   {recordShare != null && recordShare > 60 && (
                     <p className="font-bold text-crimson text-xs mt-1">
                       ⚠️ À ce niveau, les bonus pèsent plus lourd que le parcours lui-même :
