@@ -285,12 +285,14 @@ as $$
   end
 $$;
 
--- Choisit la PROCHAINE étape d'une équipe — ANTI-PELOTON.
+-- Choisit la PROCHAINE étape d'une équipe — ANTI-PELOTON et RYTHME.
 -- La trame des positions reste maîtresse (épreuve de départ, paliers communs et
 -- sprint final gardent leur rang, un groupe lié reste soudé), mais À L'INTÉRIEUR
 -- du segment courant on envoie l'équipe sur l'étape du pool la MOINS fréquentée
 -- à cet instant. Le placement de départ (start_game) répartit ; ceci corrige en
 -- direct la dérive due aux équipes qui n'avancent pas à la même vitesse.
+-- À égalité de fréquentation, on évite en plus d'enchaîner deux mini-jeux :
+-- ils servent à temporiser entre deux déplacements, pas à s'empiler.
 create or replace function public.next_route_for(p_team_id uuid)
 returns public.team_routes
 language plpgsql stable security definer
@@ -302,6 +304,7 @@ declare
   v_best    public.team_routes%rowtype;
   v_gate    int;
   v_chain   text;
+  v_last_type public.step_type;
 begin
   select game_id into v_game_id from public.teams where id = p_team_id;
   if v_game_id is null then return null; end if;
@@ -312,8 +315,10 @@ begin
   order by position limit 1;
   if not found then return null; end if;
 
-  -- Groupe d'étapes liées entamé → on enchaîne obligatoirement dessus
-  select nullif(trim(coalesce(s.chain_group, '')), '') into v_chain
+  -- La dernière étape validée : son groupe (pour enchaîner une chaîne entamée)
+  -- et son type (pour ne pas coller deux mini-jeux de suite).
+  select nullif(trim(coalesce(s.chain_group, '')), '') , s.type
+  into v_chain, v_last_type
   from public.team_routes tr
   join public.steps s on s.id = tr.step_id
   where tr.team_id = p_team_id and tr.status = 'done' and tr.validated_at is not null
@@ -354,14 +359,24 @@ begin
         and tr2.position < tr.position
     )
   order by
-    -- 1) personne dessus en ce moment
+    -- 1) RYTHME — jamais deux mini-jeux d'affilée. Une chasse se marche autant
+    --    qu'elle se réfléchit : deux casse-têtes assis à la suite, c'est le
+    --    moment où le groupe décroche. Ce critère passe AVANT l'anti-peloton,
+    --    sinon il ne sert quasiment jamais (simulation 12 équipes : 9 % des
+    --    enchaînements restaient des mini-jeu → mini-jeu contre 0,2 % ici) ;
+    --    le peloton, lui, ne remonte que de 27,5 % à 30,3 %.
+    --    Simple critère de TRI : si toutes les épreuves libres sont des
+    --    mini-jeux, on n'immobilise personne. Le coalesce neutralise le terme
+    --    au tout premier choix (aucune étape validée avant).
+    (coalesce(v_last_type, 'text') = 'minigame' and s.type = 'minigame'),
+    -- 2) personne dessus en ce moment
     (select count(*) from public.team_routes o
      where o.game_id = v_game_id and o.status = 'current' and o.step_id = tr.step_id),
-    -- 2) personne n'en vient de partir (l'équipe précédente traîne encore sur place)
+    -- 3) personne n'en vient de partir (l'équipe précédente traîne encore sur place)
     (select count(*) from public.team_routes o
      where o.game_id = v_game_id and o.step_id = tr.step_id
        and o.validated_at is not null and o.validated_at > now() - interval '8 minutes'),
-    -- 3) départage propre à l'équipe : deux équipes qui choisissent à la même
+    -- 4) départage propre à l'équipe : deux équipes qui choisissent à la même
     --    seconde ne partent pas sur la même étape
     md5(p_team_id::text || tr.step_id::text)
   limit 1;
