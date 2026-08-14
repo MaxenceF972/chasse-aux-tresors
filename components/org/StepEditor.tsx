@@ -150,6 +150,12 @@ export default function StepEditor({
   const [photoMode, setPhotoMode] = useState<"bonus" | "gate">(
     step?.content?.photo_mode ?? "bonus"
   );
+  // Malus si la photo est refusée : minutes (chrono) ou points, vide = défaut
+  const [photoPenalty, setPhotoPenalty] = useState<string>(() => {
+    const c = step?.content;
+    if (scoring === "points") return c?.photo_penalty_points != null ? String(c.photo_penalty_points) : "";
+    return c?.photo_penalty_sec != null ? String(Math.round(c.photo_penalty_sec / 60)) : "";
+  });
   const [textMode, setTextMode] = useState<"normal" | "bonus">(
     step?.content?.text_mode ?? "normal"
   );
@@ -290,6 +296,23 @@ export default function StepEditor({
               ? { lat: parseCoord(rdvLat), lng: parseCoord(rdvLng) }
               : undefined,
           photo_mode: type === "photo" ? photoMode : undefined,
+          // Conserve la clé de l'AUTRE barème (au cas où la partie en change)
+          photo_penalty_sec:
+            type !== "photo"
+              ? undefined
+              : scoring === "points"
+                ? step?.content?.photo_penalty_sec
+                : photoPenalty.trim()
+                  ? Math.max(0, Number(photoPenalty)) * 60
+                  : undefined,
+          photo_penalty_points:
+            type !== "photo"
+              ? undefined
+              : scoring === "points"
+                ? photoPenalty.trim()
+                  ? Math.max(0, Number(photoPenalty))
+                  : undefined
+                : step?.content?.photo_penalty_points,
           text_mode: type === "text" ? textMode : undefined,
           // Conserve la clé de l'AUTRE barème (au cas où la partie en change)
           bonus_points:
@@ -605,6 +628,28 @@ export default function StepEditor({
                 </span>
               </button>
             </div>
+
+            {photoMode === "bonus" && (
+              <div>
+                <Label>
+                  🙅 Malus si tu refuses la photo{" "}
+                  {scoring === "points" ? "(points retirés)" : "(minutes ajoutées)"}
+                </Label>
+                <Input
+                  value={photoPenalty}
+                  onChange={(e) => setPhotoPenalty(e.target.value.replace(/\D/g, ""))}
+                  inputMode="numeric"
+                  placeholder="défaut de la partie"
+                  className="w-40"
+                />
+                <p className="text-xs font-bold text-ink/55 mt-1">
+                  S&apos;ajoute à la perte des {points || 0} points de l&apos;étape. Vide = le
+                  réglage global de la partie ; <strong>0</strong> = aucun malus, la photo ratée
+                  ne coûte alors que les points de l&apos;étape. Le motif apparaît dans le
+                  classement des joueurs, et re-valider la photo rend le malus.
+                </p>
+              </div>
+            )}
           </div>
         )}
 

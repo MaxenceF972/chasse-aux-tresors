@@ -33,7 +33,9 @@ export interface GameSettings {
   /** Pénalité d'un mini-jeu passé : points (mode points) / secondes (mode chrono) */
   skip_penalty_points?: number;
   skip_penalty_sec?: number;
-  photo_penalty_sec?: number;
+  /** Malus par défaut d'une photo refusée (surchargé par étape) */
+  photo_penalty_sec?: number;    // mode chrono
+  photo_penalty_points?: number; // mode points
   /** Présentation de la chasse (thème, déroulé…) affichée aux joueurs au lobby */
   briefing?: string;
   /** Charte personnalisée par l'organisateur (une règle par ligne) — défaut si absente */
@@ -63,6 +65,9 @@ export interface StepContent {
   rdv?: { lat: number; lng: number };
   /** Épreuve photo : bonus (avance direct, jugée après) ou gate (bloquante, l'orga valide pour avancer) */
   photo_mode?: "bonus" | "gate";
+  /** Malus si l'organisateur refuse la photo (surcharge le réglage de la partie) */
+  photo_penalty_sec?: number;    // mode chrono : minutes ajoutées ×60
+  photo_penalty_points?: number; // mode points : points retirés
   /** Énigme : "normal" (il faut trouver pour avancer) ou "bonus" (une seule
       réponse, on avance quoi qu'il arrive, l'organisateur juge après) */
   text_mode?: "normal" | "bonus";

@@ -281,8 +281,10 @@ export default function AwardsDialog({
                       style={{ backgroundColor: teamColor(teamId) }}
                     />
                     <span className="truncate max-w-[9rem]">{teamName(teamId)}</span>
-                    <span className="font-display text-leaf">
-                      +{value} {unit}
+                    {/* Le solde peut être négatif (photo refusée) : pas de « +− » */}
+                    <span className={`font-display ${value < 0 ? "text-crimson" : "text-leaf"}`}>
+                      {value > 0 ? "+" : ""}
+                      {value} {unit}
                     </span>
                   </span>
                 ))}
@@ -641,10 +643,12 @@ export default function AwardsDialog({
                 const pts = Number(ev.payload.points ?? 0);
                 const sec = Number(ev.payload.seconds ?? 0);
                 const revoked = !!ev.payload.revoked;
+                // Un malus (photo refusée) descend ici aussi : jamais de « +−50 »
                 const amount =
                   pts !== 0
-                    ? `+${pts} pts`
+                    ? `${pts > 0 ? "+" : ""}${pts} pts`
                     : `${sec > 0 ? "+" : "−"}${Math.abs(Math.round(sec / 60))} min`;
+                const bad = pts < 0 || sec > 0;
                 return (
                   <div
                     key={ev.id}
@@ -666,7 +670,9 @@ export default function AwardsDialog({
                       </span>
                     </span>
                     <span
-                      className={`font-display text-sm shrink-0 ${revoked ? "line-through" : ""}`}
+                      className={`font-display text-sm shrink-0 ${revoked ? "line-through" : ""} ${
+                        bad ? "text-crimson" : ""
+                      }`}
                     >
                       {amount}
                     </span>

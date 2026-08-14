@@ -1818,8 +1818,10 @@ begin
 end $$;
 
 -- L'organisateur juge une photo (pendant OU en fin de partie). L'équipe a déjà
--- avancé : valider = les points de l'étape sont conservés ; refuser = 0 point
--- sur l'étape (mode points) ou pénalité de temps (mode chrono).
+-- avancé : valider = les points de l'étape sont conservés ; refuser = elle
+-- perd les points de l'étape ET encaisse le malus réglé sur l'étape (ou celui
+-- de la partie). Le malus est tracé comme un ajustement négatif : les joueurs
+-- le voient avec son motif, et rejuger dans l'autre sens le rend.
 create or replace function public.org_review_photo(p_submission_id uuid, p_approve boolean)
 returns jsonb
 language plpgsql volatile security definer
@@ -1831,21 +1833,46 @@ declare
   v_step  public.steps%rowtype;
   v_route public.team_routes%rowtype;
   v_next  public.team_routes%rowtype;
+  v_pts   int := 0;
+  v_sec   int := 0;
+  v_applied boolean;
 begin
   select * into v_sub from public.submissions where id = p_submission_id for update;
   if not found or not public.is_game_owner(v_sub.game_id) then raise exception 'INTERDIT'; end if;
   select * into v_game from public.games where id = v_sub.game_id;
   select * into v_step from public.steps where id = v_sub.step_id;
 
+  -- Malus d'un refus : réglage PROPRE À L'ÉTAPE, sinon celui de la partie.
+  -- Points : score retiré (en plus des points de l'étape, déjà perdus).
+  -- Chrono : minutes ajoutées au temps final.
+  if coalesce(v_game.settings->>'scoring', 'time') = 'points' then
+    v_pts := -coalesce(nullif(v_step.content->>'photo_penalty_points', '')::int,
+                       nullif(v_game.settings->>'photo_penalty_points', '')::int, 50);
+  else
+    v_sec := coalesce(nullif(v_step.content->>'photo_penalty_sec', '')::int,
+                      nullif(v_game.settings->>'photo_penalty_sec', '')::int, 180);
+  end if;
+
+  -- Malus déjà appliqué à CETTE photo (et non annulé depuis) ?
+  v_applied := exists (
+    select 1 from public.events e
+    where e.game_id = v_sub.game_id and e.type = 'bonus_awarded'
+      and e.payload->>'submission_id' = p_submission_id::text
+      and not coalesce((e.payload->>'revoked')::boolean, false)
+  );
+
   if p_approve then
-    -- L'orga corrige un refus : on retire la pénalité appliquée au refus
-    -- (symétrique du bloc de refus ci-dessous — sans plancher, les pénalités
-    -- négatives étant des bonus temps légitimes).
-    if v_sub.status = 'rejected' and coalesce(v_game.settings->>'scoring', 'time') = 'time'
-       and coalesce(v_step.content->>'photo_mode', 'bonus') <> 'gate' then
+    -- L'orga corrige un refus : le malus est rendu, et sa trace annulée.
+    if v_applied then
       update public.teams
-      set penalty_seconds = penalty_seconds - coalesce((v_game.settings->>'photo_penalty_sec')::int, 180)
+      set bonus_points = bonus_points - v_pts,
+          penalty_seconds = penalty_seconds - v_sec
       where id = v_sub.team_id;
+      update public.events
+      set payload = payload || jsonb_build_object('revoked', true, 'revoked_at', now())
+      where game_id = v_sub.game_id and type = 'bonus_awarded'
+        and payload->>'submission_id' = p_submission_id::text
+        and not coalesce((payload->>'revoked')::boolean, false);
     end if;
     update public.submissions set status = 'approved', decided_at = now() where id = p_submission_id;
     insert into public.events (game_id, team_id, type, payload)
@@ -1875,13 +1902,20 @@ begin
       end if;
     end if;
   else
-    -- ne pénalise le chrono qu'au premier refus, et jamais en mode bloquant
-    -- (l'équipe doit déjà reprendre une photo, c'est sa pénalité)
-    if v_sub.status <> 'rejected' and coalesce(v_game.settings->>'scoring', 'time') = 'time'
-       and coalesce(v_step.content->>'photo_mode', 'bonus') <> 'gate' then
+    -- Malus du refus : une seule fois, jamais en mode bloquant (l'équipe doit
+    -- déjà reprendre sa photo, c'est sa peine). Tracé comme un ajustement
+    -- négatif → visible des joueurs avec son motif, et annulable.
+    if not v_applied and coalesce(v_step.content->>'photo_mode', 'bonus') <> 'gate'
+       and (v_pts <> 0 or v_sec <> 0) then
       update public.teams
-      set penalty_seconds = penalty_seconds + coalesce((v_game.settings->>'photo_penalty_sec')::int, 180)
+      set bonus_points = bonus_points + v_pts,
+          penalty_seconds = penalty_seconds + v_sec
       where id = v_sub.team_id;
+      insert into public.events (game_id, team_id, type, payload)
+      values (v_sub.game_id, v_sub.team_id, 'bonus_awarded',
+              jsonb_build_object('points', v_pts, 'seconds', v_sec,
+                                 'reason', '📸 photo refusée — ' || coalesce(v_step.title, 'épreuve photo'),
+                                 'submission_id', p_submission_id));
     end if;
     update public.submissions set status = 'rejected', decided_at = now() where id = p_submission_id;
     insert into public.events (game_id, team_id, type, payload)

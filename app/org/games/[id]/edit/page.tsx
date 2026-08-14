@@ -338,16 +338,30 @@ export default function GameEditPage() {
             />
           </div>
           <div>
-            <Label>Pénalité « photo refusée » (min)</Label>
+            <Label>
+              Malus « photo refusée » ({(game.settings.scoring ?? "time") === "points" ? "points" : "min"})
+            </Label>
             <Input
               type="number"
               min={0}
               inputMode="numeric"
               disabled={!editable}
-              defaultValue={Math.round((game.settings.photo_penalty_sec ?? 180) / 60)}
-              onBlur={(e) => saveSettings({ photo_penalty_sec: (Number(e.target.value) || 0) * 60 })}
+              defaultValue={
+                (game.settings.scoring ?? "time") === "points"
+                  ? game.settings.photo_penalty_points ?? 50
+                  : Math.round((game.settings.photo_penalty_sec ?? 180) / 60)
+              }
+              onBlur={(e) =>
+                saveSettings(
+                  (game.settings.scoring ?? "time") === "points"
+                    ? { photo_penalty_points: Number(e.target.value) || 0 }
+                    : { photo_penalty_sec: (Number(e.target.value) || 0) * 60 }
+                )
+              }
             />
-            <p className="text-xs font-bold text-ink/50 mt-1">Mode chrono. En points : 0 point sur l&apos;étape.</p>
+            <p className="text-xs font-bold text-ink/50 mt-1">
+              S&apos;ajoute à la perte des points de l&apos;étape. Réglable épreuve par épreuve.
+            </p>
           </div>
         </div>
       </Card>

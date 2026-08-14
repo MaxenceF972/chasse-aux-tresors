@@ -275,11 +275,12 @@ export default function FinalPage() {
         {isPoints ? (
           <>
             Score = points des étapes validées <span className="text-leaf">+ récompenses 🏅</span>{" "}
-            − pénalités (indices, étapes passées).
+            − pénalités (indices, étapes passées, photos refusées).
           </>
         ) : (
           <>
-            Classement au chrono : temps de parcours + pénalités (indices, étapes passées){" "}
+            Classement au chrono : temps de parcours + pénalités (indices, étapes passées,
+            photos refusées){" "}
             <span className="text-leaf">− le temps offert par les récompenses 🏅</span>.
           </>
         )}
