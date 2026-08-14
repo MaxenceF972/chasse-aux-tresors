@@ -128,6 +128,8 @@ export default function AwardsDialog({
     isPoints ? ["300", "200", "100"] : ["3", "2", "1"]
   );
   const [freeTeam, setFreeTeam] = useState("");
+  /** +1 = bonus, −1 = malus (le même canal, au signe près) */
+  const [freeSign, setFreeSign] = useState<1 | -1>(1);
   const [freeAmount, setFreeAmount] = useState(isPoints ? "50" : "1");
   const [freeReason, setFreeReason] = useState("");
 
@@ -571,10 +573,32 @@ export default function AwardsDialog({
           </section>
         )}
 
-        {/* 4. Bonus libre : fair-play, coup de cœur… */}
+        {/* 4. Bonus OU malus libre : fair-play, triche, retard… à tout moment */}
         <section>
-          <h3 className="font-display text-lg mb-2">✨ Bonus libre</h3>
+          <h3 className="font-display text-lg mb-2">✨ Bonus / malus libre</h3>
           <div className="space-y-2">
+            {/* Le sens se choisit AVANT le montant : impossible de se tromper
+                de signe, et le bouton final dit ce qu'il va faire. */}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setFreeSign(1)}
+                className={`flex-1 min-h-11 rounded-xl border-[3px] border-ink font-display text-sm ${
+                  freeSign === 1 ? "bg-leaf text-parchment" : "bg-white text-ink/60"
+                }`}
+              >
+                🏅 BONUS
+              </button>
+              <button
+                type="button"
+                onClick={() => setFreeSign(-1)}
+                className={`flex-1 min-h-11 rounded-xl border-[3px] border-ink font-display text-sm ${
+                  freeSign === -1 ? "bg-crimson text-parchment" : "bg-white text-ink/60"
+                }`}
+              >
+                ⚠️ MALUS
+              </button>
+            </div>
             <div>
               <Label>Équipe</Label>
               <select
@@ -605,7 +629,9 @@ export default function AwardsDialog({
                 <Input
                   value={freeReason}
                   onChange={(e) => setFreeReason(e.target.value)}
-                  placeholder="fair-play, coup de cœur…"
+                  placeholder={
+                    freeSign === 1 ? "fair-play, coup de cœur…" : "retard, hors zone, triche…"
+                  }
                   maxLength={60}
                 />
               </div>
@@ -613,19 +639,26 @@ export default function AwardsDialog({
             <Button
               full
               size="md"
+              variant={freeSign === -1 ? "crimson" : "gold"}
               disabled={busy || !freeTeam || !Number(freeAmount)}
               onClick={async () => {
                 await run([
                   {
                     teamId: freeTeam,
-                    amount: Math.round(Number(freeAmount)),
-                    reason: freeReason.trim() || "bonus de l'organisateur",
+                    // Un malus, c'est le même canal avec le signe inverse :
+                    // points retirés, ou temps ajouté en mode chrono.
+                    amount: freeSign * Math.round(Number(freeAmount)),
+                    reason:
+                      freeReason.trim() ||
+                      (freeSign === -1 ? "malus de l'organisateur" : "bonus de l'organisateur"),
                   },
                 ]);
                 setFreeReason("");
               }}
             >
-              ✨ ATTRIBUER CE BONUS
+              {freeSign === -1
+                ? `⚠️ RETIRER ${Number(freeAmount) || 0} ${unit}`
+                : `🏅 ATTRIBUER ${Number(freeAmount) || 0} ${unit}`}
             </Button>
           </div>
         </section>

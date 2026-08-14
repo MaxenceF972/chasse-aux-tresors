@@ -4,9 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { frError, sb, rpc } from "@/lib/supabase/client";
-import type { Game, GameEvent, Player, RankingData, Step, Submission, Team, TeamRoute } from "@/lib/types";
+import type { Game, GameEvent, Player, RankingData, Step, StepType, Submission, Team, TeamRoute } from "@/lib/types";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
+import { renderRich } from "@/lib/game/rich";
 import { formatClock, formatDuration } from "@/lib/game/format";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
@@ -36,6 +37,23 @@ const START_ERRORS: Record<string, string> = {
   POOL_TROP_PETIT:
     "Pas assez d'énigmes dans le pool aléatoire : il en faut au moins autant que d'équipes pour garantir que personne ne se suive.",
 };
+
+/** Pastille du type d'épreuve, alignée sur celle de l'éditeur. */
+const STEP_ICON: Record<StepType, string> = {
+  nfc: "🏷️",
+  text: "💬",
+  minigame: "🎮",
+  photo: "📸",
+  gps: "📍",
+};
+
+/** Le strict nécessaire des secrets d'étape : juger une réponse, dépanner une
+    équipe au téléphone. Jamais exposé aux joueurs (RLS : organisateur seul). */
+interface StepSecretPeek {
+  step_id: string;
+  answers: string[];
+  manual_code: string | null;
+}
 
 /** Durée réelle d'un mini-jeu joué par une équipe (table minigame_results). */
 interface MinigameTime {
@@ -120,7 +138,7 @@ export default function LiveDashboardPage() {
   // Tous les bonus de la partie (requête dédiée, hors fenêtre du journal)
   const [bonusEvents, setBonusEvents] = useState<GameEvent[]>([]);
   const [minigameTimes, setMinigameTimes] = useState<MinigameTime[]>([]);
-  const [secretsMap, setSecretsMap] = useState<Map<string, { answers: string[] }>>(new Map());
+  const [secretsMap, setSecretsMap] = useState<Map<string, StepSecretPeek>>(new Map());
   const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
@@ -159,10 +177,10 @@ export default function LiveDashboardPage() {
     if (stepRows.length) {
       const { data: secs } = await sb()
         .from("step_secrets")
-        .select("step_id, answers")
+        .select("step_id, answers, manual_code")
         .in("step_id", stepRows.map((r) => r.id));
       setSecretsMap(
-        new Map(((secs as { step_id: string; answers: string[] }[]) ?? []).map((x) => [x.step_id, x]))
+        new Map(((secs as StepSecretPeek[]) ?? []).map((x) => [x.step_id, x]))
       );
     }
   }, [gameId]);
@@ -452,9 +470,12 @@ export default function LiveDashboardPage() {
 
   async function awardMany(items: AwardItem[]) {
     const isPoints = game?.settings.scoring === "points";
-    // Mode chrono : un bonus de temps n'a d'effet que sur une équipe arrivée.
+    // Mode chrono : le temps RENDU ne se voit qu'une fois l'équipe arrivée
+    // (un malus, lui, se lit tout de suite dans les pénalités).
     const sansEffet = !isPoints
-      ? items.filter((it) => !teams.find((t) => t.id === it.teamId)?.finished_at)
+      ? items.filter(
+          (it) => it.amount > 0 && !teams.find((t) => t.id === it.teamId)?.finished_at
+        )
       : [];
     try {
       for (const it of items) {
@@ -465,13 +486,19 @@ export default function LiveDashboardPage() {
           p_reason: it.reason,
         });
       }
+      // Un montant négatif est un MALUS : le dire, sinon le toast ment.
+      const malus = items.every((it) => it.amount < 0);
       showToast(
         items.length > 1
           ? `🏅 ${items.length} récompenses attribuées !`
-          : `🏅 Récompense attribuée à « ${
-              teams.find((t) => t.id === items[0].teamId)?.name ?? "?"
-            } »`,
-        "success"
+          : malus
+            ? `⚠️ Malus appliqué à « ${
+                teams.find((t) => t.id === items[0].teamId)?.name ?? "?"
+              } »`
+            : `🏅 Récompense attribuée à « ${
+                teams.find((t) => t.id === items[0].teamId)?.name ?? "?"
+              } »`,
+        malus ? "info" : "success"
       );
       if (sansEffet.length > 0) {
         showToast(
@@ -1044,7 +1071,9 @@ export default function LiveDashboardPage() {
                     })}
                 </div>
 
-                  <p className="font-bold text-sm text-ink/70 min-w-0 truncate">
+                  {/* Replié : une ligne, la liste reste dense. Déplié : le
+                      titre complet, sur autant de lignes qu'il en faut. */}
+                  <p className={`font-bold text-sm text-ink/70 min-w-0 ${open ? "" : "truncate"}`}>
                     {live.team.finished_at ? (
                       <>
                         🏆 Terminé en{" "}
@@ -1085,6 +1114,41 @@ export default function LiveDashboardPage() {
                     )}
                   </p>
                 </button>
+
+                {/* Déplié : l'épreuve en cours EN ENTIER — énoncé et solution
+                    sous les yeux, pour dépanner une équipe sans ouvrir
+                    l'antisèche dans un autre onglet. */}
+                {open && live.current && (
+                  <div className="mt-2 pt-2 border-t-2 border-ink/10">
+                    <div className="rounded-lg border-2 border-ink/15 bg-white/60 p-2 space-y-1.5">
+                      <p className="font-display text-sm leading-snug">
+                        {STEP_ICON[live.current.step.type]} {live.current.step.title}
+                      </p>
+                      {live.current.step.content.body && (
+                        <div
+                          className="font-bold text-ink/70 text-sm leading-snug"
+                          dangerouslySetInnerHTML={{
+                            __html: renderRich(live.current.step.content.body),
+                          }}
+                        />
+                      )}
+                      {(secretsMap.get(live.current.step.id)?.answers ?? []).length > 0 && (
+                        <p className="font-bold text-leaf text-xs leading-snug break-words">
+                          🔑 {(secretsMap.get(live.current.step.id)?.answers ?? []).join(" · ")}
+                        </p>
+                      )}
+                      {live.current.step.type === "nfc" &&
+                        secretsMap.get(live.current.step.id)?.manual_code && (
+                          <p className="font-bold text-ink/60 text-xs">
+                            🔢 Code de secours :{" "}
+                            <span className="font-mono tracking-[0.15em]">
+                              {secretsMap.get(live.current.step.id)?.manual_code}
+                            </span>
+                          </p>
+                        )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Actions dépliées au tap : la liste reste dense au repos */}
                 {open && (
