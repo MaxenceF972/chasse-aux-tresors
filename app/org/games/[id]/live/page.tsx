@@ -16,6 +16,7 @@ import Dialog from "@/components/ui/Dialog";
 import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import TeamMap from "@/components/org/TeamMap";
+import TeamJourney from "@/components/org/TeamJourney";
 import AwardsDialog, {
   type AwardItem,
   type RecordFamily,
@@ -136,6 +137,8 @@ export default function LiveDashboardPage() {
   // zones de défilement imbriquées qui piégeaient le doigt sur téléphone).
   const [tab, setTab] = useState<LiveTab>("teams");
   const [expandedTeam, setExpandedTeam] = useState<string | null>(null);
+  /** Parcours détaillé ouvert au clic sur une case d'étape */
+  const [journey, setJourney] = useState<{ team: Team; stepId: string } | null>(null);
   const [urgentFirst, setUrgentFirst] = useState(false);
   const [awardsOpen, setAwardsOpen] = useState(false);
   // Tous les bonus de la partie (requête dédiée, hors fenêtre du journal)
@@ -954,9 +957,10 @@ export default function LiveDashboardPage() {
             )}
           </h2>
           <p className="font-bold text-parchment/50 text-xs mb-3">
-            Touche une équipe pour ses actions. Une case par étape — couleur de
-            l&apos;équipe : validée · 🟡 : en cours · 🔴 : passée avec pénalité · 🟢 : rattrapée ·
-            grise : temps écoulé · blanche : à venir.
+            Touche une équipe pour ses actions, <strong>une case pour le détail de son
+            parcours</strong>. Une case par étape — couleur de l&apos;équipe : validée · 🟡 : en
+            cours · 🔴 : passée avec pénalité · 🟢 : rattrapée · grise : temps écoulé · blanche :
+            à venir.
           </p>
           <div className="flex gap-2 mb-3 flex-wrap items-center">
             {teams.length > 6 && (
@@ -1025,8 +1029,11 @@ export default function LiveDashboardPage() {
                     ›
                   </span>
                 </div>
+                </button>
 
-                {/* Avancement étape par étape (une case = une étape) */}
+                {/* Avancement étape par étape (une case = une étape).
+                    Hors du bouton de dépliage : chaque case est elle-même un
+                    bouton qui ouvre le détail du parcours. */}
                 <div className="flex gap-[3px] mb-1.5">
                   {routes
                     .filter((r) => r.team_id === live.team.id)
@@ -1067,16 +1074,26 @@ export default function LiveDashboardPage() {
                         cls = "bg-gold animate-pulse";
                       }
                       return (
-                        <div
+                        <button
                           key={r.id}
+                          type="button"
                           title={label}
-                          className={`h-2.5 flex-1 rounded-sm border border-ink ${cls}`}
+                          aria-label={label}
+                          onClick={() => setJourney({ team: live.team, stepId: r.step_id })}
+                          // after:… agrandit la zone tactile sans épaissir la barre
+                          className={`relative h-3 flex-1 rounded-sm border border-ink after:absolute after:inset-x-0 after:-inset-y-2 after:content-[''] ${cls}`}
                           style={bg ? { backgroundColor: bg } : undefined}
                         />
                       );
                     })}
                 </div>
 
+                <button
+                  type="button"
+                  className="w-full text-left"
+                  aria-expanded={open}
+                  onClick={() => setExpandedTeam(open ? null : live.team.id)}
+                >
                   {/* Replié : une ligne, la liste reste dense. Déplié : le
                       titre complet, sur autant de lignes qu'il en faut. */}
                   <p className={`font-bold text-sm text-ink/70 min-w-0 ${open ? "" : "truncate"}`}>
@@ -1514,6 +1531,18 @@ export default function LiveDashboardPage() {
         onAward={awardMany}
         onRevoke={revokeBonusById}
       />
+
+      {/* Parcours détaillé d'une équipe (clic sur une case d'étape) */}
+      {journey && (
+        <TeamJourney
+          team={journey.team}
+          routes={routes.filter((r) => r.team_id === journey.team.id)}
+          steps={stepMap}
+          startedAt={game.started_at}
+          focusStepId={journey.stepId}
+          onClose={() => setJourney(null)}
+        />
+      )}
 
       {/* Dialog Stats : records par épreuve + infos fun */}
       <Dialog open={statsOpen} onClose={() => setStatsOpen(false)} title="📈 Stats de la partie">
