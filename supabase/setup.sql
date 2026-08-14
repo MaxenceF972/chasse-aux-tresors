@@ -1817,11 +1817,12 @@ begin
   return jsonb_build_object('ok', true, 'points', v_pts, 'seconds', v_sec);
 end $$;
 
--- L'organisateur juge une photo (pendant OU en fin de partie). L'équipe a déjà
--- avancé : valider = les points de l'étape sont conservés ; refuser = elle
--- perd les points de l'étape ET encaisse le malus réglé sur l'étape (ou celui
--- de la partie). Le malus est tracé comme un ajustement négatif : les joueurs
--- le voient avec son motif, et rejuger dans l'autre sens le rend.
+-- L'organisateur juge une photo (pendant OU en fin de partie). Refuser coûte
+-- le malus réglé sur l'étape (ou celui de la partie), dans les deux modes :
+-- en mode bonus l'équipe perd en plus les points de l'étape ; en mode bloquant
+-- elle doit renvoyer une photo, et chaque refus coûte à nouveau. Le malus est
+-- tracé comme un ajustement négatif : les joueurs le voient avec son motif, et
+-- valider la photo après coup le rend.
 create or replace function public.org_review_photo(p_submission_id uuid, p_approve boolean)
 returns jsonb
 language plpgsql volatile security definer
@@ -1902,11 +1903,12 @@ begin
       end if;
     end if;
   else
-    -- Malus du refus : une seule fois, jamais en mode bloquant (l'équipe doit
-    -- déjà reprendre sa photo, c'est sa peine). Tracé comme un ajustement
-    -- négatif → visible des joueurs avec son motif, et annulable.
-    if not v_applied and coalesce(v_step.content->>'photo_mode', 'bonus') <> 'gate'
-       and (v_pts <> 0 or v_sec <> 0) then
+    -- Malus du refus, dans les DEUX modes. Une seule fois par photo refusée :
+    -- en mode bloquant l'équipe peut en renvoyer plusieurs, et chaque photo
+    -- refusée coûte — mais rejuger la même ne double jamais la peine.
+    -- Tracé comme un ajustement négatif → visible des joueurs avec son motif,
+    -- et rendu si la photo est finalement validée.
+    if not v_applied and (v_pts <> 0 or v_sec <> 0) then
       update public.teams
       set bonus_points = bonus_points + v_pts,
           penalty_seconds = penalty_seconds + v_sec

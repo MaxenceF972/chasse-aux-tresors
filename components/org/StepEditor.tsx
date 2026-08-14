@@ -629,27 +629,37 @@ export default function StepEditor({
               </button>
             </div>
 
-            {photoMode === "bonus" && (
-              <div>
-                <Label>
-                  🙅 Malus si tu refuses la photo{" "}
-                  {scoring === "points" ? "(points retirés)" : "(minutes ajoutées)"}
-                </Label>
-                <Input
-                  value={photoPenalty}
-                  onChange={(e) => setPhotoPenalty(e.target.value.replace(/\D/g, ""))}
-                  inputMode="numeric"
-                  placeholder="défaut de la partie"
-                  className="w-40"
-                />
-                <p className="text-xs font-bold text-ink/55 mt-1">
-                  S&apos;ajoute à la perte des {points || 0} points de l&apos;étape. Vide = le
-                  réglage global de la partie ; <strong>0</strong> = aucun malus, la photo ratée
-                  ne coûte alors que les points de l&apos;étape. Le motif apparaît dans le
-                  classement des joueurs, et re-valider la photo rend le malus.
-                </p>
-              </div>
-            )}
+            <div>
+              <Label>
+                🙅 Malus si tu refuses la photo{" "}
+                {scoring === "points" ? "(points retirés)" : "(minutes ajoutées)"}
+              </Label>
+              <Input
+                value={photoPenalty}
+                onChange={(e) => setPhotoPenalty(e.target.value.replace(/\D/g, ""))}
+                inputMode="numeric"
+                placeholder="défaut de la partie"
+                className="w-40"
+              />
+              <p className="text-xs font-bold text-ink/55 mt-1">
+                {photoMode === "bonus" ? (
+                  <>
+                    S&apos;ajoute à la perte des {points || 0} points de l&apos;étape. Vide = le
+                    réglage global de la partie ; <strong>0</strong> = aucun malus, la photo
+                    ratée ne coûte alors que les points de l&apos;étape.
+                  </>
+                ) : (
+                  <>
+                    <strong>Chaque photo refusée coûte ce malus</strong> — l&apos;équipe en
+                    renvoie une autre pour avancer, et une nouvelle bâclée coûtera encore. Vide =
+                    le réglage global de la partie ; <strong>0</strong> = seule la reprise fait
+                    office de peine.
+                  </>
+                )}{" "}
+                Le motif apparaît dans le classement des joueurs, et valider la photo rend le
+                malus.
+              </p>
+            </div>
           </div>
         )}
 
