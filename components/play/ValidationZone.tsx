@@ -69,7 +69,12 @@ export default function ValidationZone({
 
   return (
     <div className={wrong ? "animate-shake" : ""}>
-      {step.type === "text" && <TextAnswer disabled={disabled || busy} onRun={run} />}
+      {step.type === "text" &&
+        ((step.content.text_mode ?? "normal") === "bonus" ? (
+          <BonusAnswer step={step} disabled={disabled || busy} onAdvanced={onAdvanced} />
+        ) : (
+          <TextAnswer disabled={disabled || busy} onRun={run} />
+        ))}
       {step.type === "nfc" && <NfcValidation disabled={disabled || busy} onRun={run} />}
       {step.type === "gps" && <GpsValidation step={step} disabled={disabled || busy} onRun={run} />}
       {step.type === "minigame" && (
@@ -126,6 +131,104 @@ function TextAnswer({
     </form>
   );
 }
+
+// --- Énigme bonus : une seule réponse, jugée après coup ----------------------
+
+function BonusAnswer({
+  step,
+  disabled,
+  onAdvanced,
+}: {
+  step: PublicStep;
+  disabled: boolean;
+  onAdvanced: (wasFinished: boolean) => void;
+}) {
+  const [answer, setAnswer] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  async function send() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await rpc<{ ok: boolean; finished?: boolean; error?: string }>(
+        "submit_bonus_answer",
+        { p_step_id: step.id, p_answer: answer.trim() }
+      );
+      if (!res.ok) {
+        setError(ANSWER_ERRORS[res.error ?? ""] ?? "Envoi impossible — réessaie.");
+        setConfirming(false);
+        return;
+      }
+      onAdvanced(!!res.finished);
+    } catch (err) {
+      setError(frError(err, "Envoi impossible — vérifie le réseau et réessaie"));
+      setConfirming(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-xl border-[3px] border-ink bg-gold px-3 py-2.5">
+        <p className="font-display">🎁 ÉPREUVE BONUS</p>
+        <p className="font-bold text-ink/70 text-sm leading-snug">
+          Vous avez droit à <strong>une seule réponse</strong>. Quelle qu&apos;elle soit, vous
+          passez à la suite — aucune pénalité. Le maître du jeu la jugera : si elle est bonne,
+          vous empochez un bonus au classement.
+        </p>
+      </div>
+
+      <Label>Votre réponse</Label>
+      <Input
+        value={answer}
+        onChange={(e) => setAnswer(e.target.value)}
+        placeholder="Écrivez votre réponse ici…"
+        disabled={disabled || busy || confirming}
+        autoComplete="off"
+        maxLength={400}
+      />
+
+      {confirming ? (
+        <div className="rounded-xl border-[3px] border-crimson p-3 space-y-2">
+          <p className="font-bold text-sm">
+            Envoyer <span className="text-crimson">« {answer.trim()} »</span> ? On ne peut pas
+            revenir en arrière, et l&apos;étape sera terminée.
+          </p>
+          <div className="flex gap-2">
+            <Button full variant="leaf" disabled={busy} onClick={send}>
+              {busy ? "…" : "✅ OUI, J'ENVOIE"}
+            </Button>
+            <Button full variant="parchment" disabled={busy} onClick={() => setConfirming(false)}>
+              Non
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <Button
+          full
+          size="xl"
+          disabled={disabled || busy || !answer.trim()}
+          onClick={() => setConfirming(true)}
+        >
+          🎁 ENVOYER MA RÉPONSE
+        </Button>
+      )}
+
+      {error && <p className="font-bold text-crimson text-sm text-center">{error}</p>}
+    </div>
+  );
+}
+
+const ANSWER_ERRORS: Record<string, string> = {
+  REPONSE_VIDE: "Écris une réponse avant d'envoyer.",
+  ETAPE_INVALIDE: "Cette épreuve n'est plus celle en cours — recharge la page.",
+  ETAPE_PAS_BONUS: "Cette épreuve n'est pas une énigme bonus.",
+  PARTIE_NON_ACTIVE: "La partie est en pause ou terminée.",
+  NON_INSCRIT: "Session perdue — rejoins ton équipe avec ton code.",
+};
 
 // --- Balise NFC / QR / code manuel ------------------------------------------
 

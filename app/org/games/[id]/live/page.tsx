@@ -59,6 +59,7 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
     case "hint_sent": return `📨 Indice envoyé à « ${team} » : ${String(e.payload.message ?? "")}`;
     case "manual_validate": return `🛠️ Étape validée manuellement pour « ${team} »`;
     case "photo_submitted": return `📸 « ${team} » a envoyé une photo pour « ${String(e.payload.step_title ?? "?")} »`;
+    case "bonus_answer": return `🎁 « ${team} » a répondu à « ${String(e.payload.step_title ?? "?")} » : « ${String(e.payload.answer ?? "")} »`;
     case "photo_rejected": return `🙅 Photo de « ${team} » refusée`;
     case "photo_approved": return `👍 Photo de « ${team} » validée`;
     case "photo_winner": return `🏅 Photo gagnante désignée pour « ${team} »`;
@@ -119,6 +120,7 @@ export default function LiveDashboardPage() {
   // Tous les bonus de la partie (requête dédiée, hors fenêtre du journal)
   const [bonusEvents, setBonusEvents] = useState<GameEvent[]>([]);
   const [minigameTimes, setMinigameTimes] = useState<MinigameTime[]>([]);
+  const [secretsMap, setSecretsMap] = useState<Map<string, { answers: string[] }>>(new Map());
   const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
@@ -151,6 +153,18 @@ export default function LiveDashboardPage() {
     setSubmissions((sub.data as Submission[]) ?? []);
     setBonusEvents((bev.data as GameEvent[]) ?? []);
     setMinigameTimes((mg.data as MinigameTime[]) ?? []);
+
+    // Réponses attendues : affichées au moment de juger une énigme bonus.
+    const stepRows = (s.data as Step[]) ?? [];
+    if (stepRows.length) {
+      const { data: secs } = await sb()
+        .from("step_secrets")
+        .select("step_id, answers")
+        .in("step_id", stepRows.map((r) => r.id));
+      setSecretsMap(
+        new Map(((secs as { step_id: string; answers: string[] }[]) ?? []).map((x) => [x.step_id, x]))
+      );
+    }
   }, [gameId]);
 
   useEffect(() => {
@@ -526,10 +540,24 @@ export default function LiveDashboardPage() {
     }
   }
 
-  async function reviewPhoto(submission: Submission, approve: boolean) {
+  /** Juge une soumission : photo d'épreuve, ou réponse d'énigme bonus. */
+  async function reviewSubmission(submission: Submission, approve: boolean) {
+    const isAnswer = !submission.url;
     try {
-      await rpc("org_review_photo", { p_submission_id: submission.id, p_approve: approve });
-      showToast(approve ? "Photo validée ✅" : "Photo refusée", approve ? "success" : "info");
+      await rpc(isAnswer ? "org_review_answer" : "org_review_photo", {
+        p_submission_id: submission.id,
+        p_approve: approve,
+      });
+      showToast(
+        isAnswer
+          ? approve
+            ? "🎁 Bonne réponse — bonus attribué !"
+            : "Réponse refusée (aucune pénalité)"
+          : approve
+            ? "Photo validée ✅"
+            : "Photo refusée",
+        approve ? "success" : "info"
+      );
       await load();
     } catch (err) {
       showToast(`Échec : ${frError(err, "erreur")}`, "error");
@@ -703,7 +731,7 @@ export default function LiveDashboardPage() {
   const TABS: { key: LiveTab; label: string; badge: number }[] = [
     { key: "teams", label: "🏁 Équipes", badge: stuckCount },
     { key: "sos", label: "🆘 SOS", badge: unreadCount },
-    { key: "photos", label: "📸 Photos", badge: submissions.length },
+    { key: "photos", label: "✅ À valider", badge: submissions.length },
     { key: "journal", label: "📜 Journal", badge: 0 },
     { key: "map", label: "📍 Carte", badge: 0 },
   ];
@@ -1178,7 +1206,11 @@ export default function LiveDashboardPage() {
             sos: ["team_message"],
             valid: ["step_validated", "team_finished", "manual_validate", "step_neutralized", "minigame_redeemed", "step_redeemed"],
             warn: ["wrong_answer", "minigame_skipped", "step_skipped", "step_timeout", "hint_unlocked", "game_paused"],
-            photo: ["photo_submitted", "photo_approved", "photo_rejected", "photo_winner"],
+            photo: [
+              "photo_submitted", "photo_approved", "photo_rejected", "photo_winner",
+              // Les réponses bonus se jugent au même endroit : même filtre
+              "bonus_answer",
+            ],
           };
           const shown =
             journalFilter === "all"
@@ -1209,13 +1241,13 @@ export default function LiveDashboardPage() {
       </>
       )}
 
-      {/* Onglet PHOTOS : la file d'attente de jugement */}
+      {/* Onglet À VALIDER : photos d'épreuve ET réponses d'énigmes bonus */}
       {tab === "photos" && submissions.length === 0 && (
         <Card className="p-6 text-center mb-8">
-          <div className="text-4xl mb-2">📸</div>
-          <p className="font-display text-lg">Aucune photo en attente</p>
+          <div className="text-4xl mb-2">✅</div>
+          <p className="font-display text-lg">Rien en attente</p>
           <p className="font-bold text-ink/55 text-sm mt-1">
-            Tout est jugé ! Les photos déjà validées restent dans la galerie.
+            Tout est jugé ! Photos et réponses bonus arrivent ici au fil de la partie.
           </p>
           <Link href={`/org/games/${gameId}/photos`} className="contents">
             <Button size="sm" variant="gold" className="mt-3">
@@ -1227,7 +1259,7 @@ export default function LiveDashboardPage() {
       {tab === "photos" && submissions.length > 0 && (
         <>
           <h2 className="font-display text-2xl text-gold mb-3">
-            📸 Photos à valider ({submissions.length})
+            ✅ À valider ({submissions.length})
           </h2>
           <div className="space-y-4 mb-8">
             {submissions.map((submission) => {
@@ -1245,18 +1277,38 @@ export default function LiveDashboardPage() {
                       — {step?.title ?? "?"}
                     </span>
                   </div>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={submission.url}
-                    alt={`Photo de ${team?.name ?? "?"}`}
-                    className="w-full max-h-80 object-contain rounded-xl border-[3px] border-ink bg-ink mb-3"
-                  />
+                  {submission.url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={submission.url}
+                      alt={`Photo de ${team?.name ?? "?"}`}
+                      className="w-full max-h-80 object-contain rounded-xl border-[3px] border-ink bg-ink mb-3"
+                    />
+                  ) : (
+                    // Énigme bonus : la réponse de l'équipe, et juste en dessous
+                    // celle attendue — on juge sans aller chercher l'antisèche.
+                    <div className="mb-3 space-y-2">
+                      <div className="rounded-xl border-[3px] border-ink bg-white/70 px-3 py-2.5">
+                        <p className="font-bold text-ink/45 text-xs">Leur réponse</p>
+                        <p className="font-display text-lg leading-snug break-words">
+                          {submission.answer ?? "—"}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border-2 border-dashed border-ink/30 px-3 py-2">
+                        <p className="font-bold text-ink/45 text-xs">Réponse attendue</p>
+                        <p className="font-bold text-ink/70 text-sm leading-snug break-words">
+                          {(secretsMap.get(submission.step_id)?.answers ?? []).join(" · ") ||
+                            "libre — à ton appréciation"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex gap-2">
-                    <Button className="flex-1" variant="leaf" onClick={() => reviewPhoto(submission, true)}>
-                      ✅ VALIDER
+                    <Button className="flex-1" variant="leaf" onClick={() => reviewSubmission(submission, true)}>
+                      {submission.url ? "✅ VALIDER" : "✅ BONNE RÉPONSE"}
                     </Button>
-                    <Button className="flex-1" variant="crimson" onClick={() => reviewPhoto(submission, false)}>
-                      ❌ REFUSER
+                    <Button className="flex-1" variant="crimson" onClick={() => reviewSubmission(submission, false)}>
+                      {submission.url ? "❌ REFUSER" : "❌ MAUVAISE"}
                     </Button>
                   </div>
                 </Card>

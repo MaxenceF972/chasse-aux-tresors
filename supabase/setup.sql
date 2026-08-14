@@ -170,6 +170,10 @@ create table if not exists public.submissions (
 );
 
 alter table public.submissions add column if not exists is_winner boolean not null default false;
+-- Énigme bonus : la « soumission » est une RÉPONSE écrite, pas une photo.
+-- L'équipe répond une fois, avance aussitôt, et l'organisateur juge après coup.
+alter table public.submissions add column if not exists answer text;
+alter table public.submissions alter column url drop not null;
 
 -- Abonnements aux notifications push (aucun accès direct : RPC + service role)
 create table if not exists public.push_subscriptions (
@@ -1672,6 +1676,147 @@ begin
   end if;
 end $$;
 
+-- Énigme BONUS : l'équipe a droit à UNE réponse, elle avance immédiatement
+-- quelle qu'elle soit, et l'organisateur juge après coup (bonne réponse =
+-- bonus). Aucune pénalité en cas d'erreur : c'est un bonus, pas un péage.
+-- Permet les questions ouvertes qu'aucune liste de réponses ne peut valider.
+create or replace function public.submit_bonus_answer(p_step_id uuid, p_answer text)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public, extensions
+as $$
+declare
+  v_player public.players%rowtype;
+  v_team   public.teams%rowtype;
+  v_game   public.games%rowtype;
+  v_route  public.team_routes%rowtype;
+  v_step   public.steps%rowtype;
+  v_next   public.team_routes%rowtype;
+  v_finished boolean := false;
+begin
+  select * into v_player from public.players where auth_uid = auth.uid();
+  if not found then return jsonb_build_object('ok', false, 'error', 'NON_INSCRIT'); end if;
+  select * into v_team from public.teams where id = v_player.team_id;
+  select * into v_game from public.games where id = v_team.game_id;
+  if v_game.status <> 'running' then
+    return jsonb_build_object('ok', false, 'error', 'PARTIE_NON_ACTIVE');
+  end if;
+
+  select * into v_route from public.team_routes
+  where team_id = v_team.id and step_id = p_step_id and status = 'current'
+  for update;
+  if not found then return jsonb_build_object('ok', false, 'error', 'ETAPE_INVALIDE'); end if;
+
+  select * into v_step from public.steps where id = p_step_id;
+  if v_step.type <> 'text'
+     or coalesce(v_step.content->>'text_mode', 'normal') <> 'bonus' then
+    return jsonb_build_object('ok', false, 'error', 'ETAPE_PAS_BONUS');
+  end if;
+  if p_answer is null or length(trim(p_answer)) = 0 then
+    return jsonb_build_object('ok', false, 'error', 'REPONSE_VIDE');
+  end if;
+
+  insert into public.submissions (game_id, team_id, step_id, answer)
+  values (v_game.id, v_team.id, p_step_id, left(trim(p_answer), 400));
+
+  insert into public.events (game_id, team_id, type, payload)
+  values (v_game.id, v_team.id, 'bonus_answer',
+          jsonb_build_object('step_id', p_step_id, 'step_title', v_step.title,
+                             'answer', left(trim(p_answer), 400)));
+
+  -- L'équipe avance TOUJOURS : la justesse ne conditionne que le bonus.
+  update public.team_routes set status = 'done', validated_at = now() where id = v_route.id;
+
+  v_next := public.next_route_for(v_team.id);
+  if v_next.id is not null then
+    update public.team_routes set status = 'current' where id = v_next.id;
+  else
+    v_finished := true;
+    update public.teams
+    set finished_at = now(), final_time_ms = public.game_elapsed_ms(v_game)
+    where id = v_team.id and finished_at is null;
+    insert into public.events (game_id, team_id, type)
+    values (v_game.id, v_team.id, 'team_finished');
+  end if;
+
+  insert into public.events (game_id, team_id, type, payload)
+  values (v_game.id, v_team.id, 'step_validated',
+          jsonb_build_object('step_id', p_step_id, 'kind', 'bonus_answer',
+                             'step_title', v_step.title, 'position', v_route.position));
+
+  return jsonb_build_object('ok', true, 'correct', true, 'finished', v_finished);
+end $$;
+
+-- L'organisateur juge la réponse d'une énigme bonus. Validée : l'équipe
+-- encaisse le bonus de l'étape (points, ou temps rendu en mode chrono), tracé
+-- comme n'importe quelle récompense — donc visible des joueurs avec son motif
+-- et annulable depuis l'écran Récompenses. Refusée : rien, aucune pénalité.
+-- Rejuger dans l'autre sens reprend ou rend le bonus, sans jamais le doubler.
+create or replace function public.org_review_answer(p_submission_id uuid, p_approve boolean)
+returns jsonb
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_sub    public.submissions%rowtype;
+  v_game   public.games%rowtype;
+  v_step   public.steps%rowtype;
+  v_pts    int := 0;
+  v_sec    int := 0;
+  v_given  boolean;
+begin
+  select * into v_sub from public.submissions where id = p_submission_id for update;
+  if not found or not public.is_game_owner(v_sub.game_id) then raise exception 'INTERDIT'; end if;
+  select * into v_game from public.games where id = v_sub.game_id;
+  select * into v_step from public.steps where id = v_sub.step_id;
+
+  if coalesce(v_game.settings->>'scoring', 'time') = 'points' then
+    v_pts := coalesce(nullif(v_step.content->>'bonus_points', '')::int, 100);
+  else
+    v_sec := -coalesce(nullif(v_step.content->>'bonus_sec', '')::int, 60);
+  end if;
+
+  -- Bonus déjà accordé pour CETTE réponse (et non annulé depuis) ?
+  v_given := exists (
+    select 1 from public.events e
+    where e.game_id = v_sub.game_id and e.type = 'bonus_awarded'
+      and e.payload->>'submission_id' = p_submission_id::text
+      and not coalesce((e.payload->>'revoked')::boolean, false)
+  );
+
+  if p_approve then
+    update public.submissions set status = 'approved', decided_at = now() where id = p_submission_id;
+    if not v_given then
+      update public.teams
+      set bonus_points = bonus_points + v_pts,
+          penalty_seconds = penalty_seconds + v_sec
+      where id = v_sub.team_id;
+      insert into public.events (game_id, team_id, type, payload)
+      values (v_sub.game_id, v_sub.team_id, 'bonus_awarded',
+              jsonb_build_object('points', v_pts, 'seconds', v_sec,
+                                 'reason', '🧠 ' || coalesce(v_step.title, 'énigme bonus'),
+                                 'submission_id', p_submission_id));
+    end if;
+  else
+    update public.submissions set status = 'rejected', decided_at = now() where id = p_submission_id;
+    if v_given then
+      -- Reprise du bonus : on reverse les montants et on marque l'événement
+      -- d'origine annulé (la trace reste dans le journal).
+      update public.teams
+      set bonus_points = bonus_points - v_pts,
+          penalty_seconds = penalty_seconds - v_sec
+      where id = v_sub.team_id;
+      update public.events
+      set payload = payload || jsonb_build_object('revoked', true, 'revoked_at', now())
+      where game_id = v_sub.game_id and type = 'bonus_awarded'
+        and payload->>'submission_id' = p_submission_id::text
+        and not coalesce((payload->>'revoked')::boolean, false);
+    end if;
+  end if;
+
+  return jsonb_build_object('ok', true, 'points', v_pts, 'seconds', v_sec);
+end $$;
+
 -- L'organisateur juge une photo (pendant OU en fin de partie). L'équipe a déjà
 -- avancé : valider = les points de l'étape sont conservés ; refuser = 0 point
 -- sur l'étape (mode points) ou pénalité de temps (mode chrono).
@@ -2390,6 +2535,7 @@ begin
     'redeem_step(uuid,uuid,jsonb)', 'skip_step_timeout(uuid)',
     'send_team_message(text)',
     'report_position(double precision,double precision)', 'submit_photo(uuid,text)',
+    'submit_bonus_answer(uuid,text)', 'org_review_answer(uuid,boolean)',
     'gps_ping(uuid,double precision,double precision)',
     'save_push_subscription(jsonb)'
   ] loop

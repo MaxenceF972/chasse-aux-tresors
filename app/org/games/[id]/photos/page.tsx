@@ -13,6 +13,10 @@ import Card from "@/components/ui/Card";
 import Dialog from "@/components/ui/Dialog";
 import Spinner from "@/components/ui/Spinner";
 
+/** Cette page ne montre que des PHOTOS : la requête écarte les réponses
+    d'énigme bonus, qui vivent dans la même table sans url. */
+type PhotoSubmission = Submission & { url: string };
+
 const STATUS_BADGE: Record<Submission["status"], { label: string; cls: string }> = {
   pending: { label: "⏳ À juger", cls: "bg-gold text-ink" },
   approved: { label: "✅ Validée", cls: "bg-leaf text-parchment" },
@@ -32,8 +36,8 @@ export default function PhotosPage() {
   const [game, setGame] = useState<Game | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [lightbox, setLightbox] = useState<Submission | null>(null);
+  const [submissions, setSubmissions] = useState<PhotoSubmission[]>([]);
+  const [lightbox, setLightbox] = useState<PhotoSubmission | null>(null);
   const [zipping, setZipping] = useState(false);
 
   const load = useCallback(async () => {
@@ -41,12 +45,12 @@ export default function PhotosPage() {
       sb().from("games").select("*").eq("id", gameId).single(),
       sb().from("teams").select("*").eq("game_id", gameId),
       sb().from("steps").select("*").eq("game_id", gameId),
-      sb().from("submissions").select("*").eq("game_id", gameId).order("created_at"),
+      sb().from("submissions").select("*").eq("game_id", gameId).not("url", "is", null).order("created_at"),
     ]);
     setGame(g.data as Game);
     setTeams((t.data as Team[]) ?? []);
     setSteps((s.data as Step[]) ?? []);
-    setSubmissions((sub.data as Submission[]) ?? []);
+    setSubmissions((sub.data as PhotoSubmission[]) ?? []);
   }, [gameId]);
 
   useEffect(() => {
@@ -59,14 +63,14 @@ export default function PhotosPage() {
 
   // Regroupées par équipe
   const byTeam = useMemo(() => {
-    const map = new Map<string, Submission[]>();
+    const map = new Map<string, PhotoSubmission[]>();
     for (const sub of submissions) {
       map.set(sub.team_id, [...(map.get(sub.team_id) ?? []), sub]);
     }
     return map;
   }, [submissions]);
 
-  async function review(sub: Submission, approve: boolean) {
+  async function review(sub: PhotoSubmission, approve: boolean) {
     try {
       await rpc("org_review_photo", { p_submission_id: sub.id, p_approve: approve });
       await load();
@@ -75,7 +79,7 @@ export default function PhotosPage() {
     }
   }
 
-  async function setWinner(sub: Submission) {
+  async function setWinner(sub: PhotoSubmission) {
     try {
       const res = await rpc<{ ok: boolean; winner: boolean }>("org_set_photo_winner", {
         p_submission_id: sub.id,
@@ -90,14 +94,14 @@ export default function PhotosPage() {
     }
   }
 
-  function fileName(sub: Submission): string {
+  function fileName(sub: PhotoSubmission): string {
     const team = teamMap.get(sub.team_id)?.name ?? "equipe";
     const step = stepMap.get(sub.step_id)?.title ?? "etape";
     const safe = (s: string) => s.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 30);
     return `${safe(team)}_${safe(step)}_${sub.id.slice(0, 6)}.webp`;
   }
 
-  async function downloadOne(sub: Submission) {
+  async function downloadOne(sub: PhotoSubmission) {
     try {
       const res = await fetch(sub.url);
       const blob = await res.blob();

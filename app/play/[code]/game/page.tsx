@@ -136,6 +136,8 @@ export default function GameScreen() {
     return `+${Math.max(1, Math.round(sec / 60))} min`;
   })();
   const currentIsMinigame = current?.step.type === "minigame";
+  const currentIsBonusRiddle =
+    current?.step.type === "text" && (current.step.content.text_mode ?? "normal") === "bonus";
 
   // Timer d'étape : temps restant (null si pas de limite)
   const timerLeftSec =
@@ -477,8 +479,10 @@ export default function GameScreen() {
               {/* Indices */}
               <HintPanel hints={current.hints} onUnlock={unlockHint} />
 
-              {/* Passer l'étape (bloqué) — pénalité propre à l'étape */}
-              {game.status === "running" && (
+              {/* Passer l'étape (bloqué) — pénalité propre à l'étape.
+                  Masqué sur une énigme bonus : n'importe quelle réponse fait
+                  déjà avancer gratuitement, payer une pénalité serait absurde. */}
+              {game.status === "running" && !currentIsBonusRiddle && (
                 <div>
                   <Button full size="md" variant="outline-crimson" onClick={handleSkipStep}>
                     🚪 BLOQUÉS ? PASSER L&apos;ÉTAPE

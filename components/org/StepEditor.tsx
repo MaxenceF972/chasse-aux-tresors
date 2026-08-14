@@ -150,6 +150,15 @@ export default function StepEditor({
   const [photoMode, setPhotoMode] = useState<"bonus" | "gate">(
     step?.content?.photo_mode ?? "bonus"
   );
+  const [textMode, setTextMode] = useState<"normal" | "bonus">(
+    step?.content?.text_mode ?? "normal"
+  );
+  // Récompense d'une énigme bonus : points (mode points) ou minutes (chrono)
+  const [bonusReward, setBonusReward] = useState<string>(() => {
+    const c = step?.content;
+    if (scoring === "points") return c?.bonus_points != null ? String(c.bonus_points) : "100";
+    return c?.bonus_sec != null ? String(Math.round(c.bonus_sec / 60)) : "1";
+  });
   const [points, setPoints] = useState<number>(step?.points ?? 100);
   const [timeLimitMin, setTimeLimitMin] = useState<string>(
     step?.time_limit_sec ? String(Math.round(step.time_limit_sec / 60)) : ""
@@ -170,6 +179,9 @@ export default function StepEditor({
 
   const minigameDef = MINIGAMES[minigameKind];
   const showAnswers = type === "text" || (type === "minigame" && minigameDef.needsAnswer);
+  // Énigme bonus : c'est l'organisateur qui juge, la liste de réponses n'est
+  // qu'un pense-bête — donc facultative (questions ouvertes possibles).
+  const isBonusRiddle = type === "text" && textMode === "bonus";
   // Un point est posé sur une épreuve non-GPS → guidage réglable
   const hasRdvPoint = type !== "gps" && rdvLat.trim() !== "" && rdvLng.trim() !== "";
   // Le point de l'étape, s'il existe : sert de raccourci aux indices « lieu »
@@ -213,7 +225,7 @@ export default function StepEditor({
       return;
     }
     const answers = answersText.split("\n").map((a) => a.trim()).filter(Boolean);
-    if (showAnswers && answers.length === 0) {
+    if (showAnswers && !isBonusRiddle && answers.length === 0) {
       setError("Ajoute au moins une réponse acceptée.");
       return;
     }
@@ -278,6 +290,20 @@ export default function StepEditor({
               ? { lat: parseCoord(rdvLat), lng: parseCoord(rdvLng) }
               : undefined,
           photo_mode: type === "photo" ? photoMode : undefined,
+          text_mode: type === "text" ? textMode : undefined,
+          // Conserve la clé de l'AUTRE barème (au cas où la partie en change)
+          bonus_points:
+            type === "text" && textMode === "bonus"
+              ? scoring === "points"
+                ? Math.max(0, Number(bonusReward) || 0)
+                : step?.content?.bonus_points
+              : undefined,
+          bonus_sec:
+            type === "text" && textMode === "bonus"
+              ? scoring === "points"
+                ? step?.content?.bonus_sec
+                : Math.max(0, Number(bonusReward) || 0) * 60
+              : undefined,
           gps_guidance:
             type === "gps" ? gpsGuidance : hasRdvPoint ? rdvGuidance : undefined,
           gps_hotcold_thresholds: hotcoldActive ? gpsThresholds.map(Number) : undefined,
@@ -485,6 +511,61 @@ export default function StepEditor({
               L&apos;onglet « Balises » de la partie permet d&apos;écrire les puces NFC et
               d&apos;imprimer les QR codes.
             </p>
+          </div>
+        )}
+
+        {type === "text" && (
+          <div className="space-y-3 rounded-xl border-[3px] border-ink/20 p-3">
+            <Label>Type d&apos;énigme</Label>
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setTextMode("normal")}
+                className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                  textMode === "normal" ? "bg-gold" : "bg-white"
+                }`}
+              >
+                <span className="font-display">🎯 Énigme classique</span>
+                <span className="block text-xs font-bold text-ink/60">
+                  L&apos;équipe cherche jusqu&apos;à trouver : autant d&apos;essais qu&apos;elle
+                  veut, et elle ne passe à la suite qu&apos;une fois la bonne réponse donnée.
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTextMode("bonus")}
+                className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                  textMode === "bonus" ? "bg-gold" : "bg-white"
+                }`}
+              >
+                <span className="font-display">🎁 Énigme bonus</span>
+                <span className="block text-xs font-bold text-ink/60">
+                  Une seule réponse, et l&apos;équipe avance quoi qu&apos;il arrive — aucune
+                  pénalité si elle se trompe. C&apos;est toi qui juges ensuite : validée, la
+                  réponse rapporte une récompense. Idéal pour une question ouverte.
+                </span>
+              </button>
+            </div>
+
+            {textMode === "bonus" && (
+              <div>
+                <Label>
+                  Récompense si tu valides la réponse{" "}
+                  {scoring === "points" ? "(points)" : "(minutes offertes)"}
+                </Label>
+                <Input
+                  value={bonusReward}
+                  onChange={(e) => setBonusReward(e.target.value.replace(/\D/g, ""))}
+                  inputMode="numeric"
+                  className="w-28"
+                />
+                <p className="text-xs font-bold text-ink/55 mt-1">
+                  Les réponses arrivent dans l&apos;onglet « ✅ À valider » du dashboard live,
+                  avec la réponse attendue sous les yeux. Validée, la récompense apparaît dans le
+                  classement des joueurs avec son motif ; refusée, il ne se passe rien.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -878,9 +959,11 @@ export default function StepEditor({
         {showAnswers && (
           <div>
             <Label>
-              {type === "minigame" && minigameDef.answerLabel
-                ? minigameDef.answerLabel
-                : "Réponses acceptées (une par ligne)"}
+              {isBonusRiddle
+                ? "Réponse attendue (facultative — elle t'aidera à juger)"
+                : type === "minigame" && minigameDef.answerLabel
+                  ? minigameDef.answerLabel
+                  : "Réponses acceptées (une par ligne)"}
             </Label>
             <TextArea
               rows={3}
@@ -889,7 +972,9 @@ export default function StepEditor({
               placeholder={"la fontaine\nfontaine"}
             />
             <p className="text-xs font-bold text-ink/50 mt-1">
-              Insensible à la casse, aux accents et à la ponctuation.
+              {isBonusRiddle
+                ? "Rien n'est vérifié automatiquement ici : cette réponse s'affichera à côté de celle de l'équipe, au moment où tu jugeras."
+                : "Insensible à la casse, aux accents et à la ponctuation."}
             </p>
           </div>
         )}

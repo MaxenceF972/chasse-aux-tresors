@@ -63,6 +63,12 @@ export interface StepContent {
   rdv?: { lat: number; lng: number };
   /** Épreuve photo : bonus (avance direct, jugée après) ou gate (bloquante, l'orga valide pour avancer) */
   photo_mode?: "bonus" | "gate";
+  /** Énigme : "normal" (il faut trouver pour avancer) ou "bonus" (une seule
+      réponse, on avance quoi qu'il arrive, l'organisateur juge après) */
+  text_mode?: "normal" | "bonus";
+  /** Énigme bonus : récompense si la réponse est validée par l'organisateur */
+  bonus_points?: number; // mode points
+  bonus_sec?: number;    // mode chrono : secondes rendues
   /** Pénalité si l'équipe passe cette étape (surcharge le réglage global de la partie) */
   skip_penalty_sec?: number;   // mode chrono : minutes ajoutées ×60
   skip_penalty_points?: number; // mode points : points retirés
@@ -161,7 +167,10 @@ export interface Submission {
   game_id: string;
   team_id: string;
   step_id: string;
-  url: string;
+  /** Photo envoyée — null quand la soumission est une réponse d'énigme bonus */
+  url: string | null;
+  /** Réponse écrite d'une énigme bonus, jugée par l'organisateur */
+  answer?: string | null;
   status: "pending" | "approved" | "rejected";
   is_winner: boolean;
   created_at: string;

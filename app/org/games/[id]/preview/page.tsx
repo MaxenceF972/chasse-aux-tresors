@@ -87,9 +87,13 @@ export default function PreviewPage() {
   }
 
   function checkAnswer() {
-    const ok = (secrets?.answers ?? []).some(
-      (a) => normalizeAnswer(a) !== "" && normalizeAnswer(a) === normalizeAnswer(answer)
-    );
+    // Énigme bonus : en jeu, l'équipe passe quoi qu'elle réponde — le test
+    // doit se comporter pareil, sinon on ne peut pas dérouler son parcours.
+    const ok =
+      step?.content.text_mode === "bonus" ||
+      (secrets?.answers ?? []).some(
+        (a) => normalizeAnswer(a) !== "" && normalizeAnswer(a) === normalizeAnswer(answer)
+      );
     if (ok) next();
     else {
       sfx.fail();
@@ -243,7 +247,20 @@ export default function PreviewPage() {
                     </Button>
                   </div>
                   <p className="text-xs font-bold text-ink/50 mt-1">
-                    Réponses acceptées : {(secrets?.answers ?? []).join(" · ") || "(aucune !)"}
+                    {step.content.text_mode === "bonus" ? (
+                      <>
+                        🎁 <strong>Énigme bonus</strong> : en vrai, l&apos;équipe n&apos;a
+                        qu&apos;un essai et passe quoi qu&apos;elle réponde — c&apos;est toi qui
+                        juges ensuite depuis l&apos;onglet « À valider ». Ici, tape n&apos;importe
+                        quoi puis « OK » pour continuer le test.
+                        {(secrets?.answers ?? []).length > 0 &&
+                          ` Réponse attendue : ${(secrets?.answers ?? []).join(" · ")}`}
+                      </>
+                    ) : (
+                      <>
+                        Réponses acceptées : {(secrets?.answers ?? []).join(" · ") || "(aucune !)"}
+                      </>
+                    )}
                   </p>
                 </div>
               )}
