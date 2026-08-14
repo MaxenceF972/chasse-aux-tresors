@@ -9,7 +9,10 @@ interface SuccessOverlayProps {
   onDone: () => void;
 }
 
-/** Le "X" rouge s'abat sur la carte : validation réussie ! */
+/**
+ * La croix du trésor s'abat sur la carte : validation réussie !
+ * Elle est VERTE — en rouge, les équipes croyaient avoir raté l'épreuve.
+ */
 export default function SuccessOverlay({ show, finished, onDone }: SuccessOverlayProps) {
   const confetti = useMemo(
     () =>
@@ -60,7 +63,7 @@ export default function SuccessOverlay({ show, finished, onDone }: SuccessOverla
             initial={{ scale: 3, rotate: -30, opacity: 0 }}
             animate={{ scale: 1, rotate: -8, opacity: 1 }}
             transition={{ type: "spring", stiffness: 260, damping: 14 }}
-            className="font-display text-8xl text-crimson drop-shadow-[4px_4px_0_#111111] select-none"
+            className="font-display text-8xl text-leaf-bright drop-shadow-[4px_4px_0_#111111] select-none"
           >
             ✗
           </motion.div>
