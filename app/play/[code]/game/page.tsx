@@ -383,7 +383,11 @@ export default function GameScreen() {
                 </span>
                 {current.step.is_final && (
                   <span className="font-display text-sm bg-crimson text-parchment px-2.5 py-1 rounded-lg rotate-1">
-                    🏁 SPRINT FINAL
+                    {/* Le sprint final peut compter plusieurs épreuves : on ne
+                        crie « dernière » que sur la toute dernière du parcours. */}
+                    {current.position === progress.total - 1
+                      ? "🏁 DERNIÈRE ÉPREUVE"
+                      : "🏁 SPRINT FINAL"}
                   </span>
                 )}
                 {current.step.is_start && (

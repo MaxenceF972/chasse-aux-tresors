@@ -7,7 +7,7 @@ import { frError, sb } from "@/lib/supabase/client";
 import type { Game, Step, StepSecrets, StepType } from "@/lib/types";
 import { DEFAULT_CHARTER_LINES } from "@/lib/game/charter";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
-import StepEditor from "@/components/org/StepEditor";
+import StepEditor, { MAX_FINAL_STEPS } from "@/components/org/StepEditor";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import { Input, Label, TextArea } from "@/components/ui/Input";
@@ -17,6 +17,8 @@ import { useConfirm } from "@/components/ui/Confirm";
 
 const TYPE_ICON: Record<StepType, string> = { nfc: "🏷️", text: "💬", minigame: "🎮", photo: "📸", gps: "📍" };
 const TYPE_LABEL: Record<StepType, string> = { nfc: "Balise", text: "Énigme", minigame: "Mini-jeu", photo: "Photo", gps: "Balise GPS" };
+
+type SectionKey = "starts" | "middle" | "finals";
 
 export default function GameEditPage() {
   const { user, loading } = useOrgAuth();
@@ -77,25 +79,46 @@ export default function GameEditPage() {
       .forEach((s) => keys.add(s.chain_group?.trim() ? `g:${s.chain_group.trim()}` : `s:${s.id}`));
     return keys.size;
   }, [steps]);
-  const hasFinal = useMemo(() => steps.some((s) => s.is_final), [steps]);
+  // Le parcours est affiché dans l'ordre où il se JOUE : départ, puis le corps
+  // de la chasse (pool mélangé + paliers communs), puis le sprint final. C'est
+  // exactement le découpage de start_game — l'ordre d'une section n'a de sens
+  // que face aux étapes de la même section.
+  const sections = useMemo(
+    () => ({
+      starts: steps.filter((s) => s.is_start && !s.is_final),
+      middle: steps.filter((s) => !s.is_start && !s.is_final),
+      finals: steps.filter((s) => s.is_final),
+    }),
+    [steps]
+  );
+  const hasFinal = sections.finals.length > 0;
 
-  async function move(index: number, dir: -1 | 1) {
+  /** Monte / descend une étape À L'INTÉRIEUR de sa section. */
+  async function move(key: SectionKey, index: number, dir: -1 | 1) {
+    const list = sections[key];
     const other = index + dir;
-    if (other < 0 || other >= steps.length) return;
-    const a = steps[index];
-    const b = steps[other];
-    // Échange les order_hint (réindexe si égaux)
-    const hintA = b.order_hint === a.order_hint ? a.order_hint + dir : b.order_hint;
-    await Promise.all([
-      sb().from("steps").update({ order_hint: hintA }).eq("id", a.id),
-      sb().from("steps").update({ order_hint: a.order_hint }).eq("id", b.id),
-    ]);
-    // Réindexation propre pour éviter les collisions au fil du temps
-    const reordered = [...steps];
-    [reordered[index], reordered[other]] = [reordered[other], reordered[index]];
-    await Promise.all(
-      reordered.map((s, i) => sb().from("steps").update({ order_hint: i * 10 }).eq("id", s.id))
+    if (other < 0 || other >= list.length) return;
+    const swapped = [...list];
+    [swapped[index], swapped[other]] = [swapped[other], swapped[index]];
+
+    // La liste complète, dans l'ordre de jeu : c'est elle qui fixe les
+    // order_hint (réindexés proprement pour éviter les collisions).
+    const ordered = [
+      key === "starts" ? swapped : sections.starts,
+      key === "middle" ? swapped : sections.middle,
+      key === "finals" ? swapped : sections.finals,
+    ].flat();
+    const changed = ordered
+      .map((s, i) => ({ id: s.id, hint: i * 10, was: s.order_hint }))
+      .filter((u) => u.hint !== u.was);
+    setSteps(ordered.map((s, i) => ({ ...s, order_hint: i * 10 })));
+
+    const results = await Promise.all(
+      changed.map((u) => sb().from("steps").update({ order_hint: u.hint }).eq("id", u.id))
     );
+    if (results.some((r) => r.error)) {
+      showToast("Réordonnancement non enregistré — réessaie.", "error");
+    }
     void load();
   }
 
@@ -383,90 +406,143 @@ export default function GameEditPage() {
         </Card>
       )}
 
-      <div className="space-y-3 mb-5">
-        {steps.map((step, i) => (
-          <Card key={step.id} className="p-3">
-            <div className="flex items-center gap-3">
-              <div className="flex flex-col gap-1.5">
-                <button
-                  disabled={!editable || i === 0}
-                  onClick={() => move(i, -1)}
-                  className="w-10 h-10 rounded-lg border-2 border-ink bg-white font-bold text-lg disabled:opacity-30 active:bg-parchment-dark"
-                  aria-label="Monter"
-                >
-                  ↑
-                </button>
-                <button
-                  disabled={!editable || i === steps.length - 1}
-                  onClick={() => move(i, 1)}
-                  className="w-10 h-10 rounded-lg border-2 border-ink bg-white font-bold text-lg disabled:opacity-30 active:bg-parchment-dark"
-                  aria-label="Descendre"
-                >
-                  ↓
-                </button>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="font-display truncate">
-                  {TYPE_ICON[step.type]} {step.title}
-                </div>
-                <div className="flex gap-1.5 flex-wrap mt-1">
-                  {step.is_final ? (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-crimson text-parchment border-2 border-ink">
-                      🏁 Sprint final
-                    </span>
-                  ) : step.is_start ? (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-gold border-2 border-ink">
-                      🚀 Départ
-                    </span>
-                  ) : step.is_common_checkpoint ? (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-leaf text-parchment border-2 border-ink">
-                      📍 Palier commun
-                    </span>
-                  ) : (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-parchment-dark border-2 border-ink">
-                      🎲 Pool
-                    </span>
-                  )}
-                  {step.chain_group && (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-gold border-2 border-ink">
-                      🔗 Groupe {step.chain_group}
-                    </span>
-                  )}
-                  {step.type === "minigame" && step.content.minigame && (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-white border-2 border-ink">
-                      {step.content.minigame.kind}
-                    </span>
-                  )}
-                  {step.media_urls.length > 0 && (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-white border-2 border-ink">
-                      📷 {step.media_urls.length}
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Button
-                  size="sm"
-                  variant="parchment"
-                  disabled={!editable}
-                  onClick={() => {
-                    if (!secretsReady) {
-                      showToast("Chargement des réponses en cours — réessaie dans une seconde.", "info");
-                      return;
-                    }
-                    setEditing({ step, type: step.type });
-                  }}
-                >
-                  ✏️
-                </Button>
-                <Button size="sm" variant="crimson" disabled={!editable} onClick={() => deleteStep(step)}>
-                  🗑️
-                </Button>
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
+      {steps.length > 0 && (
+        <div className="space-y-6 mb-5">
+          {(
+            [
+              {
+                key: "starts",
+                title: "🚀 DÉPART",
+                help: "La première épreuve, la même pour toutes les équipes.",
+              },
+              {
+                key: "middle",
+                title: "🎲 LE PARCOURS",
+                help: `Le cœur de la chasse : ${poolCount} bloc${poolCount > 1 ? "s" : ""} distribué${poolCount > 1 ? "s" : ""} dans un ordre différent à chaque équipe, et les paliers communs à leur position fixe.`,
+              },
+              {
+                key: "finals",
+                title: "🏁 SPRINT FINAL",
+                help: `Jusqu'à ${MAX_FINAL_STEPS} épreuves jouées à la suite, dans CET ordre, par toutes les équipes — débloquées seulement quand tout le reste est validé.`,
+              },
+            ] as { key: SectionKey; title: string; help: string }[]
+          ).map((sec) => {
+            const list = sections[sec.key];
+            // Une section vide ne s'affiche que pour le sprint final : c'est là
+            // qu'on veut voir qu'il n'y a rien, et comment le remplir.
+            if (list.length === 0 && sec.key !== "finals") return null;
+            return (
+              <section key={sec.key}>
+                <h3 className="font-display text-parchment text-lg">{sec.title}</h3>
+                <p className="font-bold text-parchment/45 text-xs mb-2 leading-snug">{sec.help}</p>
+
+                {list.length === 0 ? (
+                  <Card className="p-3">
+                    <p className="font-bold text-ink/55 text-sm">
+                      Aucune épreuve — ouvre une étape et choisis « 🏁 Sprint final » pour un finish
+                      commun (le trésor, une dernière énigme, une photo de groupe…).
+                    </p>
+                  </Card>
+                ) : (
+                  <div className="space-y-3">
+                    {list.map((step, i) => (
+                      <Card key={step.id} className="p-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex flex-col gap-1.5">
+                            <button
+                              disabled={!editable || i === 0}
+                              onClick={() => move(sec.key, i, -1)}
+                              className="w-10 h-10 rounded-lg border-2 border-ink bg-white font-bold text-lg disabled:opacity-30 active:bg-parchment-dark"
+                              aria-label="Monter"
+                            >
+                              ↑
+                            </button>
+                            <button
+                              disabled={!editable || i === list.length - 1}
+                              onClick={() => move(sec.key, i, 1)}
+                              className="w-10 h-10 rounded-lg border-2 border-ink bg-white font-bold text-lg disabled:opacity-30 active:bg-parchment-dark"
+                              aria-label="Descendre"
+                            >
+                              ↓
+                            </button>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-display truncate">
+                              {TYPE_ICON[step.type]} {step.title}
+                            </div>
+                            <div className="flex gap-1.5 flex-wrap mt-1">
+                              {step.is_final ? (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-crimson text-parchment border-2 border-ink">
+                                  🏁 Sprint {i + 1}
+                                  {list.length > 1 ? `/${list.length}` : ""}
+                                </span>
+                              ) : step.is_start ? (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-gold border-2 border-ink">
+                                  🚀 Départ
+                                </span>
+                              ) : step.is_common_checkpoint ? (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-leaf text-parchment border-2 border-ink">
+                                  📍 Palier commun
+                                </span>
+                              ) : (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-parchment-dark border-2 border-ink">
+                                  🎲 Pool
+                                </span>
+                              )}
+                              {step.chain_group && (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-gold border-2 border-ink">
+                                  🔗 Groupe {step.chain_group}
+                                </span>
+                              )}
+                              {step.type === "minigame" && step.content.minigame && (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-white border-2 border-ink">
+                                  {step.content.minigame.kind}
+                                </span>
+                              )}
+                              {step.media_urls.length > 0 && (
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-white border-2 border-ink">
+                                  📷 {step.media_urls.length}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="parchment"
+                              disabled={!editable}
+                              onClick={() => {
+                                if (!secretsReady) {
+                                  showToast(
+                                    "Chargement des réponses en cours — réessaie dans une seconde.",
+                                    "info"
+                                  );
+                                  return;
+                                }
+                                setEditing({ step, type: step.type });
+                              }}
+                            >
+                              ✏️
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="crimson"
+                              disabled={!editable}
+                              onClick={() => deleteStep(step)}
+                            >
+                              🗑️
+                            </Button>
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+      )}
 
       {editable && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-8">
@@ -496,8 +572,8 @@ export default function GameEditPage() {
 
       {!hasFinal && steps.length > 1 && (
         <p className="mt-4 text-sm font-bold text-gold/80">
-          💡 Conseil : marque une étape comme « Sprint final » pour un finish commun à toutes les
-          équipes.
+          💡 Conseil : marque 1 à {MAX_FINAL_STEPS} étapes comme « 🏁 Sprint final » pour un finish
+          commun — toutes les équipes les enchaînent dans le même ordre, une fois le reste bouclé.
         </p>
       )}
 
@@ -508,7 +584,7 @@ export default function GameEditPage() {
           secrets={editing.step ? (secretsMap[editing.step.id] ?? null) : null}
           initialType={editing.type}
           nextOrderHint={(steps.length ? Math.max(...steps.map((s) => s.order_hint)) : 0) + 10}
-          hasOtherFinal={steps.some((s) => s.is_final && s.id !== editing.step?.id)}
+          otherFinals={steps.filter((s) => s.is_final && s.id !== editing.step?.id).length}
           hasOtherStart={steps.some((s) => s.is_start && s.id !== editing.step?.id)}
           scoring={game.settings.scoring === "points" ? "points" : "time"}
           onSaved={() => {

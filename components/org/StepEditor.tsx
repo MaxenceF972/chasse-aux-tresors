@@ -14,6 +14,9 @@ import { Input, Label, TextArea } from "@/components/ui/Input";
 
 type Placement = "start" | "pool" | "common" | "final";
 
+/** Le sprint final peut enchaîner jusqu'à 6 étapes (au-delà, ce n'est plus un sprint). */
+export const MAX_FINAL_STEPS = 6;
+
 const HINT_KINDS: { kind: HintKind; icon: string; label: string }[] = [
   { kind: "text", icon: "💬", label: "Texte" },
   { kind: "media", icon: "🖼️", label: "Média" },
@@ -42,7 +45,8 @@ interface StepEditorProps {
   secrets: StepSecrets | null;
   initialType: StepType;
   nextOrderHint: number;
-  hasOtherFinal: boolean;
+  /** Étapes DÉJÀ en sprint final, celle qu'on édite exclue */
+  otherFinals: number;
   hasOtherStart: boolean;
   /** Mode de score de la partie : décide si la pénalité de skip est en min ou en points */
   scoring: "time" | "points";
@@ -84,7 +88,7 @@ export default function StepEditor({
   secrets,
   initialType,
   nextOrderHint,
-  hasOtherFinal,
+  otherFinals,
   hasOtherStart,
   scoring,
   onSaved,
@@ -222,8 +226,10 @@ export default function StepEditor({
       setError("Donne un titre à l'étape.");
       return;
     }
-    if (placement === "final" && hasOtherFinal) {
-      setError("Il y a déjà un sprint final — retire d'abord l'autre étape finale.");
+    if (placement === "final" && otherFinals >= MAX_FINAL_STEPS) {
+      setError(
+        `Le sprint final contient déjà ${otherFinals} étapes — c'est le maximum. Repasse-en une au pool pour faire de la place.`
+      );
       return;
     }
     if (placement === "start" && hasOtherStart) {
@@ -357,7 +363,14 @@ export default function StepEditor({
 
       let stepId = step?.id;
       if (stepId) {
-        const { error } = await sb().from("steps").update(row).eq("id", stepId);
+        // Promue en sprint final, l'étape rejoint la FIN du parcours : sinon
+        // elle garderait son rang du milieu et s'insérerait au hasard dans le
+        // sprint (l'ordre du sprint, c'est l'order_hint).
+        const promoted = placement === "final" && !step?.is_final;
+        const { error } = await sb()
+          .from("steps")
+          .update(promoted ? { ...row, order_hint: nextOrderHint } : row)
+          .eq("id", stepId);
         if (error) throw new Error(error.message);
       } else {
         const { data, error } = await sb()
@@ -1277,7 +1290,7 @@ export default function StepEditor({
                 { v: "start", icon: "🚀", label: "Épreuve de départ", help: "Toujours la première étape, identique pour toutes les équipes" },
                 { v: "pool", icon: "🎲", label: "Pool aléatoire", help: "Ordre décalé pour chaque équipe (anti-suivi)" },
                 { v: "common", icon: "📍", label: "Palier commun", help: "Position fixe, tout le monde y passe à ce moment du parcours" },
-                { v: "final", icon: "🏁", label: "Sprint final", help: "Dernière étape identique pour tous, débloquée quand tout est validé" },
+                { v: "final", icon: "🏁", label: "Sprint final", help: `Jusqu'à ${MAX_FINAL_STEPS} étapes enchaînées, identiques pour tous, débloquées quand tout le reste est validé` },
               ] as { v: Placement; icon: string; label: string; help: string }[]
             ).map((opt) => (
               <button
@@ -1295,6 +1308,18 @@ export default function StepEditor({
               </button>
             ))}
           </div>
+
+          {placement === "final" && (
+            <p className="text-xs font-bold text-ink/55 mt-2">
+              🏁 {step?.is_final ? "Le sprint final compte" : "Elle rejoindra la fin du sprint final, qui comptera"}{" "}
+              <strong>
+                {otherFinals + 1} épreuve{otherFinals > 0 ? "s" : ""}
+              </strong>{" "}
+              (6 au maximum). Toutes les équipes les enchaînent dans le{" "}
+              <strong>même ordre</strong>, celui de la section « 🏁 Sprint final » du parcours —
+              range-les avec les flèches ↑↓.
+            </p>
+          )}
         </div>
 
         {/* Enchaînement d'étapes (pool uniquement) */}

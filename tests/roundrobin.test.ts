@@ -154,6 +154,23 @@ test("round-robin : la finale est toujours en dernière position", () => {
   }
 });
 
+test("sprint final : 2 à 6 étapes, à la toute fin, dans le même ordre pour tous", () => {
+  for (const finalCount of [2, 3, 4, 5, 6]) {
+    const { slots, pool, finals } = makeConfig(6, [2], finalCount);
+    const routes = buildRoutes(slots, pool, finals, 4, shuffledOrder(6));
+    for (const route of routes) {
+      // le sprint ferme le parcours, dans l'ordre déclaré
+      assert.deepEqual(route.slice(-finalCount), finals, `sprint de ${finalCount} étapes`);
+      // et rien du sprint ne fuit plus tôt dans le parcours
+      assert.equal(
+        route.slice(0, -finalCount).some((s) => finals.includes(s)),
+        false,
+        `une étape du sprint apparaît avant la fin (${finalCount})`
+      );
+    }
+  }
+});
+
 test("anti-peloton : deux équipes décalées ne se suivent pas d'énigme en énigme", () => {
   // Le cas vécu : 12 équipes, 12 énigmes au pool. Avec l'ancien décalage
   // cyclique simple, une équipe UNE étape derrière une autre tombait sur la
