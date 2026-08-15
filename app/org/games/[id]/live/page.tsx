@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { frError, sb, rpc } from "@/lib/supabase/client";
-import type { Game, GameEvent, Player, RankingData, Step, StepType, Submission, Team, TeamRoute } from "@/lib/types";
+import type { BroadcastKind, Game, GameEvent, Player, RankingData, Step, StepType, Submission, Team, TeamRoute } from "@/lib/types";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import { renderRich } from "@/lib/game/rich";
@@ -34,6 +34,37 @@ const STUCK_MS = 10 * 60000;
 
 /** Nombre d'équipes classées par épreuve (barème dégressif 100, 90, 80…). */
 const RECORD_RANKS = 10;
+
+/** Les trois niveaux d'un message général, du plus calme au plus fort. */
+const BROADCAST_KINDS: {
+  v: BroadcastKind;
+  short: string;
+  label: string;
+  help: string;
+  cls: string;
+}[] = [
+  {
+    v: "info",
+    short: "📣 Annonce",
+    label: "📣 Annonce",
+    help: "Une information de service : horaire, point de rendez-vous, félicitations.",
+    cls: "bg-parchment-dark",
+  },
+  {
+    v: "warning",
+    short: "⚠️ Avertissement",
+    label: "⚠️ Avertissement",
+    help: "Un rappel à l'ordre : zone interdite, consigne de sécurité, rappel du règlement.",
+    cls: "bg-gold",
+  },
+  {
+    v: "alert",
+    short: "🚨 Alerte",
+    label: "🚨 Alerte",
+    help: "L'urgence : la chasse s'arrête, tout le monde rentre. Vibration longue et bandeau rouge.",
+    cls: "bg-crimson text-parchment",
+  },
+];
 
 const START_ERRORS: Record<string, string> = {
   AUCUNE_EQUIPE: "Aucune équipe n'a rejoint le lobby.",
@@ -92,6 +123,11 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
     case "step_timeout": return `⌛ « ${team} » — temps écoulé sur « ${String(e.payload.step_title ?? "?")} »`;
     case "step_neutralized": return `🛠️ Étape « ${String(e.payload.step_title ?? "?")} » neutralisée (${String(e.payload.teams_affected ?? 0)} équipes)`;
     case "team_message": return `🆘 « ${team} » : ${String(e.payload.message ?? "")}`;
+    case "org_broadcast": {
+      const k = String(e.payload.kind ?? "info");
+      const icon = k === "alert" ? "🚨 ALERTE" : k === "warning" ? "⚠️ AVERTISSEMENT" : "📣 ANNONCE";
+      return `${icon} à toutes les équipes : ${String(e.payload.message ?? "")}`;
+    }
     case "bonus_awarded": {
       const pts = Number(e.payload.points ?? 0);
       const sec = Number(e.payload.seconds ?? 0);
@@ -127,6 +163,10 @@ export default function LiveDashboardPage() {
   const [busy, setBusy] = useState(false);
   const [hintTarget, setHintTarget] = useState<Team | null>(null);
   const [hintMessage, setHintMessage] = useState("");
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastKind, setBroadcastKind] = useState<BroadcastKind>("info");
+  const [broadcastMessage, setBroadcastMessage] = useState("");
+  const [broadcastBusy, setBroadcastBusy] = useState(false);
   const [manageTeam, setManageTeam] = useState<Team | null>(null);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -422,6 +462,53 @@ export default function LiveDashboardPage() {
       await load();
     } catch (err) {
       showToast(`Échec : ${frError(err, "erreur")}`, "error");
+    }
+  }
+
+  /** Message général : toutes les équipes d'un coup, avec son niveau. */
+  async function sendBroadcast() {
+    const message = broadcastMessage.trim();
+    if (!message) return;
+    setBroadcastBusy(true);
+    try {
+      const res = await rpc<{ ok: boolean; teams: number }>("org_broadcast", {
+        p_game_id: gameId,
+        p_kind: broadcastKind,
+        p_message: message,
+      });
+      showToast(
+        `${BROADCAST_KINDS.find((k) => k.v === broadcastKind)?.short} envoyé à ${res.teams} équipe(s) ✅`,
+        "success"
+      );
+      setBroadcastMessage("");
+      setBroadcastOpen(false);
+      // Notification push en prime : le téléphone en poche vibre aussi.
+      try {
+        const { data } = await sb().auth.getSession();
+        if (data.session) {
+          void fetch("/api/push", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${data.session.access_token}`,
+            },
+            body: JSON.stringify({ game_id: gameId, message, kind: broadcastKind }),
+          });
+        }
+      } catch {
+        /* push best-effort : le message est déjà passé en temps réel */
+      }
+      await load();
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : "";
+      showToast(
+        /does not exist|schema cache/i.test(raw)
+          ? "⚠️ Recolle supabase/setup.sql : la base ne connaît pas encore org_broadcast."
+          : `Envoi impossible : ${frError(err, "erreur")}`,
+        "error"
+      );
+    } finally {
+      setBroadcastBusy(false);
     }
   }
 
@@ -874,6 +961,9 @@ export default function LiveDashboardPage() {
         )}
         {(game.status === "running" || game.status === "paused") && (
           <>
+            <Button variant="gold" disabled={busy} onClick={() => setBroadcastOpen(true)}>
+              📢 Message général
+            </Button>
             <Button variant="parchment" disabled={busy} onClick={() => setToolsOpen(true)}>
               🛠️ Outils
             </Button>
@@ -1680,6 +1770,74 @@ export default function LiveDashboardPage() {
                 </div>
               ))}
           </div>
+        </div>
+      </Dialog>
+
+      {/* Dialog message général — toutes les équipes d'un coup */}
+      <Dialog
+        open={broadcastOpen}
+        onClose={() => setBroadcastOpen(false)}
+        title="📢 Message général"
+      >
+        <div className="space-y-4">
+          <p className="font-bold text-ink/55 text-sm">
+            Envoyé à <strong>toutes les équipes</strong> ({teams.length}) en même temps : il
+            s&apos;affiche à l&apos;écran tout de suite, fait vibrer les téléphones, et attend
+            celles qui sont hors réseau ou écran éteint.
+          </p>
+
+          <div>
+            <Label>Niveau</Label>
+            <div className="space-y-2">
+              {BROADCAST_KINDS.map((k) => (
+                <button
+                  key={k.v}
+                  type="button"
+                  onClick={() => setBroadcastKind(k.v)}
+                  className={`w-full text-left p-3 rounded-xl border-[3px] border-ink ${
+                    broadcastKind === k.v ? k.cls : "bg-white"
+                  }`}
+                >
+                  <span className="font-display">{k.label}</span>
+                  <span
+                    className={`block text-xs font-bold ${
+                      broadcastKind === k.v && k.v === "alert" ? "text-parchment/80" : "text-ink/60"
+                    }`}
+                  >
+                    {k.help}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <Label>Message</Label>
+            <TextArea
+              rows={3}
+              value={broadcastMessage}
+              onChange={(e) => setBroadcastMessage(e.target.value)}
+              placeholder={
+                broadcastKind === "alert"
+                  ? "Orage annoncé : arrêtez tout et rentrez au point de départ."
+                  : broadcastKind === "warning"
+                    ? "Rappel : le parking et la route sont interdits, restez dans le parc."
+                    : "Rendez-vous à 16 h près de la fontaine pour le goûter !"
+              }
+            />
+          </div>
+
+          <Button
+            full
+            size="lg"
+            variant={broadcastKind === "alert" ? "crimson" : "gold"}
+            onClick={sendBroadcast}
+            disabled={!broadcastMessage.trim() || broadcastBusy}
+          >
+            {broadcastBusy
+              ? "…"
+              : `📢 ENVOYER À ${teams.length} ÉQUIPE${teams.length > 1 ? "S" : ""}`}
+          </Button>
         </div>
       </Dialog>
 

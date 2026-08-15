@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ensureAnonSession, isNetworkError, rpc, sb } from "@/lib/supabase/client";
-import type { PlayState, ValidateKind, ValidateResult } from "@/lib/types";
+import type { BroadcastKind, PlayState, ValidateKind, ValidateResult } from "@/lib/types";
 import { enqueueValidation, flushQueue, listQueued } from "@/lib/game/offline-queue";
 import { bonusLabel } from "@/lib/game/format";
 import { precacheUrls } from "@/lib/pwa";
@@ -16,11 +16,34 @@ export type SubmitOutcome =
 export interface OrgMessage {
   id: number;
   message: string;
-  /** "bonus" = récompense du maître du jeu (célébrée), "hint" = message */
-  kind: "hint" | "bonus";
+  /**
+   * "bonus" = récompense du maître du jeu (célébrée), "hint" = message privé
+   * à l'équipe, info/warning/alert = message général à toute la partie.
+   */
+  kind: "hint" | "bonus" | BroadcastKind;
 }
 
 const STATE_CACHE_KEY = "toyah:playstate";
+/** Dernier message général déjà affiché : évite de le rejouer à chaque refetch. */
+const SEEN_BROADCAST_KEY = "toyah:broadcast-seen";
+/** Au-delà, un message général n'est plus rattrapé : il n'est plus d'actualité. */
+const BROADCAST_MAX_AGE_MS = 30 * 60 * 1000;
+
+function seenBroadcastId(): number {
+  try {
+    return Number(localStorage.getItem(SEEN_BROADCAST_KEY) ?? 0) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function markBroadcastSeen(id: number) {
+  try {
+    localStorage.setItem(SEEN_BROADCAST_KEY, String(id));
+  } catch {
+    /* stockage plein — le message sera juste réaffiché */
+  }
+}
 
 /**
  * État central de l'écran joueur : bootstrap + realtime + validations
@@ -46,6 +69,19 @@ export function usePlayState(expectedCode?: string) {
         stateRef.current = data;
         setState(data);
         setOffline(false);
+        // Rattrapage : un message général envoyé pendant que le téléphone
+        // dormait n'a jamais atteint le canal temps réel. On le rejoue ici,
+        // une seule fois (chaque refetch le renverrait sinon), et seulement
+        // s'il est encore d'actualité — une équipe qui installe l'app en
+        // cours de partie n'a pas à recevoir l'annonce d'il y a deux heures.
+        const b = data.broadcast;
+        if (b?.message && b.id > seenBroadcastId()) {
+          markBroadcastSeen(b.id);
+          const ageMs = Date.now() - new Date(b.at).getTime();
+          if (ageMs < BROADCAST_MAX_AGE_MS) {
+            setOrgMessage({ id: b.id, message: b.message, kind: b.kind });
+          }
+        }
         try {
           localStorage.setItem(STATE_CACHE_KEY, JSON.stringify(data));
         } catch {
@@ -142,6 +178,27 @@ export function usePlayState(expectedCode?: string) {
             });
           }
           void refetch();
+        }
+      )
+      // Messages généraux : ils portent team_id null, donc le filtre par
+      // équipe ci-dessus ne les voit pas. La policy events_select limite ce
+      // qui remonte ici aux events de la partie visibles par ce joueur.
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "events", filter: `game_id=eq.${gameId}` },
+        (payload) => {
+          const row = payload.new as {
+            id: number;
+            type: string;
+            payload: { kind?: string; message?: string };
+          };
+          if (row.type !== "org_broadcast" || !row.payload?.message) return;
+          markBroadcastSeen(row.id);
+          setOrgMessage({
+            id: row.id,
+            message: row.payload.message,
+            kind: (row.payload.kind as BroadcastKind) ?? "info",
+          });
         }
       )
       .subscribe();

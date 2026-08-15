@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import { usePlayState } from "@/components/play/usePlayState";
+import { usePlayState, type OrgMessage } from "@/components/play/usePlayState";
 import { useWakeLock } from "@/lib/hooks/useWakeLock";
 import { useGeoShare } from "@/lib/hooks/useGeoShare";
 import { isAudioUrl, isVideoUrl } from "@/lib/game/media";
@@ -37,6 +37,50 @@ const SKIPPED_ICONS: Record<string, string> = {
   nfc: "🏷️",
   gps: "🧭",
   photo: "📸",
+};
+
+/**
+ * Bandeau « message du maître du jeu ». Chaque niveau se distingue par la
+ * couleur ET le poids du titre : en plein soleil, sur un écran de téléphone,
+ * la teinte seule ne suffit pas à faire la différence entre une annonce et
+ * une alerte.
+ */
+const ORG_MESSAGE_STYLE: Record<
+  OrgMessage["kind"],
+  { box: string; title: string; body: string; hint: string }
+> = {
+  bonus: {
+    box: "bg-leaf text-parchment",
+    title: "🏅 RÉCOMPENSE DU MAÎTRE DU JEU !",
+    body: "",
+    hint: "text-parchment/60",
+  },
+  // text-ink explicite : sans lui, le titre hérite du parchemin de la page
+  // et disparaît sur un fond clair (le titre gold était déjà délavé).
+  hint: {
+    box: "bg-gold text-ink",
+    title: "📨 MESSAGE DE L'ORGANISATEUR",
+    body: "text-ink/85",
+    hint: "text-ink/50",
+  },
+  info: {
+    box: "bg-parchment text-ink",
+    title: "📣 ANNONCE",
+    body: "text-ink/85",
+    hint: "text-ink/50",
+  },
+  warning: {
+    box: "bg-gold text-ink",
+    title: "⚠️ AVERTISSEMENT",
+    body: "text-ink/85",
+    hint: "text-ink/50",
+  },
+  alert: {
+    box: "bg-crimson text-parchment",
+    title: "🚨 ALERTE",
+    body: "",
+    hint: "text-parchment/60",
+  },
 };
 
 export default function GameScreen() {
@@ -88,12 +132,16 @@ export default function GameScreen() {
     if (state.game.status === "finished") router.replace(`/play/${code}/final`);
   }, [state, code, router]);
 
-  // Message de l'organisateur → vibration + son ; une récompense, elle, se fête
+  // Message de l'organisateur → vibration + son ; une récompense se fête, une
+  // alerte insiste (elle peut arriver pendant que le téléphone est en poche).
   useEffect(() => {
     if (!orgMessage) return;
     if (orgMessage.kind === "bonus") {
       sfx.fanfare();
       haptics.success();
+    } else if (orgMessage.kind === "alert") {
+      sfx.fail();
+      haptics.fail();
     } else {
       sfx.pop();
       haptics.scan();
@@ -633,22 +681,22 @@ export default function GameScreen() {
             transition={{ type: "spring", stiffness: 300, damping: 24 }}
             onClick={clearOrgMessage}
             className={`fixed bottom-[max(1rem,env(safe-area-inset-bottom))] inset-x-4 z-50 max-w-lg mx-auto rounded-2xl border-[3px] border-ink p-4 text-left shadow-[5px_5px_0_0_#111111] ${
-              orgMessage.kind === "bonus" ? "bg-leaf text-parchment" : "bg-gold"
-            }`}
+              ORG_MESSAGE_STYLE[orgMessage.kind].box
+            } ${orgMessage.kind === "alert" ? "animate-shake" : ""}`}
           >
-            {orgMessage.kind === "bonus" ? (
-              <>
-                <p className="font-display text-lg mb-0.5">🏅 RÉCOMPENSE DU MAÎTRE DU JEU !</p>
-                <p className="font-bold">{orgMessage.message}</p>
-                <p className="text-xs font-bold text-parchment/60 mt-1">(toucher pour fermer)</p>
-              </>
-            ) : (
-              <>
-                <p className="font-display text-sm mb-0.5">📨 MESSAGE DE L&apos;ORGANISATEUR</p>
-                <p className="font-bold text-ink/85">{orgMessage.message}</p>
-                <p className="text-xs font-bold text-ink/50 mt-1">(toucher pour fermer)</p>
-              </>
-            )}
+            <p
+              className={`font-display mb-0.5 ${
+                orgMessage.kind === "bonus" || orgMessage.kind === "alert" ? "text-lg" : "text-sm"
+              }`}
+            >
+              {ORG_MESSAGE_STYLE[orgMessage.kind].title}
+            </p>
+            <p className={`font-bold ${ORG_MESSAGE_STYLE[orgMessage.kind].body}`}>
+              {orgMessage.message}
+            </p>
+            <p className={`text-xs font-bold mt-1 ${ORG_MESSAGE_STYLE[orgMessage.kind].hint}`}>
+              (toucher pour fermer)
+            </p>
           </motion.button>
         )}
       </AnimatePresence>

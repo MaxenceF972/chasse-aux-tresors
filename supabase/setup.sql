@@ -929,6 +929,42 @@ begin
   values (v_team.game_id, p_team_id, 'hint_sent', jsonb_build_object('message', p_message));
 end $$;
 
+-- Message général : part vers TOUTES les équipes de la partie d'un coup.
+-- team_id null = event global (la policy events_select le laisse passer à
+-- tous les joueurs de la partie). Trois niveaux, du plus calme au plus fort :
+--   info    📣 annonce      (« rendez-vous à 16 h pour le goûter »)
+--   warning ⚠️ avertissement (« la zone du port est interdite »)
+--   alert   🚨 alerte        (« orage, rentrez au point de départ »)
+create or replace function public.org_broadcast(
+  p_game_id uuid, p_kind text, p_message text
+) returns jsonb
+language plpgsql volatile security definer
+set search_path = public
+as $$
+declare
+  v_msg   text := trim(coalesce(p_message, ''));
+  v_kind  text := lower(trim(coalesce(p_kind, 'info')));
+  v_teams int;
+begin
+  if not public.is_game_owner(p_game_id) then
+    raise exception 'INTERDIT';
+  end if;
+  if v_msg = '' then
+    raise exception 'MESSAGE_VIDE';
+  end if;
+  if v_kind not in ('info', 'warning', 'alert') then
+    raise exception 'TYPE_INCONNU';
+  end if;
+
+  select count(*) into v_teams from public.teams where game_id = p_game_id;
+
+  insert into public.events (game_id, team_id, type, payload)
+  values (p_game_id, null, 'org_broadcast',
+          jsonb_build_object('kind', v_kind, 'message', left(v_msg, 1000)));
+
+  return jsonb_build_object('ok', true, 'teams', v_teams);
+end $$;
+
 -- ----------------------------------------------------------------------------
 -- RPC — Joueur
 -- ----------------------------------------------------------------------------
@@ -1235,6 +1271,20 @@ begin
       where tr.team_id = v_team.id and tr.skipped and tr.redeemed_at is null
         and coalesce((s.content->>'redeemable')::boolean, s.type = 'minigame')
     ), '[]'::jsonb),
+    -- Dernier message général de l'organisateur. Le temps réel ne touche que
+    -- les téléphones réveillés : celui-ci rattrape ceux qui dormaient, qui
+    -- étaient hors réseau ou qui ont rechargé la page. Le client garde l'id
+    -- déjà vu pour ne pas le réafficher en boucle.
+    'broadcast', (
+      select jsonb_build_object(
+               'id', e.id,
+               'kind', coalesce(nullif(e.payload->>'kind', ''), 'info'),
+               'message', e.payload->>'message',
+               'at', e.created_at)
+      from public.events e
+      where e.game_id = v_game.id and e.type = 'org_broadcast'
+      order by e.id desc limit 1
+    ),
     'finished', (v_total > 0 and v_done = v_total)
   );
 end $$;
@@ -2576,6 +2626,7 @@ begin
   foreach f in array array[
     'org_create_game(text,jsonb)', 'org_duplicate_game(uuid)', 'start_game(uuid)',
     'org_set_status(uuid,text)', 'org_force_validate(uuid,uuid)', 'org_send_hint(uuid,text)',
+    'org_broadcast(uuid,text,text)',
     'org_rename_team(uuid,text)', 'org_delete_team(uuid)', 'org_review_photo(uuid,boolean)',
     'org_set_photo_winner(uuid)', 'org_neutralize_step(uuid,uuid)',
     'org_award_bonus(uuid,int,int,text)', 'org_revoke_bonus(bigint)',

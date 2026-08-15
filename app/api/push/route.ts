@@ -34,28 +34,53 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Session invalide" }, { status: 401 });
     }
 
-    const body = (await req.json()) as { team_id?: string; message?: string };
+    const body = (await req.json()) as {
+      team_id?: string;
+      game_id?: string;
+      message?: string;
+      kind?: string;
+    };
     const teamId = body.team_id ?? "";
+    const gameId = body.game_id ?? "";
     const message = (body.message ?? "").slice(0, 300);
-    if (!teamId || !message) {
+    if ((!teamId && !gameId) || !message) {
       return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
     }
 
-    // Le caller doit être l'organisateur de la partie de cette équipe
-    const { data: team } = await admin
-      .from("teams")
-      .select("id, game_id, games!inner(created_by, code)")
-      .eq("id", teamId)
-      .single();
-    const game = (team as { games?: { created_by: string; code: string } } | null)?.games;
-    if (!team || !game || game.created_by !== userData.user.id) {
+    // Le caller doit être l'organisateur — de la partie visée (message général)
+    // ou de celle à laquelle l'équipe appartient (message privé).
+    let game: { created_by: string; code: string } | null = null;
+    if (gameId) {
+      const { data } = await admin
+        .from("games")
+        .select("created_by, code")
+        .eq("id", gameId)
+        .single();
+      game = data as typeof game;
+    } else {
+      const { data: team } = await admin
+        .from("teams")
+        .select("id, game_id, games!inner(created_by, code)")
+        .eq("id", teamId)
+        .single();
+      game = (team as { games?: { created_by: string; code: string } } | null)?.games ?? null;
+    }
+    if (!game || game.created_by !== userData.user.id) {
       return NextResponse.json({ error: "Interdit" }, { status: 403 });
     }
 
-    const { data: subs } = await admin
-      .from("push_subscriptions")
-      .select("auth_uid, subscription")
-      .eq("team_id", teamId);
+    const query = admin.from("push_subscriptions").select("auth_uid, subscription");
+    const { data: subs } = gameId
+      ? await query.eq("game_id", gameId)
+      : await query.eq("team_id", teamId);
+
+    const title = gameId
+      ? body.kind === "alert"
+        ? "🚨 ALERTE"
+        : body.kind === "warning"
+          ? "⚠️ Avertissement"
+          : "📣 Annonce"
+      : "📨 Message de l'organisateur";
 
     let sent = 0;
     await Promise.allSettled(
@@ -64,9 +89,9 @@ export async function POST(req: NextRequest) {
           await webpush.sendNotification(
             row.subscription as webpush.PushSubscription,
             JSON.stringify({
-              title: "📨 Message de l'organisateur",
+              title,
               body: message,
-              url: `/play/${game.code}/game`,
+              url: `/play/${game!.code}/game`,
             })
           );
           sent++;

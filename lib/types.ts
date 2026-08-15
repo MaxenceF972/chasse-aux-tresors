@@ -298,7 +298,20 @@ export interface PlayState {
   skipped_minigames: { id: string; title: string; content: StepContent }[];
   /** Épreuves sautées rattrapables (tous types) — absent tant que le SQL n'est pas ré-appliqué */
   skipped_steps?: SkippedStep[];
+  /** Dernier message général de l'organisateur (rattrapage hors temps réel) */
+  broadcast?: Broadcast | null;
   finished: boolean;
+}
+
+/** Niveau d'un message général : du plus calme au plus fort. */
+export type BroadcastKind = "info" | "warning" | "alert";
+
+/** Message envoyé à TOUTES les équipes de la partie. */
+export interface Broadcast {
+  id: number;
+  kind: BroadcastKind;
+  message: string;
+  at: string;
 }
 
 /** Épreuve sautée, à rattraper plus tard (la pénalité du skip reste due). */
