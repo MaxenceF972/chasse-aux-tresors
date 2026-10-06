@@ -139,7 +139,13 @@ export default function AntisechePage() {
                     step.content.gps_guidance === "hotcold") &&
                   secrets?.gps_lat != null && (
                     <p>
-                      {step.content.gps_guidance === "compass" ? "🧭 Guidage boussole" : "🔥 Guidage chaud/froid"}{" "}
+                      {step.content.gps_guidance === "compass"
+                        ? step.content.gps_hide_distance
+                          // L'organisateur doit le savoir avant qu'une équipe
+                          // vienne lui dire « la boussole n'affiche pas la distance ».
+                          ? "🧭 Guidage boussole, distance masquée"
+                          : "🧭 Guidage boussole"
+                        : "🔥 Guidage chaud/froid"}{" "}
                       (sans carte) :{" "}
                       <span className="font-mono bg-parchment px-1.5 py-0.5 rounded border border-ink/30">
                         {secrets.gps_lat}, {secrets.gps_lng}

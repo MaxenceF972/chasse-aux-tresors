@@ -48,7 +48,16 @@ export default function Toaster() {
   }, []);
 
   return (
-    <div className="fixed top-[max(0.75rem,calc(env(safe-area-inset-top)+0.5rem))] inset-x-4 z-[70] flex flex-col items-center gap-2 pointer-events-none">
+    // Région vivante : c'est par ici que passent la plupart des messages du
+    // jeu (validation, refus, message de l'organisateur). Sans `aria-live`, un
+    // lecteur d'écran ne les annonce jamais — le bandeau apparaît et repart
+    // sans avoir rien dit. « polite » : on n'interrompt pas la lecture d'une
+    // énigme en cours, on attend la fin de la phrase.
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed top-[max(0.75rem,calc(env(safe-area-inset-top)+0.5rem))] inset-x-4 z-[70] flex flex-col items-center gap-2 pointer-events-none"
+    >
       <AnimatePresence>
         {toasts.map((toast) => (
           <motion.button

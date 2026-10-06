@@ -95,7 +95,12 @@ function LanternsGame({ config, seed, onComplete }: MiniGameProps) {
             className={`aspect-square rounded-lg border-2 transition-all duration-150 text-2xl ${
               lit
                 ? "bg-gold border-gold-light shadow-[0_0_14px_4px_rgba(245,166,35,0.55)]"
-                : "bg-ink-soft border-ink-soft opacity-70"
+                : // UNE LANTERNE ÉTEINTE DOIT RESTER VISIBLE : en
+                  // `bg-ink-soft border-ink-soft opacity-70` sur un plateau
+                  // `bg-ink`, elle avait 1,13 pour 1 de contraste — on ne voyait
+                  // pas les cases sur lesquelles il fallait appuyer, et c'est tout
+                  // le jeu. Un contour de parchemin les pose sans les rallumer.
+                  "bg-ink-soft border-parchment/30"
             }`}
           >
             {lit ? "🏮" : ""}

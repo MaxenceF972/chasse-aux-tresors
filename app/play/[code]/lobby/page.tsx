@@ -78,12 +78,16 @@ export default function LobbyPage() {
       // toute la journée, y compris pour une équipe qui vient de se former —
       // s'en servir jetterait le capitaine dans le jeu à la seconde où il crée
       // son équipe, sans lien d'invitation ni personne à attendre.
-      // En départ groupé, le lancement de la partie fait partir tout le monde :
-      // le statut suffit (et couvre une base où le SQL n'est pas ré-appliqué).
+      // En départ groupé, le lancement fait partir tout le monde : le statut
+      // suffit quand la base ne fournit pas encore `started_at` (SQL pas
+      // ré-appliqué). S'il est fourni et vaut null, l'équipe n'est PAS partie
+      // — même en départ groupé (partie repassée de « continu » à « groupé »
+      // en cours de route) — et c'est ici qu'elle peut partir.
       const monEquipe = data.me ? data.teams?.find((t) => t.id === data.me!.team_id) : null;
       const continu = !!data.game.settings?.continuous;
       const partie =
-        monEquipe?.started_at != null || (!continu && data.game.status !== "lobby");
+        monEquipe?.started_at != null ||
+        (monEquipe?.started_at === undefined && !continu && data.game.status !== "lobby");
       if (data.me && partie && !startedRef.current) {
         startedRef.current = true;
         sfx.fanfare();
@@ -410,11 +414,11 @@ export default function LobbyPage() {
               >
                 {continu ? "⏳ En attente de l'ouverture…" : "⏳ En attente du lancement…"}
               </motion.p>
-            ) : continu && status === "paused" ? (
+            ) : (continu || myTeam.started_at === null) && status === "paused" ? (
               <p className="font-display text-lg text-ink/60">
                 ⏸️ Partie en pause — le départ attend la reprise.
               </p>
-            ) : continu ? (
+            ) : (continu || myTeam.started_at === null) && status === "running" ? (
               // Jeu en continu : la partie est ouverte, c'est l'équipe qui
               // décide de son départ. Le chrono ne court qu'à partir de là.
               <Button full size="xl" variant="leaf" onClick={demarrer} disabled={busy}>

@@ -35,6 +35,10 @@ function SimonGame({ config, seed, onComplete }: MiniGameProps) {
   const [progress, setProgress] = useState(0);
   const [attempts, setAttempts] = useState(1);
   const [done, setDone] = useState(false);
+  // Une erreur renvoyait au niveau 1 SANS UN MOT : la séquence repartait de
+  // zéro et le joueur croyait à un bug. Le son et la vibration ne suffisent
+  // pas — l'iPhone ne vibre pas sur le web, et beaucoup jouent en silencieux.
+  const [rate, setRate] = useState(false);
   const startRef = useRef(Date.now());
   const timeouts = useRef<ReturnType<typeof setTimeout>[]>([]);
 
@@ -92,6 +96,8 @@ function SimonGame({ config, seed, onComplete }: MiniGameProps) {
       haptics.fail();
       setAttempts((a) => a + 1);
       setLevel(1);
+      setRate(true);
+      timeouts.current.push(setTimeout(() => setRate(false), 1600));
     }
   }
 
@@ -104,7 +110,9 @@ function SimonGame({ config, seed, onComplete }: MiniGameProps) {
         </span>
       </div>
 
-      <div className={`grid grid-cols-2 gap-3 ${done ? "opacity-60" : ""}`}>
+      <div
+        className={`grid grid-cols-2 gap-3 ${done ? "opacity-60" : ""} ${rate ? "animate-shake" : ""}`}
+      >
         {PADS.map((pad, i) => (
           <button
             key={i}
@@ -120,9 +128,24 @@ function SimonGame({ config, seed, onComplete }: MiniGameProps) {
         ))}
       </div>
 
-      <p className="text-center font-display text-lg text-ink/70 h-6">
-        {done ? "🏆 SÉQUENCE COMPLÈTE !" : playing ? "👀 Regarde bien…" : "À toi de jouer !"}
+      <p
+        className={`text-center font-display text-lg min-h-6 leading-snug ${
+          rate ? "text-crimson" : "text-ink/70"
+        }`}
+      >
+        {done
+          ? "🏆 SÉQUENCE COMPLÈTE !"
+          : rate
+            ? "❌ Raté — la séquence repart du début !"
+            : playing
+              ? "👀 Regarde bien…"
+              : "À toi de jouer !"}
       </p>
+      {attempts > 1 && !done && (
+        <p className="text-center text-sm font-bold text-ink/50 tabular-nums">
+          {attempts}e essai
+        </p>
+      )}
     </div>
   );
 }

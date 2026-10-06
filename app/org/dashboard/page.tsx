@@ -33,6 +33,10 @@ export default function OrgDashboardPage() {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newBriefing, setNewBriefing] = useState("");
+  // Le choix structurant, fait dès la création : tout le monde part ensemble
+  // (lancé par l'organisateur), ou chacun part quand il veut. Modifiable
+  // ensuite dans l'éditeur, comme toutes les options de la partie.
+  const [newContinuous, setNewContinuous] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -53,9 +57,12 @@ export default function OrgDashboardPage() {
     setBusy(true);
     setError(null);
     try {
+      const settings: Record<string, unknown> = {};
+      if (newBriefing.trim()) settings.briefing = newBriefing.trim();
+      if (newContinuous) settings.continuous = true;
       const game = await rpc<Game>("org_create_game", {
         p_name: newName,
-        p_settings: newBriefing.trim() ? { briefing: newBriefing.trim() } : {},
+        p_settings: settings,
       });
       router.push(`/org/games/${game.id}/edit`);
     } catch (err) {
@@ -158,6 +165,43 @@ export default function OrgDashboardPage() {
     setBusy(true);
     try {
       const copy = await rpc<Game>("org_duplicate_game", { p_game_id: game.id });
+
+      // La copie hérite des URLs de l'originale, donc de son dossier Storage.
+      // On recopie les fichiers dans le sien : c'est ce qui rend les deux
+      // parties indépendantes, et la suppression de l'une sans conséquence
+      // pour l'autre. Voir app/api/duplicate-media/route.ts.
+      try {
+        const { data } = await sb().auth.getSession();
+        if (data.session) {
+          const res = await fetch("/api/duplicate-media", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${data.session.access_token}`,
+            },
+            body: JSON.stringify({ game_id: copy.id }),
+          });
+          const json = (await res.json()) as { missing?: number; error?: string };
+          if (!res.ok) throw new Error(json.error ?? "copie des médias impossible");
+          if (json.missing) {
+            showToast(
+              `${json.missing} média${json.missing > 1 ? "s" : ""} introuvable${
+                json.missing > 1 ? "s" : ""
+              } : à renvoyer dans l'éditeur.`,
+              "info"
+            );
+          }
+        }
+      } catch {
+        // La copie reste utilisable : elle partage les fichiers de
+        // l'originale, comme avant. Il faut juste le savoir avant de
+        // supprimer celle-ci.
+        showToast(
+          "Copie créée, mais ses médias restent ceux de la partie d'origine — ne supprime pas l'originale.",
+          "info"
+        );
+      }
+
       router.push(`/org/games/${copy.id}/edit`);
     } catch (err) {
       showToast(frError(err, "Duplication impossible"), "error");
@@ -209,6 +253,12 @@ export default function OrgDashboardPage() {
         <div className="space-y-4">
           {games.map((game) => {
             const status = STATUS_LABEL[game.status];
+            // INVITÉ SUR CETTE CHASSE, pas propriétaire. La RLS la lui montre
+            // (sinon il se connecterait sur un écran vide) mais tout le reste
+            // lui est fermé côté serveur : lui proposer « Éditer » ou « Live »,
+            // ce serait l'envoyer sur des boutons qui échouent. Une seule
+            // porte, celle des statistiques.
+            const invite = game.created_by !== user.id;
             return (
               <Card key={game.id} className="p-4">
                 <div className="flex items-start justify-between gap-3 mb-3">
@@ -216,6 +266,11 @@ export default function OrgDashboardPage() {
                     <h2 className="font-display text-xl leading-tight">{game.name}</h2>
                     <p className="font-mono font-bold text-ink/60 tracking-[0.2em]">
                       {game.code}
+                      {game.settings?.continuous && (
+                        <span className="font-display font-normal tracking-normal text-xs text-leaf ml-2">
+                          🔁 EN CONTINU
+                        </span>
+                      )}
                     </p>
                   </div>
                   <span
@@ -224,28 +279,51 @@ export default function OrgDashboardPage() {
                     {status.text}
                   </span>
                 </div>
+                {invite && (
+                  <p className="font-bold text-ink/55 text-sm mb-3 leading-relaxed">
+                    👀 Tu es <strong>invité</strong> sur cette chasse : tu en vois les
+                    statistiques et les participants, sans pouvoir la modifier.
+                  </p>
+                )}
                 <div className="flex flex-wrap gap-2">
-                  <Link href={`/org/games/${game.id}/edit`} className="contents">
-                    <Button size="sm" variant="parchment">✏️ Éditer</Button>
-                  </Link>
-                  <Link href={`/org/games/${game.id}/live`} className="contents">
-                    <Button size="sm" variant="leaf">📡 Live</Button>
-                  </Link>
-                  <Link href={`/org/games/${game.id}/balises`} className="contents">
-                    <Button size="sm" variant="gold">🏷️ Balises</Button>
-                  </Link>
-                  <Button
-                    size="sm"
-                    variant="parchment"
-                    disabled={busy}
-                    onClick={() => duplicateGame(game)}
-                    title="Dupliquer (mêmes balises, mêmes énigmes, nouveau code)"
-                  >
-                    📄 Dupliquer
-                  </Button>
-                  <Button size="sm" variant="crimson" onClick={() => deleteGame(game)}>
-                    🗑️
-                  </Button>
+                  {invite ? (
+                    <Link href={`/org/games/${game.id}/stats`} className="contents">
+                      <Button size="sm" variant="gold">📊 Statistiques</Button>
+                    </Link>
+                  ) : (
+                    <>
+                      <Link href={`/org/games/${game.id}/edit`} className="contents">
+                        <Button size="sm" variant="parchment">✏️ Éditer</Button>
+                      </Link>
+                      <Link href={`/org/games/${game.id}/live`} className="contents">
+                        <Button size="sm" variant="leaf">📡 Live</Button>
+                      </Link>
+                      <Link href={`/org/games/${game.id}/balises`} className="contents">
+                        <Button size="sm" variant="gold">🏷️ Balises</Button>
+                      </Link>
+                      <Link href={`/org/games/${game.id}/stats`} className="contents">
+                        <Button size="sm" variant="parchment">📊 Stats</Button>
+                      </Link>
+                      <Button
+                        size="sm"
+                        variant="parchment"
+                        disabled={busy}
+                        onClick={() => duplicateGame(game)}
+                        title="Dupliquer (mêmes balises, mêmes énigmes, nouveau code)"
+                      >
+                        📄 Dupliquer
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="crimson"
+                        onClick={() => deleteGame(game)}
+                        aria-label={`Supprimer « ${game.name} »`}
+                        title="Supprimer"
+                      >
+                        🗑️
+                      </Button>
+                    </>
+                  )}
                 </div>
               </Card>
             );
@@ -288,6 +366,39 @@ export default function OrgDashboardPage() {
               onChange={(e) => setNewName(e.target.value)}
               placeholder="La chasse du Capitaine Toyah"
             />
+          </div>
+          <div>
+            <Label>Déroulement</Label>
+            <div className="grid gap-2">
+              {[
+                {
+                  v: false,
+                  title: "👥 Départ groupé",
+                  text: "Les équipes s'inscrivent au lobby, tu lances la partie : tout le monde part en même temps.",
+                },
+                {
+                  v: true,
+                  title: "🔁 En continu",
+                  text: "Chacun arrive et part quand il veut, seul ou en équipe, avec son propre chrono. Idéal pour un lieu ouvert au public.",
+                },
+              ].map((o) => (
+                <button
+                  key={o.title}
+                  type="button"
+                  onClick={() => setNewContinuous(o.v)}
+                  aria-pressed={newContinuous === o.v}
+                  className={`text-left rounded-xl border-[3px] p-3 transition-colors ${
+                    newContinuous === o.v ? "border-ink bg-gold/25" : "border-ink/25 bg-white/60"
+                  }`}
+                >
+                  <span className="font-display">{o.title}</span>
+                  <span className="block font-bold text-ink/60 text-sm leading-snug">{o.text}</span>
+                </button>
+              ))}
+            </div>
+            <p className="font-bold text-ink/45 text-xs mt-1.5">
+              Modifiable ensuite dans l&apos;éditeur, avec les autres options.
+            </p>
           </div>
           <div>
             <Label>Présentation (affichée aux joueurs au lobby)</Label>

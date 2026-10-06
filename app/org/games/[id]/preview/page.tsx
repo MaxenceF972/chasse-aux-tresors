@@ -220,7 +220,9 @@ export default function PreviewPage() {
                     <p className="font-bold text-ink/70 text-sm">
                       Sur le terrain, les joueurs voient{" "}
                       {step.content.gps_guidance === "compass"
-                        ? "une flèche et la distance"
+                        ? step.content.gps_hide_distance
+                          ? "une flèche seule, sans la distance"
+                          : "une flèche et la distance"
                         : "un thermomètre qui chauffe"}{" "}
                       — jamais la carte. Arriver ne valide pas l&apos;épreuve : ça les amène au
                       bon endroit, et ils cherchent sur place.

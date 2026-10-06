@@ -8,16 +8,35 @@ import { haptics } from "@/lib/game/haptics";
 import Button from "@/components/ui/Button";
 import { Label } from "@/components/ui/Input";
 
+// `marque` : deux lettres posées sur le pion. Un homme sur vingt distingue
+// mal le rouge du vert, et plusieurs de ces teintes ont la même luminance :
+// sans marque, le jeu repose sur la couleur seule — ce que PRODUCT.md exclut.
+// `clair` : teinte claire, la marque s'écrit alors en encre.
 const COLORS = [
-  { hex: "#F5A623", name: "Or" },
-  { hex: "#C0392B", name: "Rouge" },
-  { hex: "#2E5E3A", name: "Vert" },
-  { hex: "#2980B9", name: "Bleu" },
-  { hex: "#8E44AD", name: "Violet" },
-  { hex: "#D35400", name: "Orange" },
-  { hex: "#16A085", name: "Turquoise" },
-  { hex: "#111111", name: "Noir" },
+  { hex: "#F5A623", name: "Or", marque: "Or", clair: true },
+  { hex: "#C0392B", name: "Rouge", marque: "Ro", clair: false },
+  { hex: "#2E5E3A", name: "Vert", marque: "Ve", clair: false },
+  { hex: "#2980B9", name: "Bleu", marque: "Bl", clair: false },
+  { hex: "#8E44AD", name: "Violet", marque: "Vi", clair: false },
+  { hex: "#D35400", name: "Orange", marque: "Og", clair: false },
+  { hex: "#16A085", name: "Turquoise", marque: "Tu", clair: false },
+  { hex: "#111111", name: "Noir", marque: "No", clair: false },
 ];
+
+/** Les deux lettres d'un pion — pour lire la couleur sans la voir. */
+function Marque({ index, size }: { index: number; size: "sm" | "md" }) {
+  const c = COLORS[index];
+  return (
+    <span
+      aria-hidden
+      className={`font-display leading-none select-none ${size === "sm" ? "text-[9px]" : "text-xs"} ${
+        c.clair ? "text-ink/75" : "text-parchment/90"
+      }`}
+    >
+      {c.marque}
+    </span>
+  );
+}
 
 interface MastermindConfig {
   slots: number;
@@ -170,11 +189,15 @@ function MastermindGame({ config, seed, onComplete }: MiniGameProps) {
             <button
               key={i}
               onClick={() => clearSlot(i)}
-              aria-label={`Case ${i + 1}${v !== null ? " (toucher pour vider)" : ""}`}
-              className="w-12 h-12 rounded-full border-[3px] border-ink bg-white shadow-inner"
+              aria-label={`Case ${i + 1}${v !== null ? ` : ${COLORS[v].name} (toucher pour vider)` : ""}`}
+              className="w-12 h-12 rounded-full border-[3px] border-ink bg-white shadow-inner flex items-center justify-center"
               style={v !== null ? { backgroundColor: COLORS[v].hex } : undefined}
             >
-              {v === null && <span className="text-ink/30 font-display">?</span>}
+              {v === null ? (
+                <span className="text-ink/30 font-display">?</span>
+              ) : (
+                <Marque index={v} size="md" />
+              )}
             </button>
           ))}
         </div>
@@ -192,9 +215,11 @@ function MastermindGame({ config, seed, onComplete }: MiniGameProps) {
             key={color.hex}
             onClick={() => fill(i)}
             aria-label={color.name}
-            className="w-11 h-11 rounded-full border-[3px] border-ink shadow-[2px_2px_0_0_#111111] active:translate-y-[2px] active:shadow-none"
+            className="w-11 h-11 rounded-full border-[3px] border-ink shadow-[2px_2px_0_0_#111111] active:translate-y-[2px] active:shadow-none flex items-center justify-center"
             style={{ backgroundColor: color.hex }}
-          />
+          >
+            <Marque index={i} size="md" />
+          </button>
         ))}
       </div>
 
@@ -228,9 +253,11 @@ function MastermindGame({ config, seed, onComplete }: MiniGameProps) {
                 {attempt.guess.map((c, j) => (
                   <span
                     key={j}
-                    className="w-6 h-6 rounded-full border-2 border-ink inline-block"
+                    className="w-6 h-6 rounded-full border-2 border-ink inline-flex items-center justify-center"
                     style={{ backgroundColor: COLORS[c].hex }}
-                  />
+                  >
+                    <Marque index={c} size="sm" />
+                  </span>
                 ))}
               </div>
               <span className="font-bold text-xs leading-tight text-ink/75">

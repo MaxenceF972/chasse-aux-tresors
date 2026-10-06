@@ -21,9 +21,31 @@ interface Weighing {
   verdict: "L" | "R" | "E";
 }
 
+/**
+ * Le verdict d'une pesée — sorti du composant pour être vérifiable.
+ *
+ * Rend `null` quand les plateaux ne sont pas comparables : une balance ne
+ * renseigne QUE si elle porte autant de pièces d'un côté que de l'autre.
+ * C'était le bug du jeu : la somme brute était comparée telle quelle, si bien
+ * que deux pièces dont la lourde (1+2 = 3) contre trois pièces ordinaires (3)
+ * annonçaient « parfait équilibre » alors que la pièce truquée était sur un
+ * plateau — l'inverse exact de la vérité, et une déduction impossible.
+ */
+export function peser(
+  left: readonly number[],
+  right: readonly number[],
+  heavy: number
+): Weighing["verdict"] | null {
+  if (left.length === 0 || left.length !== right.length) return null;
+  const poids = (l: readonly number[]) => l.reduce((sum, i) => sum + (i === heavy ? 2 : 1), 0);
+  const wl = poids(left);
+  const wr = poids(right);
+  return wl > wr ? "L" : wr > wl ? "R" : "E";
+}
+
 function BalanceGame({ config, seed, onComplete }: MiniGameProps) {
   const cfg = config as unknown as BalanceConfig;
-  const coins = Math.min(12, Math.max(6, cfg.coins || 9));
+  const coins = Math.min(12, Math.max(6, cfg.coins || 8));
   const maxWeighings = Math.min(5, Math.max(2, cfg.weighings || 3));
 
   const [attempt, setAttempt] = useState(0);
@@ -41,6 +63,11 @@ function BalanceGame({ config, seed, onComplete }: MiniGameProps) {
   );
 
   const weighingsLeft = maxWeighings - history.length;
+  const nbGauche = pans.filter((v) => v === "L").length;
+  const nbDroite = pans.filter((v) => v === "R").length;
+  // UNE BALANCE COMPARE DES PLATEAUX, PAS DES TAS : elle ne renseigne que si
+  // les deux plateaux portent AUTANT de pièces. On l'exige donc (voir peser).
+  const plateauxComparables = nbGauche > 0 && nbGauche === nbDroite;
 
   function tapCoin(i: number) {
     if (won || lost) return;
@@ -58,11 +85,9 @@ function BalanceGame({ config, seed, onComplete }: MiniGameProps) {
   function weigh() {
     const left = pans.flatMap((v, i) => (v === "L" ? [i] : []));
     const right = pans.flatMap((v, i) => (v === "R" ? [i] : []));
-    if (!left.length || !right.length || weighingsLeft <= 0) return;
-    const weightOf = (list: number[]) => list.reduce((sum, i) => sum + (i === heavy ? 2 : 1), 0);
-    const wl = weightOf(left);
-    const wr = weightOf(right);
-    const verdict: Weighing["verdict"] = wl > wr ? "L" : wr > wl ? "R" : "E";
+    if (weighingsLeft <= 0) return;
+    const verdict = peser(left, right, heavy);
+    if (verdict === null) return; // plateaux inégaux : la balance ne dit rien
     setHistory((h) => [...h, { left, right, verdict }]);
     setPans(Array(coins).fill(null));
     sfx.pop();
@@ -98,13 +123,19 @@ function BalanceGame({ config, seed, onComplete }: MiniGameProps) {
   }
 
   const lastVerdict = history[history.length - 1]?.verdict;
+  // La balance ne montre le verdict que tant que les plateaux sont vides. Dès
+  // qu'on repose une pièce dessus, elle revient à l'horizontale : sinon elle
+  // reste penchée de la pesée PRÉCÉDENTE pendant qu'on prépare la suivante, et
+  // on croit lire un résultat qui n'existe pas encore. L'historique garde tout.
+  const enPlacement = nbGauche + nbDroite > 0;
+  const inclinaison = enPlacement ? undefined : lastVerdict;
 
   return (
     <div className="space-y-4">
       <p className="font-bold text-ink/70">
         ⚖️ L&apos;une de ces pièces d&apos;or est <strong>plus lourde</strong> que les autres !
-        Répartis des pièces sur les deux plateaux, pèse ({maxWeighings} pesées max), puis accuse
-        la coupable.
+        Pose-en <strong>autant de chaque côté</strong> de la balance — elle ne compare que des
+        plateaux égaux — pèse ({maxWeighings} pesées max), puis accuse la coupable.
       </p>
 
       {/* La balance */}
@@ -113,7 +144,7 @@ function BalanceGame({ config, seed, onComplete }: MiniGameProps) {
           className="text-6xl transition-transform duration-500 select-none"
           style={{
             transform:
-              lastVerdict === "L" ? "rotate(-8deg)" : lastVerdict === "R" ? "rotate(8deg)" : "none",
+              inclinaison === "L" ? "rotate(-8deg)" : inclinaison === "R" ? "rotate(8deg)" : "none",
           }}
           aria-hidden
         >
@@ -122,11 +153,11 @@ function BalanceGame({ config, seed, onComplete }: MiniGameProps) {
         <p className="font-display text-sm text-ink/60 h-5">
           {lost
             ? ""
-            : lastVerdict === "L"
+            : inclinaison === "L"
               ? "⬅️ Le plateau GAUCHE penche !"
-              : lastVerdict === "R"
+              : inclinaison === "R"
                 ? "Le plateau DROIT penche ! ➡️"
-                : lastVerdict === "E"
+                : inclinaison === "E"
                   ? "⚖️ Parfait équilibre."
                   : "Répartis des pièces puis pèse."}
         </p>
@@ -156,10 +187,19 @@ function BalanceGame({ config, seed, onComplete }: MiniGameProps) {
           );
         })}
       </div>
-      <p className="text-center text-xs font-bold text-ink/50 -mt-2">
-        {accusing
-          ? "🫵 Touche la pièce que tu accuses !"
-          : "Touche une pièce : 🟢 plateau gauche → 🔴 plateau droit → reposée."}
+      {/* Le compte de chaque plateau, en toutes lettres : c'est la seule chose
+          qui explique pourquoi « Peser » reste éteint. */}
+      <p className="text-center text-xs font-bold text-ink/50 -mt-2 tabular-nums">
+        {accusing ? (
+          "🫵 Touche la pièce que tu accuses !"
+        ) : enPlacement ? (
+          <>
+            🟢 Gauche {nbGauche} · 🔴 droite {nbDroite}
+            {plateauxComparables ? "" : " — il en faut autant de chaque côté pour peser."}
+          </>
+        ) : (
+          "Touche une pièce : 🟢 plateau gauche → 🔴 plateau droit → reposée."
+        )}
       </p>
 
       {/* Actions */}
@@ -169,12 +209,7 @@ function BalanceGame({ config, seed, onComplete }: MiniGameProps) {
             className="flex-1"
             variant="leaf"
             onClick={weigh}
-            disabled={
-              accusing ||
-              weighingsLeft <= 0 ||
-              !pans.includes("L") ||
-              !pans.includes("R")
-            }
+            disabled={accusing || weighingsLeft <= 0 || !plateauxComparables}
           >
             ⚖️ PESER ({weighingsLeft} restante{weighingsLeft > 1 ? "s" : ""})
           </Button>
@@ -232,7 +267,7 @@ function BalanceEditor({ value, onChange }: ConfigEditorProps) {
               type="button"
               onClick={() => onChange({ ...value, coins: o.coins, weighings: o.weighings })}
               className={`px-3 h-11 rounded-xl border-[3px] border-ink font-display text-sm ${
-                (cfg.coins ?? 9) === o.coins && (cfg.weighings ?? 3) === o.weighings
+                (cfg.coins ?? 8) === o.coins && (cfg.weighings ?? 3) === o.weighings
                   ? "bg-gold"
                   : "bg-white"
               }`}
@@ -243,8 +278,9 @@ function BalanceEditor({ value, onChange }: ConfigEditorProps) {
         </div>
       </div>
       <p className="text-sm font-bold text-ink/60">
-        Le grand classique de logique : accuser sans réfléchir fait échanger la pièce truquée !
-        Générée pour chaque équipe.
+        Le grand classique de logique : les plateaux doivent porter autant de pièces l&apos;un
+        que l&apos;autre (c&apos;est la règle de la balance). Accuser sans réfléchir fait échanger
+        la pièce truquée ! Générée pour chaque équipe.
       </p>
     </div>
   );
@@ -256,7 +292,9 @@ export const balanceDef: MiniGameDef = {
   icon: "⚖️",
   description: "Démasquer la pièce la plus lourde en un nombre limité de pesées",
   needsAnswer: false,
-  defaultConfig: { coins: 9, weighings: 3 },
+  // Doit correspondre à l'une des trois difficultés proposées, sinon l'éditeur
+  // s'ouvre sans aucune d'elles sélectionnée.
+  defaultConfig: { coins: 8, weighings: 3 },
   Component: BalanceGame,
   ConfigEditor: BalanceEditor,
 };

@@ -4,6 +4,7 @@ import { caesarShift } from "@/components/minigames/Caesar";
 import { feedback } from "@/components/minigames/Mastermind";
 import { genMaze, type Cell } from "@/components/minigames/Maze";
 import { LEVELS, parseLevel } from "@/components/minigames/Sokoban";
+import { peser } from "@/components/minigames/Balance";
 import { rngFromSeed } from "@/lib/game/prng";
 
 // --- César ------------------------------------------------------------------
@@ -104,4 +105,39 @@ test("sokoban : les 6 niveaux embarqués sont résolubles", () => {
   LEVELS.forEach((level, i) => {
     assert.ok(solvable(level.map), `niveau ${i + 1} (tier ${level.tier}) insoluble !`);
   });
+});
+
+/* ------------------------------------------------------------------------- *
+ * La pièce truquée : une balance ne compare que des plateaux ÉGAUX
+ * ------------------------------------------------------------------------- */
+
+test("pesée : plateaux égaux — le verdict désigne bien le côté de la pièce lourde", () => {
+  // 9 pièces, la n°2 (indice 1) est la lourde.
+  assert.equal(peser([0, 1, 2], [3, 4, 5], 1), "L");
+  assert.equal(peser([3, 4, 5], [0, 1, 2], 1), "R");
+  assert.equal(peser([3, 4, 5], [6, 7, 8], 1), "E", "la lourde est hors des plateaux");
+  assert.equal(peser([0], [1], 1), "R");
+});
+
+test("pesée : plateaux inégaux — la balance ne dit RIEN plutôt que de mentir", () => {
+  // Le cas exact qui rendait le jeu insoluble : 2 pièces dont la lourde
+  // (1+2 = 3) contre 3 pièces ordinaires (3) annonçait « parfait équilibre »,
+  // donc que la pièce cherchée n'était sur aucun plateau — l'inverse du vrai.
+  assert.equal(peser([0, 1], [2, 3, 4], 0), null);
+  assert.equal(peser([0], [1, 2], 0), null);
+  assert.equal(peser([], [], 0), null);
+  assert.equal(peser([], [0], 0), null);
+});
+
+test("pesée : à plateaux égaux, un équilibre innocente TOUJOURS les deux plateaux", () => {
+  // L'invariant dont dépend toute la déduction du joueur, vérifié pour chaque
+  // position possible de la pièce lourde sur une partie à 12 pièces.
+  const gauche = [0, 1, 2, 3];
+  const droite = [4, 5, 6, 7];
+  for (let heavy = 0; heavy < 12; heavy++) {
+    const v = peser(gauche, droite, heavy);
+    if (gauche.includes(heavy)) assert.equal(v, "L", `pièce ${heavy} à gauche`);
+    else if (droite.includes(heavy)) assert.equal(v, "R", `pièce ${heavy} à droite`);
+    else assert.equal(v, "E", `pièce ${heavy} hors balance`);
+  }
 });

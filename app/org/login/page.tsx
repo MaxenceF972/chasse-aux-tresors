@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { frError, sb } from "@/lib/supabase/client";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
-import { Input, Label } from "@/components/ui/Input";
+import { Input, Label, PasswordInput } from "@/components/ui/Input";
 import Logo from "@/components/ui/Logo";
 
 export default function OrgLoginPage() {
@@ -16,6 +16,48 @@ export default function OrgLoginPage() {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ kind: "error" | "info"; text: string } | null>(null);
+
+  /**
+   * LE RETOUR DU LIEN DE CONFIRMATION ABOUTIT ICI, et déjà connecté.
+   *
+   * Supabase renvoie sur cette page avec la session dans l'URL ; le client la
+   * ramasse tout seul. Sans ce garde, l'écran affichait quand même le
+   * formulaire : la personne venait de confirmer son adresse et on lui
+   * redemandait ses identifiants — beaucoup se croyaient refusées.
+   *
+   * On écoute AUSSI les changements d'état : la lecture de l'URL est
+   * asynchrone et se termine parfois après le premier rendu.
+   */
+  useEffect(() => {
+    let vivant = true;
+    const versDashboard = (u: { is_anonymous?: boolean } | null | undefined) => {
+      if (vivant && u && !u.is_anonymous) router.replace("/org/dashboard");
+    };
+    void sb().auth.getSession().then(({ data }) => versDashboard(data.session?.user));
+    const { data: sub } = sb().auth.onAuthStateChange((_e, session) =>
+      versDashboard(session?.user)
+    );
+
+    // Une confirmation qui échoue revient avec son motif dans l'URL — lien
+    // périmé, déjà utilisé. Le taire laissait un formulaire muet.
+    const params = new URLSearchParams(
+      window.location.hash.slice(1) || window.location.search.slice(1)
+    );
+    const erreur = params.get("error_description") || params.get("error");
+    if (erreur) {
+      setMessage({
+        kind: "error",
+        text: /expired|invalid/i.test(erreur)
+          ? "Ce lien de confirmation a expiré ou a déjà servi. Connecte-toi si ton compte est confirmé, sinon recrée-le."
+          : decodeURIComponent(erreur.replace(/\+/g, " ")),
+      });
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    return () => {
+      vivant = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,7 +84,8 @@ export default function OrgLoginPage() {
         } else {
           setMessage({
             kind: "info",
-            text: "Compte créé ! Vérifie ta boîte mail pour confirmer ton adresse, puis connecte-toi.",
+            text:
+              "Compte créé ! Ouvre le lien de confirmation reçu par mail SUR CET APPAREIL : il te connectera directement.",
           });
           setMode("login");
         }
@@ -90,8 +133,7 @@ export default function OrgLoginPage() {
           </div>
           <div>
             <Label>Mot de passe</Label>
-            <Input
-              type="password"
+            <PasswordInput
               required
               minLength={6}
               autoComplete={mode === "login" ? "current-password" : "new-password"}

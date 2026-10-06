@@ -127,6 +127,10 @@ export default function StepEditor({
   const [gpsGuidance, setGpsGuidance] = useState<"compass" | "hotcold" | "none">(
     (step?.content?.gps_guidance as "compass" | "hotcold" | "none") ?? "compass"
   );
+  // Boussole SANS le compte de mètres : la flèche seule (option du mode boussole)
+  const [sansDistance, setSansDistance] = useState<boolean>(
+    step?.content?.gps_hide_distance ?? false
+  );
   // Guidage vers le point d'une épreuve NON-GPS : carte (défaut), boussole ou
   // chaud/froid. La validation, elle, reste l'épreuve (balise, énigme…).
   const [rdvGuidance, setRdvGuidance] = useState<"map" | "compass" | "hotcold">(() => {
@@ -205,6 +209,9 @@ export default function StepEditor({
   // Le thermomètre est-il actif (balise GPS ou point d'une autre épreuve) ?
   const hotcoldActive =
     type === "gps" ? gpsGuidance === "hotcold" : hasRdvPoint && rdvGuidance === "hotcold";
+  // La boussole est-elle active (balise GPS ou point d'une autre épreuve) ?
+  const boussoleActive =
+    type === "gps" ? gpsGuidance === "compass" : hasRdvPoint && rdvGuidance === "compass";
 
   /** Paliers chaud/froid : décroissants et ≥ 1 m. Renvoie l'erreur, ou null. */
   function thresholdError(): string | null {
@@ -236,7 +243,13 @@ export default function StepEditor({
       setError("Il y a déjà une épreuve de départ — retire d'abord l'autre.");
       return;
     }
-    const answers = answersText.split("\n").map((a) => a.trim()).filter(Boolean);
+    // Les réponses ne sont écrites QUE si le type d'étape en attend. Sans ce
+    // filtre, basculer une étape de « Code César » vers « Hanoï » masquait le
+    // champ mais laissait les réponses en base : le serveur continuait de
+    // comparer, le jeu n'en envoyait aucune, et l'étape devenait invalidable.
+    const answers = showAnswers
+      ? answersText.split("\n").map((a) => a.trim()).filter(Boolean)
+      : [];
     if (showAnswers && !isBonusRiddle && answers.length === 0) {
       setError("Ajoute au moins une réponse acceptée.");
       return;
@@ -333,6 +346,10 @@ export default function StepEditor({
                 ? step?.content?.bonus_sec
                 : Math.max(0, Number(bonusReward) || 0) * 60
               : undefined,
+          // Ne s'enregistre que si une boussole est effectivement choisie : un
+          // `true` oublié sur une étape chaud/froid ressortirait si l'on
+          // repassait en boussole.
+          gps_hide_distance: boussoleActive && sansDistance ? true : undefined,
           gps_guidance:
             type === "gps" ? gpsGuidance : hasRdvPoint ? rdvGuidance : undefined,
           gps_hotcold_thresholds: hotcoldActive ? gpsThresholds.map(Number) : undefined,
@@ -420,6 +437,33 @@ export default function StepEditor({
   }
 
   /** Éditeur des 6 paliers du thermomètre — partagé balise GPS / point d'épreuve. */
+  /**
+   * L'option qui retire le compte de mètres à la boussole. Elle vit SOUS le
+   * choix du mode et non comme un quatrième bouton : ce n'est pas un autre
+   * guidage, c'est le même avec une donnée en moins.
+   */
+  function caseSansDistance() {
+    return (
+      <label className="mt-2 flex items-start gap-2.5 rounded-xl border-[3px] border-ink/20 bg-white/60 p-3 cursor-pointer">
+        <input
+          type="checkbox"
+          className="w-6 h-6 mt-0.5 shrink-0 accent-[#2E5E3A]"
+          checked={sansDistance}
+          onChange={(e) => setSansDistance(e.target.checked)}
+        />
+        <span className="font-bold text-sm text-ink/85">
+          <span className="font-display">🙈 Masquer la distance</span> — la flèche seule, sans le
+          compte de mètres. Avec le nombre, on regarde l&apos;écran descendre ; sans lui, il faut
+          lever les yeux et chercher. L&apos;équipe est toujours prévenue quand elle arrive.
+          <span className="block text-xs text-ink/55 mt-1">
+            ⚠️ Une boussole lit le métal avant le Nord : sous un toit ou près de grosses
+            structures métalliques, préfère le chaud/froid.
+          </span>
+        </span>
+      </label>
+    );
+  }
+
   function thresholdsEditor() {
     return (
       <div className="mt-3 rounded-xl border-[3px] border-ink/20 p-3 space-y-2">
@@ -782,10 +826,11 @@ export default function StepEditor({
                     gpsGuidance === "compass" ? "bg-gold" : "bg-white"
                   }`}
                 >
-                  <span className="font-display">🧭 Boussole + distance</span>
+                  <span className="font-display">🧭 Boussole</span>
                   <span className="block text-xs font-bold text-ink/60">
-                    Une flèche pointe vers le point et la distance s&apos;affiche en direct — comme
-                    une chasse au trésor géante. Validation automatique à l&apos;arrivée.
+                    Une vraie boussole : la flèche pointe vers le point et la distance s&apos;affiche
+                    en direct (masquable) — comme une chasse au trésor géante. Validation
+                    automatique à l&apos;arrivée.
                   </span>
                 </button>
                 <button
@@ -817,6 +862,7 @@ export default function StepEditor({
                 </button>
               </div>
 
+              {gpsGuidance === "compass" && caseSansDistance()}
               {gpsGuidance === "hotcold" && thresholdsEditor()}
             </div>
           </div>
@@ -980,10 +1026,10 @@ export default function StepEditor({
                       rdvGuidance === "compass" ? "bg-gold" : "bg-white"
                     }`}
                   >
-                    <span className="font-display">🧭 Boussole + distance</span>
+                    <span className="font-display">🧭 Boussole</span>
                     <span className="block text-xs font-bold text-ink/60">
-                      Pas de carte : une flèche pointe le lieu et la distance défile. L&apos;équipe
-                      doit lever le nez et s&apos;orienter.
+                      Pas de carte : une flèche pointe le lieu et la distance défile (masquable).
+                      L&apos;équipe doit lever le nez et s&apos;orienter.
                     </span>
                   </button>
                   <button
@@ -1018,6 +1064,7 @@ export default function StepEditor({
                   </div>
                 )}
 
+                {rdvGuidance === "compass" && caseSansDistance()}
                 {rdvGuidance === "hotcold" && thresholdsEditor()}
               </div>
             )}

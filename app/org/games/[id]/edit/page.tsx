@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { frError, sb } from "@/lib/supabase/client";
+import { frError, rpc, sb } from "@/lib/supabase/client";
 import type { Game, Step, StepSecrets, StepType } from "@/lib/types";
 import { DEFAULT_CHARTER_LINES } from "@/lib/game/charter";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
@@ -69,7 +69,17 @@ export default function GameEditPage() {
     if (user) void load();
   }, [user, load]);
 
-  const editable = game?.status === "lobby";
+  // Le parcours reste modifiable TANT QUE LA PARTIE N'EST PAS TERMINÉE : une
+  // balise arrachée ou une énigme illisible ne doit pas attendre la prochaine
+  // partie — et en jeu continu, la partie EST la journée : la verrouiller à
+  // l'ouverture revenait à la verrouiller pour de bon. Les équipes déjà
+  // parties gardent les lignes de parcours qui leur ont été distribuées ;
+  // seule la suppression les touche, et elle passe par org_delete_step.
+  const editable = game?.status !== "finished";
+  const enCours = game?.status === "running" || game?.status === "paused";
+  // Le barème, lui, se fige au lancement : le changer en pleine partie
+  // retournerait le classement de toutes les équipes d'un coup.
+  const baremeModifiable = game?.status === "lobby";
   // Nombre de BLOCS du pool (un groupe lié = 1 bloc) : c'est ce qui doit être
   // ≥ nombre d'équipes pour l'anti-collision.
   const poolCount = useMemo(() => {
@@ -125,17 +135,30 @@ export default function GameEditPage() {
   async function deleteStep(step: Step) {
     const ok = await confirmDlg({
       title: "Supprimer l'étape ?",
-      message: `« ${step.title} » sera retirée du parcours.`,
+      message: enCours
+        ? `« ${step.title} » sera retirée du parcours. Les équipes qui sont dessus en ce moment passeront à l'épreuve suivante.`
+        : `« ${step.title} » sera retirée du parcours.`,
       confirmLabel: "Supprimer",
       danger: true,
     });
     if (!ok) return;
-    const { error } = await sb().from("steps").delete().eq("id", step.id);
-    if (error) {
-      showToast(`Suppression impossible : ${frError(error, "erreur")}`, "error");
+    // Passe par la RPC et non par un delete direct : en pleine partie, la
+    // cascade sur team_routes laisserait une équipe sans étape courante,
+    // écran figé. org_delete_step fait d'abord avancer celles qui sont dessus.
+    try {
+      const res = await rpc<{ ok: boolean; teams_affected: number }>("org_delete_step", {
+        p_step_id: step.id,
+      });
+      showToast(
+        res.teams_affected > 0
+          ? `Étape supprimée — ${res.teams_affected} équipe${res.teams_affected > 1 ? "s ont" : " a"} été envoyée${res.teams_affected > 1 ? "s" : ""} à la suivante`
+          : "Étape supprimée",
+        "success"
+      );
+    } catch (err) {
+      showToast(`Suppression impossible : ${frError(err, "erreur")}`, "error");
       return;
     }
-    showToast("Étape supprimée", "success");
     void load();
   }
 
@@ -164,6 +187,9 @@ export default function GameEditPage() {
   }
 
   if (loading || !user || !game) return <Spinner label="Chargement…" />;
+
+  const continu = !!game.settings.continuous;
+  const sensFixe = (game.settings.route_mode ?? "disperse") === "fixe";
 
   return (
     <main className="min-h-dvh px-5 py-6 pt-safe-page max-w-2xl mx-auto pb-24">
@@ -231,14 +257,26 @@ export default function GameEditPage() {
       {!editable && (
         <Card dark className="p-4 mb-6 border-gold">
           <p className="font-bold">
-            ⚠️ La partie est {game.status === "finished" ? "terminée" : "lancée"} — le parcours
-            n&apos;est plus modifiable.
+            🏁 La partie est terminée — son classement est écrit, le parcours n&apos;est plus
+            modifiable. Pour rejouer, duplique-la depuis le tableau de bord.
           </p>
           <Link href={`/org/games/${gameId}/live`} className="contents">
             <Button size="sm" variant="gold" className="mt-2">
               📊 OUVRIR LE DASHBOARD LIVE
             </Button>
           </Link>
+        </Card>
+      )}
+
+      {enCours && (
+        <Card dark className="p-4 mb-6 border-gold">
+          <p className="font-bold">⚡ La partie est en cours — le parcours reste modifiable.</p>
+          <p className="font-bold text-parchment/60 text-sm mt-1 leading-relaxed">
+            Une balise arrachée ou une énigme illisible n&apos;a pas à attendre. Les équipes déjà
+            parties gardent le parcours qui leur a été distribué
+            {continu ? " ; tes ajouts valent pour celles qui partiront ensuite" : ""}. Supprimer
+            une étape fait passer à la suivante les équipes qui sont dessus.
+          </p>
         </Card>
       )}
 
@@ -278,6 +316,148 @@ export default function GameEditPage() {
         </div>
       </Card>
 
+      {/* Déroulement : les choix qui changent la nature de la partie */}
+      <Card className="p-4 mb-6">
+        <h2 className="font-display text-lg mb-1">⚙️ Déroulement de la partie</h2>
+        <p className="font-bold text-ink/55 text-sm mb-3 leading-relaxed">
+          Choisis exactement comment se joue ta chasse. Tout est modifiable tant que la partie
+          n&apos;est pas terminée.
+        </p>
+
+        <Label>Départ des équipes</Label>
+        <div className="grid gap-2">
+          {(
+            [
+              {
+                v: false,
+                title: "👥 Départ groupé",
+                help: "Les équipes s'inscrivent au lobby et partent toutes ensemble quand tu lances la partie depuis le dashboard live. Les inscriptions ferment au lancement.",
+              },
+              {
+                v: true,
+                title: "🔁 En continu",
+                help: "Tu ouvres la partie, puis chacun arrive et part quand il veut — seul ou en équipe — avec son propre chrono. Les inscriptions restent ouvertes. Idéal pour un lieu ouvert au public.",
+              },
+            ] as const
+          ).map((o) => (
+            <OptionChoix
+              key={o.title}
+              actif={continu === o.v}
+              titre={o.title}
+              aide={o.help}
+              disabled={!editable}
+              onClick={() => saveSettings({ continuous: o.v })}
+            />
+          ))}
+        </div>
+        {enCours && (
+          <p className="font-bold text-ink/45 text-xs mt-1.5 leading-relaxed">
+            Changé en pleine partie : « en continu » ouvre les inscriptions aux retardataires ;
+            « départ groupé » les referme (une équipe déjà inscrite peut encore partir).
+          </p>
+        )}
+
+        <div className="mt-4">
+          <Label>Sens du parcours</Label>
+          <div className="grid gap-2">
+            {(
+              [
+                {
+                  v: "disperse",
+                  title: "🎲 Chaque équipe son ordre",
+                  help: "Chaque équipe reçoit les épreuves dans un ordre qui lui est propre, et l'app la réoriente en direct vers celle où il n'y a personne : personne ne se suit.",
+                },
+                {
+                  v: "fixe",
+                  title: "➡️ Le même ordre pour toutes",
+                  help: "Tout le monde suit l'ordre de l'éditeur, du premier au dernier — quand le lieu impose un sens de circulation. Au prix de quelques embouteillages.",
+                },
+              ] as const
+            ).map((o) => (
+              <OptionChoix
+                key={o.v}
+                actif={(game.settings.route_mode ?? "disperse") === o.v}
+                titre={o.title}
+                aide={o.help}
+                disabled={!editable}
+                onClick={() => saveSettings({ route_mode: o.v })}
+              />
+            ))}
+          </div>
+          <p className="font-bold text-ink/45 text-xs mt-1.5 leading-relaxed">
+            Le départ, les paliers communs et le sprint final gardent leur rang dans les deux
+            cas.{enCours ? " Changé en pleine partie, il vaut pour les équipes qui partiront ensuite." : ""}
+          </p>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <Label>Options</Label>
+          <OptionInterrupteur
+            actif={!!game.settings.unattended}
+            titre="🙈 Sans surveillance"
+            aide="Personne ne suit le dashboard pendant la partie : les photos « bloquantes » ne bloquent plus (elles se jugent plus tard), les énigmes bonus se corrigent toutes seules, et l'app ne promet plus l'aide d'un maître du jeu en direct."
+            disabled={!editable}
+            onClick={() => saveSettings({ unattended: !game.settings.unattended })}
+          />
+          <OptionInterrupteur
+            actif={!!game.settings.ask_rating}
+            titre="⭐ Demander une note à la fin"
+            aide="Chaque joueur arrivé note l'aventure de 1 à 5 étoiles. Les résultats (moyenne et détail) sont dans les statistiques."
+            disabled={!editable}
+            onClick={() => saveSettings({ ask_rating: !game.settings.ask_rating })}
+          />
+          <OptionInterrupteur
+            actif={!!game.settings.ask_contact}
+            titre="📇 Demander un contact pour prévenir les gagnants"
+            aide="Un champ facultatif (e-mail ou téléphone) à la création de l'équipe. Visible de toi seul, dans les statistiques — jamais des autres joueurs."
+            disabled={!editable}
+            onClick={() => saveSettings({ ask_contact: !game.settings.ask_contact })}
+          />
+          <OptionInterrupteur
+            actif={!!game.settings.auto_close}
+            titre="🌙 Fermer la partie chaque soir"
+            aide={
+              game.settings.auto_close
+                ? "La partie se ferme d'elle-même à l'heure choisie, et le classement est figé. Les équipes encore en route restent au classement avec leur progression."
+                : "Éteint : la partie tourne jusqu'à ce que tu la termines depuis le dashboard live."
+            }
+            disabled={!editable}
+            onClick={() =>
+              saveSettings({
+                auto_close: !game.settings.auto_close,
+                // Le fuseau de l'organisateur : c'est dans le sien qu'il pense
+                // « 19 h ». Le serveur ferme à cette heure-là, dans ce fuseau.
+                timezone:
+                  game.settings.timezone ??
+                  Intl.DateTimeFormat().resolvedOptions().timeZone ??
+                  undefined,
+              })
+            }
+          />
+          {game.settings.auto_close && (
+            <div className="flex items-center gap-2 pl-2">
+              <Input
+                type="number"
+                min={0}
+                max={23}
+                inputMode="numeric"
+                disabled={!editable}
+                defaultValue={game.settings.close_hour ?? 19}
+                onBlur={(e) => {
+                  const h = Math.min(23, Math.max(0, Number(e.target.value) || 0));
+                  void saveSettings({ close_hour: h });
+                }}
+                className="w-24 text-center tabular-nums"
+                aria-label="Heure de fermeture"
+              />
+              <span className="font-bold text-ink/60 text-sm">
+                h — fuseau {game.settings.timezone ?? "America/Martinique"}
+              </span>
+            </div>
+          )}
+        </div>
+      </Card>
+
       {/* Réglages */}
       <Card className="p-4 mb-6">
         <h2 className="font-display text-lg mb-3">Réglages</h2>
@@ -286,12 +466,14 @@ export default function GameEditPage() {
             <Label>Équipes max</Label>
             <Input
               type="number"
-              min={1}
+              min={0}
               disabled={!editable}
-              defaultValue={game.settings.max_teams ?? ""}
+              defaultValue={game.settings.max_teams || ""}
               placeholder="∞"
               onBlur={(e) =>
-                saveSettings({ max_teams: e.target.value === "" ? null : Number(e.target.value) })
+                saveSettings({
+                  max_teams: Number(e.target.value) > 0 ? Number(e.target.value) : null,
+                })
               }
             />
           </div>
@@ -299,18 +481,20 @@ export default function GameEditPage() {
             <Label>Joueurs / équipe max</Label>
             <Input
               type="number"
-              min={1}
+              min={0}
               disabled={!editable}
-              defaultValue={game.settings.max_players_per_team ?? ""}
+              defaultValue={game.settings.max_players_per_team || ""}
               placeholder="∞"
               onBlur={(e) =>
                 saveSettings({
-                  max_players_per_team: e.target.value === "" ? null : Number(e.target.value),
+                  max_players_per_team:
+                    Number(e.target.value) > 0 ? Number(e.target.value) : null,
                 })
               }
             />
           </div>
         </div>
+        <p className="text-xs font-bold text-ink/50 mt-1">Vide ou 0 : aucun plafond.</p>
         <div className="mt-3">
           <Label>Classement</Label>
           <div className="flex gap-2">
@@ -323,7 +507,7 @@ export default function GameEditPage() {
               <button
                 key={o.v}
                 type="button"
-                disabled={!editable}
+                disabled={!baremeModifiable}
                 onClick={() => saveSettings({ scoring: o.v })}
                 className={`flex-1 p-2 rounded-xl border-[3px] border-ink text-left disabled:opacity-60 ${
                   (game.settings.scoring ?? "time") === o.v ? "bg-gold" : "bg-white"
@@ -334,6 +518,11 @@ export default function GameEditPage() {
               </button>
             ))}
           </div>
+          {!baremeModifiable && (
+            <p className="text-xs font-bold text-ink/50 mt-1">
+              Figé depuis le lancement : le changer retournerait tout le classement.
+            </p>
+          )}
         </div>
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
@@ -417,8 +606,10 @@ export default function GameEditPage() {
               },
               {
                 key: "middle",
-                title: "🎲 LE PARCOURS",
-                help: `Le cœur de la chasse : ${poolCount} bloc${poolCount > 1 ? "s" : ""} distribué${poolCount > 1 ? "s" : ""} dans un ordre différent à chaque équipe, et les paliers communs à leur position fixe.`,
+                title: sensFixe ? "➡️ LE PARCOURS" : "🎲 LE PARCOURS",
+                help: sensFixe
+                  ? `Le cœur de la chasse : ${poolCount} bloc${poolCount > 1 ? "s" : ""} joué${poolCount > 1 ? "s" : ""} dans CET ordre par toutes les équipes, paliers communs compris.`
+                  : `Le cœur de la chasse : ${poolCount} bloc${poolCount > 1 ? "s" : ""} distribué${poolCount > 1 ? "s" : ""} dans un ordre différent à chaque équipe, et les paliers communs à leur position fixe.`,
               },
               {
                 key: "finals",
@@ -565,8 +756,14 @@ export default function GameEditPage() {
         <Link href={`/org/games/${gameId}/antiseche`} className="contents">
           <Button variant="parchment">📜 Antisèche</Button>
         </Link>
+        <Link href={`/org/games/${gameId}/stats`} className="contents">
+          <Button variant="parchment">📊 Statistiques</Button>
+        </Link>
         <Link href={`/org/games/${gameId}/live`} className="contents">
-          <Button variant="leaf">📡 Dashboard live {game.status === "lobby" ? "& lancement" : ""}</Button>
+          <Button variant="leaf">
+            📡 Dashboard live{" "}
+            {game.status === "lobby" ? (continu ? "& ouverture" : "& lancement") : ""}
+          </Button>
         </Link>
       </div>
 
@@ -597,5 +794,83 @@ export default function GameEditPage() {
 
       {confirmDialog}
     </main>
+  );
+}
+
+/** Une option parmi plusieurs (carte cliquable, l'active est dorée). */
+function OptionChoix({
+  actif,
+  titre,
+  aide,
+  disabled,
+  onClick,
+}: {
+  actif: boolean;
+  titre: string;
+  aide: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      aria-pressed={actif}
+      className={`w-full text-left p-3 rounded-xl border-[3px] transition-colors disabled:opacity-60 ${
+        actif ? "border-ink bg-gold/30" : "border-ink/25 bg-white/60"
+      }`}
+    >
+      <span className="font-display text-sm">
+        {actif ? "✅ " : ""}
+        {titre}
+      </span>
+      <span className="block text-xs font-bold text-ink/60 mt-0.5 leading-relaxed">{aide}</span>
+    </button>
+  );
+}
+
+/** Une option qu'on allume ou qu'on éteint. */
+function OptionInterrupteur({
+  actif,
+  titre,
+  aide,
+  disabled,
+  onClick,
+}: {
+  actif: boolean;
+  titre: string;
+  aide: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={actif}
+      disabled={disabled}
+      onClick={onClick}
+      className={`w-full text-left p-3 rounded-xl border-[3px] transition-colors disabled:opacity-60 flex gap-3 items-start ${
+        actif ? "border-ink bg-leaf/15" : "border-ink/25 bg-white/60"
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`mt-0.5 shrink-0 w-10 h-6 rounded-full border-[3px] border-ink relative transition-colors ${
+          actif ? "bg-leaf" : "bg-parchment-dark"
+        }`}
+      >
+        <span
+          className={`absolute top-0 w-[18px] h-[18px] rounded-full bg-white border-2 border-ink transition-[left] ${
+            actif ? "left-[16px]" : "left-0"
+          }`}
+        />
+      </span>
+      <span className="min-w-0">
+        <span className="font-display text-sm">{titre}</span>
+        <span className="block text-xs font-bold text-ink/60 mt-0.5 leading-relaxed">{aide}</span>
+      </span>
+    </button>
   );
 }

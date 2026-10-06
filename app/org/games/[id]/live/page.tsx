@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { frError, sb, rpc } from "@/lib/supabase/client";
+import { frError, sb, rpc, toutesLesLignes } from "@/lib/supabase/client";
 import type { BroadcastKind, Game, GameEvent, Player, RankingData, Step, StepType, Submission, Team, TeamRoute } from "@/lib/types";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
@@ -84,6 +84,14 @@ const STEP_ICON: Record<StepType, string> = {
 
 /** Le strict nécessaire des secrets d'étape : juger une réponse, dépanner une
     équipe au téléphone. Jamais exposé aux joueurs (RLS : organisateur seul). */
+/** Ce que rend `get_ratings` : la moyenne, le compte, et le détail par étoile. */
+interface Avis {
+  count: number;
+  average: number | null;
+  /** { "1": 2, "4": 9, "5": 31 } — les étoiles absentes ne sont pas listées. */
+  distribution: Record<string, number>;
+}
+
 interface StepSecretPeek {
   step_id: string;
   answers: string[];
@@ -105,6 +113,10 @@ function eventLabel(e: GameEvent, teamName: string | undefined, stepTitle?: stri
     case "game_resumed": return "▶️ Reprise de la partie";
     case "game_finished": return "🏁 Partie terminée par l'organisateur";
     case "team_created": return `⛺ Équipe « ${team} » créée`;
+    case "team_started": return `🚀 « ${team} » est partie — son chrono tourne`;
+    case "step_deleted": return `🗑️ Étape « ${String(e.payload.step_title ?? "?")} » supprimée (${String(e.payload.teams_affected ?? 0)} équipes déplacées)`;
+    case "staff_added": return `🤝 ${String(e.payload.email ?? "?")} invité en lecture seule`;
+    case "staff_removed": return `🤝 Accès retiré à ${String(e.payload.email ?? "?")}`;
     case "player_joined": return `👤 ${String(e.payload.nickname ?? "?")} a rejoint « ${team} »`;
     case "step_validated": return `✅ « ${team} » a validé « ${String(e.payload.step_title ?? stepTitle ?? "?")} » (${String(e.payload.kind)})`;
     case "wrong_answer": return `❌ « ${team} » s'est trompé sur « ${String(e.payload.step_title ?? "?")} »`;
@@ -153,6 +165,10 @@ export default function LiveDashboardPage() {
 
   const [game, setGame] = useState<Game | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
+  // Les contacts laissés à l'inscription (option « demander un contact »).
+  // Table à part, lisible des seuls organisateurs : voir `team_contacts`.
+  const [contacts, setContacts] = useState<Map<string, string>>(new Map());
+  const [avis, setAvis] = useState<Avis | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [steps, setSteps] = useState<Step[]>([]);
   const [routes, setRoutes] = useState<TeamRoute[]>([]);
@@ -188,12 +204,26 @@ export default function LiveDashboardPage() {
   const { confirm, confirmDialog } = useConfirm();
 
   const load = useCallback(async () => {
-    const [g, t, p, s, r, e, sub, bev, mg] = await Promise.all([
+    const [g, t, p, s, r, e, sub, bev, mg, ct] = await Promise.all([
       sb().from("games").select("*").eq("id", gameId).single(),
       sb().from("teams").select("*").eq("game_id", gameId).order("created_at"),
-      sb().from("players").select("*").eq("game_id", gameId),
+      // Ces deux tables grossissent avec la partie : les joueurs en
+      // participants, les parcours en ÉQUIPES × ÉTAPES. Sans pagination,
+      // PostgREST en rend une partie et se tait — des équipes ARRIVÉES
+      // s'affichaient « 0/0 ». Voir `toutesLesLignes`.
+      toutesLesLignes<Player>((de, a) =>
+        sb().from("players").select("*").eq("game_id", gameId).order("id").range(de, a)
+      ).then((data) => ({ data })),
       sb().from("steps").select("*").eq("game_id", gameId),
-      sb().from("team_routes").select("*").eq("game_id", gameId),
+      toutesLesLignes<TeamRoute>((de, a) =>
+        sb()
+          .from("team_routes")
+          .select("*")
+          .eq("game_id", gameId)
+          .order("team_id")
+          .order("position")
+          .range(de, a)
+      ).then((data) => ({ data })),
       sb().from("events").select("*").eq("game_id", gameId).order("id", { ascending: false }).limit(250),
       sb().from("submissions").select("*").eq("game_id", gameId).eq("status", "pending").order("created_at"),
       // Bonus chargés à part : la fenêtre de 250 events du journal ne suffit
@@ -202,6 +232,7 @@ export default function LiveDashboardPage() {
       // Durée RÉELLE de jeu des mini-jeux (chrono interne au jeu) : la seule
       // mesure de vitesse qui ne soit pas polluée par le temps de marche.
       sb().from("minigame_results").select("team_id, step_id, duration_ms").eq("game_id", gameId),
+      sb().from("team_contacts").select("team_id, contact").eq("game_id", gameId),
     ]);
     if (g.data) {
       setGame(g.data as Game);
@@ -210,6 +241,14 @@ export default function LiveDashboardPage() {
         .catch(() => {});
     }
     setTeams((t.data as Team[]) ?? []);
+    setContacts(
+      new Map(
+        ((ct.data as { team_id: string; contact: string }[]) ?? []).map((c) => [c.team_id, c.contact])
+      )
+    );
+    rpc<Avis>("get_ratings", { p_game_id: gameId })
+      .then((a) => setAvis(a))
+      .catch(() => {});
     setPlayers((p.data as Player[]) ?? []);
     setSteps((s.data as Step[]) ?? []);
     setRoutes((r.data as TeamRoute[]) ?? []);
@@ -315,7 +354,14 @@ export default function LiveDashboardPage() {
         done,
         total: teamRoutes.length,
         current: currentStep
-          ? { step: currentStep, since: validated[0]?.validated_at ?? game?.started_at ?? null }
+          ? {
+              step: currentStep,
+              // Repère de l'étape en cours : la dernière validation, sinon le
+              // départ de L'ÉQUIPE. Depuis l'ouverture de la partie, une équipe
+              // partie à 16 h (jeu en continu) s'affichait « depuis 423 min —
+              // bloquée ? » trois minutes après avoir commencé.
+              since: validated[0]?.validated_at ?? team.started_at ?? game?.started_at ?? null,
+            }
           : null,
         lastValidatedAt: validated[0]?.validated_at ?? null,
       };
@@ -343,7 +389,12 @@ export default function LiveDashboardPage() {
   // Les étapes passées/expirées ne comptent pas comme des réussites.
   const funStats = useMemo(() => {
     if (!game?.started_at) return null;
-    const start = new Date(game.started_at).getTime();
+    const ouverture = new Date(game.started_at).getTime();
+    // Chaque équipe part à SON heure (jeu en continu) : mesurer ses étapes
+    // depuis l'ouverture de la partie donnait des records de plusieurs heures.
+    const departs = new Map(
+      teams.map((t) => [t.id, t.started_at ? new Date(t.started_at).getTime() : ouverture])
+    );
     const byTeam = new Map<string, TeamRoute[]>();
     for (const r of routes) byTeam.set(r.team_id, [...(byTeam.get(r.team_id) ?? []), r]);
     const bestByStep = new Map<string, { teamId: string; ms: number }>();
@@ -353,10 +404,15 @@ export default function LiveDashboardPage() {
     let flash: { teamId: string; stepId: string; ms: number } | null = null;
     const perTeam = new Map<string, { totalMs: number; count: number }>();
     for (const [teamId, rs] of byTeam) {
-      let prev = start;
-      for (const r of rs.slice().sort((a, b) => a.position - b.position)) {
-        if (!r.validated_at) break;
-        const t = new Date(r.validated_at).getTime();
+      let prev = departs.get(teamId) ?? ouverture;
+      // Dans l'ORDRE OÙ ELLES ONT ÉTÉ FAITES, pas dans l'ordre des positions :
+      // en mode dispersé, une équipe ne visite pas le parcours dans l'ordre, et
+      // chaque étape se retrouvait mesurée depuis une voisine pas encore faite.
+      const faites = rs
+        .filter((r) => r.validated_at)
+        .sort((a, b) => (a.validated_at! < b.validated_at! ? -1 : 1));
+      for (const r of faites) {
+        const t = new Date(r.validated_at!).getTime();
         const ms = t - prev;
         prev = t;
         if (r.skipped || r.timed_out || ms <= 0) continue;
@@ -643,10 +699,17 @@ export default function LiveDashboardPage() {
     }
   }
 
+  // Retirer une équipe reste possible tant que la partie n'est pas terminée :
+  // l'équipe de test lancée le matin doit pouvoir sortir du classement. Le
+  // geste est le même, l'avertissement non : une équipe déjà partie emporte
+  // son chrono, son parcours et ses photos avec elle.
   async function deleteTeam(team: Team) {
+    const dejaPartie = !!team.started_at || game?.status === "running" || game?.status === "paused";
     const ok = await confirm({
       title: "Supprimer l'équipe ?",
-      message: `« ${team.name} » et ses joueurs seront retirés. (possible uniquement avant le lancement)`,
+      message: dejaPartie
+        ? `« ${team.name} » a déjà pris le départ. Son chrono, son parcours et ses photos seront effacés, et elle quittera le classement. Sans retour.`
+        : `« ${team.name} » et ses joueurs seront retirés.`,
       confirmLabel: "Supprimer",
       danger: true,
     });
@@ -654,6 +717,8 @@ export default function LiveDashboardPage() {
     try {
       await rpc("org_delete_team", { p_team_id: team.id });
       showToast("Équipe supprimée", "success");
+      // La fiche ouverte parle d'une équipe qui n'existe plus : la refermer.
+      setManageTeam(null);
       await load();
     } catch (err) {
       showToast(`Échec : ${frError(err, "erreur")}`, "error");
@@ -928,7 +993,11 @@ export default function LiveDashboardPage() {
         <div className="flex flex-wrap gap-2">
         {game.status === "lobby" && (
           <Button size="lg" disabled={busy} onClick={doStart}>
-            {busy ? "⏳ LANCEMENT…" : "🚀 LANCER LA PARTIE"}
+            {busy
+              ? "⏳ LANCEMENT…"
+              : game.settings?.continuous
+                ? "🚀 OUVRIR LA PARTIE"
+                : "🚀 LANCER LA PARTIE"}
           </Button>
         )}
         {game.status === "running" && (
@@ -992,8 +1061,19 @@ export default function LiveDashboardPage() {
           <p className="font-bold text-ink/60 text-sm mb-3">
             {teams.length} équipe{teams.length > 1 ? "s" : ""} · {players.length} joueur
             {players.length > 1 ? "s" : ""} · {poolCount} énigme{poolCount > 1 ? "s" : ""} dans le
-            pool {teams.length > poolCount && poolCount > 0 && "⚠️ pool trop petit !"}
+            pool{" "}
+            {!game.settings?.continuous &&
+              teams.length > poolCount &&
+              poolCount > 0 &&
+              "⚠️ pool trop petit !"}
           </p>
+          {game.settings?.continuous && (
+            <p className="font-bold text-leaf text-sm mb-3 leading-relaxed">
+              🔁 Partie en continu : ouvre-la quand tu veux, même sans équipe. Les joueurs
+              arriveront et partiront d&apos;eux-mêmes, chacun avec son propre chrono. Les équipes
+              déjà inscrites partiront à l&apos;ouverture.
+            </p>
+          )}
           {teams.length === 0 ? (
             <p className="font-bold text-ink/50">
               Partage le code <span className="font-mono">{game.code}</span> pour que les équipes
@@ -1052,6 +1132,40 @@ export default function LiveDashboardPage() {
             cours · 🔴 : passée avec pénalité · 🟢 : rattrapée · grise : temps écoulé · blanche :
             à venir.
           </p>
+          {/* L'avis des joueurs (option « demander une note ») : la moyenne ET
+              le détail — 1 et 5 font 3, exactement comme 3 et 3. */}
+          {avis && avis.count > 0 && (
+            <div className="rounded-xl border-[3px] border-ink bg-parchment text-ink p-3 mb-3">
+              <p className="font-display text-sm">⭐ AVIS DES JOUEURS</p>
+              <p className="font-display text-2xl mt-0.5 tabular-nums">
+                {avis.average?.toFixed(1)} <span className="text-ink/40 text-base">/ 5</span>
+                <span className="font-bold text-ink/50 text-sm ml-3">
+                  {avis.count} {avis.count > 1 ? "réponses" : "réponse"}
+                </span>
+              </p>
+              <div className="mt-2 space-y-1">
+                {[5, 4, 3, 2, 1].map((n) => {
+                  const nb = avis.distribution[String(n)] ?? 0;
+                  const part = avis.count ? (100 * nb) / avis.count : 0;
+                  return (
+                    <div key={n} className="flex items-center gap-2 text-xs font-bold">
+                      <span className="text-ink/60 tabular-nums w-3">{n}</span>
+                      <div className="flex-1 h-2 rounded-full border-2 border-ink bg-white overflow-hidden">
+                        <div className="h-full bg-gold" style={{ width: `${part}%` }} />
+                      </div>
+                      <span className="text-ink/50 tabular-nums w-6 text-right">{nb}</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <Link href={`/org/games/${gameId}/stats`} className="contents">
+                <Button size="sm" variant="outline" className="mt-2">
+                  📊 QUI A MIS QUOI
+                </Button>
+              </Link>
+            </div>
+          )}
+
           <div className="flex gap-2 mb-3 flex-wrap items-center">
             {teams.length > 6 && (
               <Input
@@ -1576,6 +1690,26 @@ export default function LiveDashboardPage() {
               Code équipe : <span className="font-mono text-ink tracking-[0.15em]">{manageTeam.team_code}</span>{" "}
               (à donner pour re-rejoindre)
             </p>
+            {/* Le contact laissé à l'inscription, s'il l'a été (facultatif). */}
+            {(game.settings?.ask_contact || contacts.get(manageTeam.id)) && (
+              <p className="font-bold text-ink/60 text-sm">
+                📇 Contact :{" "}
+                {contacts.get(manageTeam.id) ? (
+                  <a
+                    href={
+                      contacts.get(manageTeam.id)!.includes("@")
+                        ? `mailto:${contacts.get(manageTeam.id)}`
+                        : `tel:${contacts.get(manageTeam.id)!.replace(/[^\d+]/g, "")}`
+                    }
+                    className="font-mono text-ink underline underline-offset-4"
+                  >
+                    {contacts.get(manageTeam.id)}
+                  </a>
+                ) : (
+                  <span className="text-ink/40">non renseigné</span>
+                )}
+              </p>
+            )}
             {(playersByTeam.get(manageTeam.id) ?? []).length === 0 ? (
               <p className="font-bold text-ink/60">Aucun téléphone connecté à cette équipe.</p>
             ) : (
@@ -1601,6 +1735,22 @@ export default function LiveDashboardPage() {
               <p className="font-bold text-ink/60 text-sm">
                 Équipage annoncé : {(manageTeam.roster ?? []).join(", ")}
               </p>
+            )}
+            {/* Retrait de l'équipe — atteignable une fois la partie lancée (le
+                panneau du lobby, qui portait jusqu'ici l'unique corbeille,
+                disparaît au lancement). Même garde que le SQL : tout sauf une
+                partie terminée. */}
+            {game.status !== "finished" && game.status !== "lobby" && (
+              <div className="pt-3 border-t-2 border-ink/10">
+                <Button size="sm" variant="outline-crimson" onClick={() => deleteTeam(manageTeam)}>
+                  🗑️ SUPPRIMER L&apos;ÉQUIPE
+                </Button>
+                <p className="text-xs font-bold text-ink/50 mt-1">
+                  {manageTeam.started_at
+                    ? "Elle a pris le départ : son chrono et ses photos partent avec elle."
+                    : "Elle n'est pas encore partie."}
+                </p>
+              </div>
             )}
           </div>
         )}
@@ -1628,7 +1778,8 @@ export default function LiveDashboardPage() {
           team={journey.team}
           routes={routes.filter((r) => r.team_id === journey.team.id)}
           steps={stepMap}
-          startedAt={game.started_at}
+          // Le parcours d'UNE équipe se mesure depuis SON départ (jeu en continu).
+          startedAt={journey.team.started_at ?? game.started_at}
           focusStepId={journey.stepId}
           onClose={() => setJourney(null)}
         />
