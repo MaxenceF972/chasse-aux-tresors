@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { cheminStorage } from "@/lib/game/storage";
 
 export const runtime = "nodejs";
 
@@ -39,19 +40,54 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Interdit" }, { status: 403 });
     }
 
-    // Une partie dupliquée référence les médias du dossier de l'original :
-    // on préserve tout fichier encore utilisé par les étapes d'une autre partie.
+    // UNE PARTIE DUPLIQUÉE POINTE SUR LE DOSSIER DE L'ORIGINAL.
+    //
+    // org_duplicate_game recopie les URLs telles quelles : la copie de la
+    // saison prochaine référence encore `{partie d'origine}/xxx.webp`. Effacer
+    // l'original, c'est donc crever les médias d'une chasse bien vivante.
+    //
+    // Il faut relever TOUT ce qui peut porter une URL, et pas seulement les
+    // médias d'énoncé. C'est ce qui manquait : les indices vivent dans
+    // step_secrets.hints, et les photos d'épreuve dans submissions. Un indice
+    // illustré d'une partie dupliquée disparaissait à la suppression de son
+    // original — l'équipe se retrouvait devant un cadre vide.
     const shared = new Set<string>();
+    const garder = (url: unknown) => {
+      // Lecture partagée avec la duplication (lib/game/storage.ts). L'ancienne
+      // cherchait « /{id}/ » n'importe où dans l'URL : un identifiant apparu
+      // dans un nom de fichier ou un paramètre passait pour un dossier.
+      const chemin = cheminStorage(url);
+      if (chemin && chemin.startsWith(`${gameId}/`)) shared.add(chemin);
+    };
+
     const { data: otherSteps } = await admin
       .from("steps")
-      .select("media_urls")
+      .select("id, media_urls")
       .neq("game_id", gameId);
-    for (const row of otherSteps ?? []) {
-      for (const url of (row.media_urls as string[] | null) ?? []) {
-        const idx = url.indexOf(`/${gameId}/`);
-        if (idx >= 0) shared.add(`${gameId}/${url.slice(idx + gameId.length + 2).split("?")[0]}`);
+    const autresEtapes = (otherSteps ?? []) as { id: string; media_urls: string[] | null }[];
+    for (const row of autresEtapes) for (const url of row.media_urls ?? []) garder(url);
+
+    // Indices illustrés des étapes des AUTRES parties.
+    for (let i = 0; i < autresEtapes.length; i += 200) {
+      const { data: secrets } = await admin
+        .from("step_secrets")
+        .select("hints")
+        .in("step_id", autresEtapes.slice(i, i + 200).map((e) => e.id));
+      for (const row of secrets ?? []) {
+        for (const hint of (row.hints as { media_url?: unknown }[] | null) ?? []) {
+          garder(hint?.media_url);
+        }
       }
     }
+
+    // Photos d'épreuve des autres parties (une copie hérite du dossier, pas des
+    // photos — mais une URL recopiée à la main ne doit pas non plus sauter).
+    const { data: autresPhotos } = await admin
+      .from("submissions")
+      .select("url")
+      .neq("game_id", gameId)
+      .not("url", "is", null);
+    for (const row of autresPhotos ?? []) garder(row.url);
 
     let removed = 0;
     let offset = 0; // les fichiers préservés restent en tête de liste

@@ -8,9 +8,16 @@ const ALLOWED_EXT = new Set([
   "mp4", "webm", "mov", "m4v",
   "mp3", "m4a", "aac", "ogg", "oga", "opus", "wav", "flac", "weba",
 ]);
-// Garde-fou anti-abus : plafond de photos d'épreuve par partie (les joueurs
-// anonymes ne doivent pas pouvoir remplir le Storage en boucle).
-const MAX_SUBMISSIONS_PER_GAME = 400;
+// Garde-fous anti-abus des photos d'épreuve.
+//
+// Il n'y en avait qu'un : 400 fichiers pour TOUTE la partie, comptés dans le
+// Storage — photos refusées comprises, et sans jamais rien libérer. Sur une
+// chasse qui tourne plusieurs jours devant des centaines de visiteurs, le
+// plafond tombe en pleine journée et il tombe pour TOUT LE MONDE À LA FOIS :
+// une équipe qui envoie ses photos en boucle prive toutes les autres des
+// leurs. Le plafond qui protège vraiment est celui par équipe.
+const MAX_PHOTOS_PAR_EQUIPE = 60;
+const MAX_PHOTOS_PAR_PARTIE = 5000;
 
 function adminClient() {
   return createClient(
@@ -36,7 +43,7 @@ export async function POST(req: NextRequest) {
     const admin = adminClient();
     const { data: userData, error: userErr } = await admin.auth.getUser(token);
     if (userErr || !userData.user) {
-      return NextResponse.json({ error: "Session invalide — reconnecte-toi" }, { status: 401 });
+      return NextResponse.json({ error: "Session expirée — recharge la page." }, { status: 401 });
     }
 
     const body = (await req.json()) as { game_id?: string; ext?: string; purpose?: string };
@@ -54,20 +61,40 @@ export async function POST(req: NextRequest) {
       }
       const { data: player } = await admin
         .from("players")
-        .select("id")
+        .select("id, team_id")
         .eq("auth_uid", userData.user.id)
         .eq("game_id", gameId)
         .maybeSingle();
       if (!player) {
-        return NextResponse.json({ error: "Tu ne participes pas à cette partie" }, { status: 403 });
-      }
-      // Plafond global de photos par partie (anti-abus Storage)
-      const { data: existing } = await admin.storage
-        .from("media")
-        .list(gameId, { limit: MAX_SUBMISSIONS_PER_GAME + 1, search: "sub-" });
-      if ((existing?.length ?? 0) >= MAX_SUBMISSIONS_PER_GAME) {
         return NextResponse.json(
-          { error: "Limite de photos atteinte pour cette partie" },
+          { error: "Tu ne participes pas à cette partie." },
+          { status: 403 }
+        );
+      }
+
+      // Les deux plafonds se comptent sur `submissions` et non sur le
+      // Storage : c'est indexé, c'est instantané, et ça compte des photos
+      // réellement envoyées plutôt que des fichiers.
+      const equipeId = (player as { team_id: string | null }).team_id;
+      if (equipeId) {
+        const { count } = await admin
+          .from("submissions")
+          .select("id", { count: "exact", head: true })
+          .eq("team_id", equipeId);
+        if ((count ?? 0) >= MAX_PHOTOS_PAR_EQUIPE) {
+          return NextResponse.json(
+            { error: "Ton équipe a atteint son nombre maximum de photos." },
+            { status: 429 }
+          );
+        }
+      }
+      const { count: total } = await admin
+        .from("submissions")
+        .select("id", { count: "exact", head: true })
+        .eq("game_id", gameId);
+      if ((total ?? 0) >= MAX_PHOTOS_PAR_PARTIE) {
+        return NextResponse.json(
+          { error: "Limite de photos atteinte pour cette partie." },
           { status: 429 }
         );
       }
