@@ -146,9 +146,21 @@ export default function GameEditPage() {
     // cascade sur team_routes laisserait une équipe sans étape courante,
     // écran figé. org_delete_step fait d'abord avancer celles qui sont dessus.
     try {
-      const res = await rpc<{ ok: boolean; teams_affected: number }>("org_delete_step", {
-        p_step_id: step.id,
-      });
+      let res: { ok: boolean; teams_affected: number };
+      try {
+        res = await rpc<{ ok: boolean; teams_affected: number }>("org_delete_step", {
+          p_step_id: step.id,
+        });
+      } catch (err) {
+        // Base où le SQL n'est pas encore ré-appliqué : la fonction n'existe
+        // pas. Suppression directe, comme avant — sûre tant que la partie n'a
+        // pas commencé.
+        const raw = err instanceof Error ? err.message : "";
+        if (!/could not find the function|PGRST202|does not exist/i.test(raw)) throw err;
+        const { error } = await sb().from("steps").delete().eq("id", step.id);
+        if (error) throw new Error(error.message);
+        res = { ok: true, teams_affected: 0 };
+      }
       showToast(
         res.teams_affected > 0
           ? `Étape supprimée — ${res.teams_affected} équipe${res.teams_affected > 1 ? "s ont" : " a"} été envoyée${res.teams_affected > 1 ? "s" : ""} à la suivante`

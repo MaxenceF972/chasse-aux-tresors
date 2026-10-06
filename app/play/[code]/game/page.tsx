@@ -241,6 +241,10 @@ export default function GameScreen() {
     return (
       <Preflight
         contexte={verifOuverte ? "menu" : "depart"}
+        // La charte au départ en jeu continu (un coéquipier, une arrivée par
+        // balise ne l'ont peut-être jamais vue) ; pas au coup d'envoi d'un
+        // départ groupé, où le capitaine l'a acceptée et où le chrono tourne.
+        avecCharte={!verifOuverte && !!game.settings.continuous}
         charter={game.settings.charter}
         onTermine={() => {
           marquerPreflight(code);

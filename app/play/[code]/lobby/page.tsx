@@ -174,12 +174,17 @@ export default function LobbyPage() {
     }
     setBusy(true);
     try {
+      // `p_contact` n'est envoyé QUE s'il est rempli : PostgREST choisit la
+      // fonction d'après les noms d'arguments, et une base où le SQL n'est pas
+      // encore ré-appliqué ne connaît pas ce paramètre — l'envoyer, même à
+      // null, ferait échouer TOUTE création d'équipe.
+      const contactSaisi = lobby?.game?.settings?.ask_contact ? contact.trim() : "";
       const res = await rpc<{ team_id: string; team_code: string }>("create_team", {
         p_code: code,
         p_team_name: teamName,
         p_nickname: nickname,
         p_members: membersText.split("\n").map((m) => m.trim()).filter(Boolean),
-        p_contact: lobby?.game?.settings?.ask_contact ? contact.trim() || null : null,
+        ...(contactSaisi ? { p_contact: contactSaisi } : {}),
       });
       setPlayerSession({ code, team_id: res.team_id, team_code: res.team_code, nickname });
       setTeamCode(res.team_code);

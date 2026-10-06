@@ -114,12 +114,15 @@ export default function JoinPage() {
           : null);
 
       if (!equipe) {
+        // `p_contact` seulement s'il est rempli : voir le lobby (PostgREST
+        // choisit la fonction d'après les noms d'arguments).
+        const contactSaisi = reglages?.ask_contact ? contact.trim() : "";
         equipe = await rpc<{ team_id: string; team_code: string }>("create_team", {
           p_code: code,
           p_team_name: prenom.trim(),
           p_nickname: prenom.trim(),
           p_members: [],
-          p_contact: reglages?.ask_contact ? contact.trim() || null : null,
+          ...(contactSaisi ? { p_contact: contactSaisi } : {}),
         });
         equipeRef.current = equipe;
       }

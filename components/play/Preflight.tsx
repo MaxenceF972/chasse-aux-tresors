@@ -60,6 +60,13 @@ interface PreflightProps {
    *    pas de charte, on ne fait pas relire un règlement déjà accepté.
    */
   contexte?: "depart" | "lobby" | "menu";
+  /**
+   * Montrer la charte d'abord. Par défaut : partout sauf depuis le menu.
+   * L'écran de jeu l'éteint au coup d'envoi d'un départ groupé : le chrono
+   * tourne déjà, le capitaine l'a acceptée au lobby, et la relire coûterait
+   * des minutes à chaque téléphone.
+   */
+  avecCharte?: boolean;
 }
 
 const PICTO: Record<Sujet, string> = {
@@ -119,9 +126,10 @@ export default function Preflight({
   onFermer,
   charter,
   contexte = "depart",
+  avecCharte = contexte !== "menu",
 }: PreflightProps) {
   const [etape, setEtape] = useState<"consignes" | "annonce" | "liste">(
-    contexte === "menu" ? "annonce" : "consignes"
+    avecCharte ? "consignes" : "annonce"
   );
   const depart = contexte === "depart";
   const [plat, setPlat] = useState<Plateforme>("autre");
