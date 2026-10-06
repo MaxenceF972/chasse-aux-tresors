@@ -153,10 +153,16 @@ export default function GameEditPage() {
         });
       } catch (err) {
         // Base où le SQL n'est pas encore ré-appliqué : la fonction n'existe
-        // pas. Suppression directe, comme avant — sûre tant que la partie n'a
-        // pas commencé.
+        // pas. Suppression directe, comme avant — mais SEULEMENT avant le
+        // lancement. En pleine partie, la cascade sur team_routes laisserait
+        // les équipes arrêtées sur cette étape sans étape courante.
         const raw = err instanceof Error ? err.message : "";
         if (!/could not find the function|PGRST202|does not exist/i.test(raw)) throw err;
+        if (game?.status !== "lobby") {
+          throw new Error(
+            "Mets d'abord la base à jour (supabase/setup.sql) : supprimer une étape en pleine partie en a besoin."
+          );
+        }
         const { error } = await sb().from("steps").delete().eq("id", step.id);
         if (error) throw new Error(error.message);
         res = { ok: true, teams_affected: 0 };
@@ -430,7 +436,7 @@ export default function GameEditPage() {
             titre="🌙 Fermer la partie chaque soir"
             aide={
               game.settings.auto_close
-                ? "La partie se ferme d'elle-même à l'heure choisie, et le classement est figé. Les équipes encore en route restent au classement avec leur progression."
+                ? "Passé l'heure choisie, plus aucune équipe ne s'inscrit ni ne part, et la partie se ferme d'elle-même dans la soirée ou la nuit : le classement est figé. Les équipes encore en route restent au classement avec leur progression. 0 h = minuit."
                 : "Éteint : la partie tourne jusqu'à ce que tu la termines depuis le dashboard live."
             }
             disabled={!editable}
@@ -456,7 +462,13 @@ export default function GameEditPage() {
                 disabled={!editable}
                 defaultValue={game.settings.close_hour ?? 19}
                 onBlur={(e) => {
-                  const h = Math.min(23, Math.max(0, Number(e.target.value) || 0));
+                  // Un champ vidé reprend l'heure par défaut : lu 0, il fermait
+                  // la partie à minuit sans qu'on l'ait choisi. Et une heure
+                  // entière seulement — le serveur ne lit que des heures pleines.
+                  const saisie = e.target.value.trim();
+                  const n = Math.round(Number(saisie));
+                  const h = saisie === "" || !Number.isFinite(n) ? 19 : Math.min(23, Math.max(0, n));
+                  e.target.value = String(h);
                   void saveSettings({ close_hour: h });
                 }}
                 className="w-24 text-center tabular-nums"

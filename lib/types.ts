@@ -440,6 +440,11 @@ export interface RankingData {
     ask_rating?: boolean;
   };
   teams: RankedTeam[];
+  /**
+   * L'équipe du demandeur, connue du serveur — null pour l'organisateur et la
+   * page publique, absente tant que le SQL n'est pas ré-appliqué.
+   */
+  my_team_id?: string | null;
   /** Récompenses de l'organisateur avec leur motif — absent tant que le SQL n'est pas ré-appliqué */
   bonuses?: AwardedBonus[];
   /**

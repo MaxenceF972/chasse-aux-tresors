@@ -260,3 +260,34 @@ test("une équipe déjà partie n'est jamais reprise : on en crée bien une nouv
 
   assert.notEqual(a.team_id, b.team_id);
 });
+
+test("au classement, une équipe inscrite mais pas encore partie n'a pas de temps", async () => {
+  // La journée est ouverte depuis le matin. Retomber sur l'ouverture de la
+  // partie donnait à l'équipe qui attend au lobby des heures de course — et
+  // parfois une place sur le podium.
+  const { rows, game, arrive } = await journeeOuverte();
+  await rows(`update public.games set started_at = now() - interval '5 hours' where id = $1`, [game.id]);
+  const partie = await arrive("Les Corsaires", "Aline");
+  const attend = await arrive("Les Tortues", "Simon", { lance: false });
+
+  const r = (await rows(`select public.get_ranking($1) as r`, [game.code]))[0].r;
+  const ligne = (id) => r.teams.find((t) => t.id === id);
+  assert.equal(ligne(attend.team_id).elapsed_ms, null, "pas partie : pas de temps");
+  assert.ok(ligne(partie.team_id).elapsed_ms < 60000, "son chrono part de SON départ");
+  assert.equal(r.teams.at(-1).id, attend.team_id, "en fin de liste, après celles qui courent");
+});
+
+test("get_ranking dit au joueur quelle est son équipe — et à lui seul", async () => {
+  // L'écran de fin oublie la session locale dès que la partie est close : il
+  // reconnaît l'équipe du joueur par là, pour garder sa note et ses photos.
+  const { rows, as, org, game, arrive } = await journeeOuverte();
+  const equipe = await arrive("Les Corsaires", "Aline");
+  await as(equipe.uid);
+  assert.equal((await rows(`select public.get_ranking($1) as r`, [game.code]))[0].r.my_team_id, equipe.team_id);
+  await as(org);
+  assert.equal(
+    (await rows(`select public.get_ranking($1) as r`, [game.code]))[0].r.my_team_id,
+    null,
+    "l'organisateur n'a pas d'équipe"
+  );
+});

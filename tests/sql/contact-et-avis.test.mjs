@@ -106,6 +106,45 @@ test("le propriétaire de la partie voit les contacts, et lui seul", async () =>
   assert.equal((await lit(avecContact)).length, 0);
 });
 
+test("PERSONNE NE RÉÉCRIT LE CONTACT D'UNE ÉQUIPE EN APPELANT poser_contact", async () => {
+  // La fonction n'a aucun contrôle : elle n'est faite que pour create_team.
+  // Ouverte, elle laissait n'importe quel visiteur remplacer — ou effacer —
+  // le contact du gagnant, avec des identifiants publics (get_ranking).
+  const { rows, sousRls, curieux, avecContact, org, game, equipeA } = await journee();
+  for (const qui of [curieux, avecContact]) {
+    await assert.rejects(
+      () =>
+        sousRls(qui, () =>
+          rows(`select public.poser_contact($1,$2,'pirate@exemple.fr')`, [game.id, equipeA.team_id])
+        ),
+      /permission denied/
+    );
+  }
+  await sousRls(org, async () => {
+    const [ligne] = await rows(`select contact from public.team_contacts where team_id = $1`, [
+      equipeA.team_id,
+    ]);
+    assert.equal(ligne.contact, "aline@exemple.fr", "le contact d'origine est intact");
+  });
+});
+
+test("create_team, appelée par un vrai visiteur, enregistre toujours son contact", async () => {
+  // Le témoin du verrou ci-dessus : sous le rôle `authenticated` (celui d'un
+  // navigateur), create_team passe par poser_contact avec SES droits à elle.
+  const { rows, sousRls, curieux, org, game } = await journee();
+  const equipe = await sousRls(curieux, async () =>
+    (await rows(`select public.create_team($1,$2,$3,'{}',$4) as r`, [
+      game.code, "Les Requins", "Noé", "noe@exemple.fr",
+    ]))[0].r
+  );
+  await sousRls(org, async () => {
+    const [ligne] = await rows(`select contact from public.team_contacts where team_id = $1`, [
+      equipe.team_id,
+    ]);
+    assert.equal(ligne?.contact, "noe@exemple.fr");
+  });
+});
+
 test("un contact vidé efface la ligne", async () => {
   const { rows, as, avecContact, org, game } = await journee();
   // Le visiteur se ravise : il repasse par le formulaire sans rien mettre.

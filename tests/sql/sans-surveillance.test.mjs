@@ -13,8 +13,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { freshDb } from "./harness.mjs";
 
-/** Une partie en mode sans surveillance, avec une équipe partie. */
-async function journee({ surveille = false, heure = 19, fermetureAuto = true } = {}) {
+/**
+ * Une partie en mode sans surveillance, avec une équipe partie.
+ *
+ * `heure` vaut 0 par défaut — MINUIT : la partie ne ferme qu'au changement de
+ * jour, si bien que l'inscription et le départ du scénario passent à toute
+ * heure. Avec 19 h, ils seraient refusés chaque fois que la suite tourne le
+ * soir : passé l'heure, plus personne ne part (voir auto_close_due).
+ */
+async function journee({ surveille = false, heure = 0, fermetureAuto = true } = {}) {
   const { rows, as, newUser } = await freshDb();
   const org = await newUser();
   await as(org);
@@ -140,17 +147,41 @@ test("sans réponse attendue, la question ouverte est accordée", async () => {
   assert.equal(sub.status, "approved", "le jeu ne peut pas juger : il accorde");
 });
 
+/**
+ * Un fuseau où il est en ce moment entre 1 h et 22 h, et l'heure qu'il y est.
+ *
+ * Les scénarios de fermeture raisonnent sur « avant » et « après » l'heure,
+ * le JOUR MÊME : il leur faut une heure locale qui ait un avant et un après
+ * dans la journée. Deux fuseaux distants de treize heures en garantissent un,
+ * quelle que soit l'heure à laquelle la suite tourne.
+ */
+async function heureLocale(rows) {
+  const [r] = await rows(
+    `select tz, extract(hour from now() at time zone tz)::int as h
+     from unnest(array['America/Martinique', 'Asia/Tokyo']) as tz
+     where extract(hour from now() at time zone tz) between 1 and 22
+     limit 1`
+  );
+  return r;
+}
+
+/** Règle la fermeture d'une partie ouverte à l'instant. */
+async function fermerA(ctx, reglages) {
+  await ctx.as(ctx.org);
+  await ctx.rows(
+    `update public.games set settings = settings || $2::jsonb, started_at = now() where id = $1`,
+    [ctx.game.id, JSON.stringify(reglages)]
+  );
+}
+
 test("fermeture demandée : la partie se ferme d'elle-même passé l'heure", async () => {
-  const ctx = await journee({ heure: 19 });
+  const ctx = await journee();
   await ctx.step("text", "Le phare");
   await lancer(ctx);
-  await ctx.as(ctx.org);
+  // L'heure de fermeture est celle qu'il est : elle vient de passer.
+  const { tz, h } = await heureLocale(ctx.rows);
+  await fermerA(ctx, { close_hour: h, timezone: tz });
 
-  // Ouverture ce matin, on se place après l'heure de fermeture.
-  await ctx.rows(
-    `update public.games set settings = settings || '{"close_hour":0}'::jsonb where id = $1`,
-    [ctx.game.id]
-  );
   const res = (await ctx.rows(`select public.close_expired_games() as r`))[0].r;
   assert.equal(res.closed.length, 1);
 
@@ -163,16 +194,89 @@ test("avant l'heure, elle reste ouverte", async () => {
   const ctx = await journee();
   await ctx.step("text", "Le phare");
   await lancer(ctx);
+  const { tz, h } = await heureLocale(ctx.rows);
+  await fermerA(ctx, { close_hour: h + 1, timezone: tz });
+
+  const res = (await ctx.rows(`select public.close_expired_games() as r`))[0].r;
+  assert.equal(res.closed.length, 0);
+  const [g] = await ctx.rows(`select status from public.games where id = $1`, [ctx.game.id]);
+  assert.equal(g.status, "running");
+});
+
+test("fermeture à 0 h : c'est minuit, la partie reste ouverte toute la journée", async () => {
+  // Lu « heure >= 0 », 0 h fermait la partie dès son ouverture. Et c'est la
+  // valeur que prend un champ d'heure vidé par mégarde.
+  const ctx = await journee();
+  await ctx.step("text", "Le phare");
+  await lancer(ctx);
+  await fermerA(ctx, { close_hour: 0 });
+
+  const res = (await ctx.rows(`select public.close_expired_games() as r`))[0].r;
+  assert.equal(res.closed.length, 0, "ouverte aujourd'hui : rien à fermer avant minuit");
+});
+
+test("un fuseau inconnu ne fait pas échouer le passage du soir", async () => {
+  // L'appel échouait en entier : aucune partie n'était plus fermée, nulle part.
+  const ctx = await journee();
+  await ctx.step("text", "Le phare");
+  await lancer(ctx);
   await ctx.as(ctx.org);
-  // Heure de fermeture hors d'atteinte, partie ouverte aujourd'hui.
   await ctx.rows(
-    `update public.games set settings = settings || '{"close_hour":23}'::jsonb,
-                             started_at = now() where id = $1`, [ctx.game.id]
+    `update public.games set settings = settings || '{"timezone":"Mars/Olympus_Mons"}'::jsonb,
+                             started_at = now() - interval '2 days' where id = $1`,
+    [ctx.game.id]
   );
   const res = (await ctx.rows(`select public.close_expired_games() as r`))[0].r;
-  const [g] = await ctx.rows(`select status from public.games where id = $1`, [ctx.game.id]);
-  // 23 h : ouverte sauf si l'exécution tombe après 23 h heure Martinique.
-  if (res.closed.length === 0) assert.equal(g.status, "running");
+  assert.equal(res.closed.length, 1, "le fuseau par défaut prend le relais");
+});
+
+test("une heure de fermeture non entière ne fait pas échouer le passage", async () => {
+  const ctx = await journee();
+  await ctx.step("text", "Le phare");
+  await lancer(ctx);
+  await ctx.as(ctx.org);
+  await ctx.rows(
+    `update public.games set settings = settings || '{"close_hour":19.5}'::jsonb,
+                             started_at = now() - interval '2 days' where id = $1`,
+    [ctx.game.id]
+  );
+  const res = (await ctx.rows(`select public.close_expired_games() as r`))[0].r;
+  assert.equal(res.closed.length, 1);
+});
+
+test("passé l'heure, plus d'inscription ni de départ — même avant le passage du soir", async () => {
+  // Le passage qui ferme n'a lieu qu'une fois par jour. Sans ce refus, une
+  // partie qui devait fermer à 21 h accueillait encore, le lendemain matin,
+  // les visiteurs du jour suivant.
+  const ctx = await journee();
+  await ctx.step("text", "Le phare");
+  await lancer(ctx);
+  const nouveau = async () => (await ctx.rows(`insert into auth.users default values returning id`))[0].id;
+
+  // Une équipe inscrite la veille, jamais partie.
+  const veille = await nouveau();
+  await ctx.as(veille);
+  await ctx.rows(`select public.create_team($1,'Les Tortues','Simon')`, [ctx.game.code]);
+
+  // La partie a ouvert avant-hier : l'heure est passée, dans tous les fuseaux.
+  await ctx.as(ctx.org);
+  await ctx.rows(`update public.games set started_at = now() - interval '2 days' where id = $1`, [
+    ctx.game.id,
+  ]);
+
+  await ctx.as(await nouveau());
+  await assert.rejects(
+    () => ctx.rows(`select public.create_team($1,'Les Requins','Noé')`, [ctx.game.code]),
+    /PARTIE_TERMINEE/,
+    "le visiteur du jour ne rejoint pas la partie de la veille"
+  );
+  await ctx.as(veille);
+  await assert.rejects(() => ctx.rows(`select public.start_team()`), /PARTIE_TERMINEE/);
+
+  // L'équipe déjà en route, elle, n'est pas inquiétée.
+  await ctx.as(ctx.visiteur);
+  const res = (await ctx.rows(`select public.start_team() as r`))[0].r;
+  assert.equal(res.already, true);
 });
 
 test("fermeture demandée : une nuit de cron sautée se rattrape", async () => {
@@ -205,6 +309,15 @@ test("SANS fermeture demandée, la chasse tourne indéfiniment", async () => {
   assert.equal(res.closed.length, 0, "quarante jours plus tard, elle court toujours");
   const [g] = await ctx.rows(`select status from public.games where id = $1`, [ctx.game.id]);
   assert.equal(g.status, "running");
+
+  // Et on s'y inscrit toujours : le refus « passé l'heure » ne vaut que pour
+  // une partie qui a demandé sa fermeture.
+  const [{ id }] = await ctx.rows(`insert into auth.users default values returning id`);
+  await ctx.as(id);
+  const equipe = (await ctx.rows(`select public.create_team($1,'Les Requins','Noé') as r`, [
+    ctx.game.code,
+  ]))[0].r;
+  assert.ok(equipe.team_id);
 });
 
 test("une partie surveillée n'est jamais fermée automatiquement", async () => {

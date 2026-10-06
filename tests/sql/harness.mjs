@@ -42,15 +42,17 @@ create or replace function extensions.unaccent(text) returns text language sql i
 $fn$;
 `;
 
+/** Le schéma tel qu'on le colle dans le SQL Editor de Supabase. */
+const schema = () =>
+  readFileSync(join(ROOT, "supabase", "setup.sql"), "utf8")
+    // PGlite n'embarque pas unaccent : le stub ci-dessus en tient lieu.
+    .replace(/create extension if not exists unaccent[^;]*;/g, "");
+
 /** Une base neuve avec le schéma appliqué, plus quelques raccourcis de test. */
 export async function freshDb() {
   const db = await PGlite.create();
   await db.exec(STUBS);
-  await db.exec(
-    readFileSync(join(ROOT, "supabase", "setup.sql"), "utf8")
-      // PGlite n'embarque pas unaccent : le stub ci-dessus en tient lieu.
-      .replace(/create extension if not exists unaccent[^;]*;/g, "")
-  );
+  await db.exec(schema());
 
   // Les droits de table que Supabase pose lui-même sur le schéma `public` :
   // `anon` et `authenticated` peuvent tout tenter, et ce sont les POLITIQUES
@@ -111,7 +113,14 @@ export async function freshDb() {
   const newUser = async () =>
     (await rows(`insert into auth.users default values returning id`))[0].id;
 
-  return { db, rows, one, as, sousRls, newUser };
+  /**
+   * Ré-applique setup.sql sur la base EXISTANTE — ce que fait l'organisateur
+   * à chaque mise à jour, parties en cours comprises. Sert à prouver qu'une
+   * migration laisse intactes les données d'avant.
+   */
+  const reappliquer = () => db.exec(schema());
+
+  return { db, rows, one, as, sousRls, newUser, reappliquer };
 }
 
 /** Millisecondes → minutes arrondies : les scénarios raisonnent en minutes. */

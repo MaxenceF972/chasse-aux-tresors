@@ -13,6 +13,33 @@ function adminClient() {
 }
 
 /**
+ * Toutes les lignes d'une lecture, page par page — et une ERREUR arrête tout.
+ *
+ * Ici une liste incomplète n'est pas un affichage dégradé : un fichier qu'une
+ * copie utilise encore passerait pour orphelin, et serait effacé. Or PostgREST
+ * plafonne chaque réponse en silence (1000 lignes chez Supabase) : sans
+ * pagination, passé ce nombre d'étapes sur l'ensemble des parties, des
+ * références sortaient du compte. On avance de ce qui a été RENDU, pas de ce
+ * qui a été demandé : un plafond serveur plus bas ne fait rien sauter.
+ */
+async function toutes<T>(
+  page: (
+    de: number,
+    a: number
+  ) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>
+): Promise<T[]> {
+  const tout: T[] = [];
+  for (let n = 0, de = 0; n < 1000; n++) {
+    const { data, error } = await page(de, de + 999);
+    if (error) throw new Error(error.message);
+    if (!data?.length) return tout;
+    tout.push(...data);
+    de += data.length;
+  }
+  throw new Error("Lecture interrompue : trop de lignes à relever");
+}
+
+/**
  * Supprime tous les médias Storage d'une partie (appelé avant la suppression
  * de la partie elle-même — sinon les fichiers deviennent orphelins).
  */
@@ -60,19 +87,20 @@ export async function POST(req: NextRequest) {
       if (chemin && chemin.startsWith(`${gameId}/`)) shared.add(chemin);
     };
 
-    const { data: otherSteps } = await admin
-      .from("steps")
-      .select("id, media_urls")
-      .neq("game_id", gameId);
-    const autresEtapes = (otherSteps ?? []) as { id: string; media_urls: string[] | null }[];
+    // Une lecture qui échoue fait tout échouer AVANT la moindre suppression :
+    // mieux vaut des fichiers orphelins qu'une chasse vivante sans ses médias.
+    const autresEtapes = await toutes<{ id: string; media_urls: string[] | null }>((de, a) =>
+      admin.from("steps").select("id, media_urls").neq("game_id", gameId).order("id").range(de, a)
+    );
     for (const row of autresEtapes) for (const url of row.media_urls ?? []) garder(url);
 
     // Indices illustrés des étapes des AUTRES parties.
     for (let i = 0; i < autresEtapes.length; i += 200) {
-      const { data: secrets } = await admin
+      const { data: secrets, error } = await admin
         .from("step_secrets")
         .select("hints")
         .in("step_id", autresEtapes.slice(i, i + 200).map((e) => e.id));
+      if (error) throw new Error(error.message);
       for (const row of secrets ?? []) {
         for (const hint of (row.hints as { media_url?: unknown }[] | null) ?? []) {
           garder(hint?.media_url);
@@ -82,12 +110,18 @@ export async function POST(req: NextRequest) {
 
     // Photos d'épreuve des autres parties (une copie hérite du dossier, pas des
     // photos — mais une URL recopiée à la main ne doit pas non plus sauter).
-    const { data: autresPhotos } = await admin
-      .from("submissions")
-      .select("url")
-      .neq("game_id", gameId)
-      .not("url", "is", null);
-    for (const row of autresPhotos ?? []) garder(row.url);
+    // Seules celles qui pointent dans CE dossier : inutile de relire toutes
+    // les photos de toutes les parties.
+    const autresPhotos = await toutes<{ url: string }>((de, a) =>
+      admin
+        .from("submissions")
+        .select("url")
+        .neq("game_id", gameId)
+        .like("url", `%/${gameId}/%`)
+        .order("id")
+        .range(de, a)
+    );
+    for (const row of autresPhotos) garder(row.url);
 
     let removed = 0;
     let offset = 0; // les fichiers préservés restent en tête de liste

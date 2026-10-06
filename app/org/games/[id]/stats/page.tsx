@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { frError, rpc, sb, toutesLesLignes } from "@/lib/supabase/client";
-import type { Game, Player, Team } from "@/lib/types";
+import type { Game, Player, RankingData, Team } from "@/lib/types";
 import { useOrgAuth } from "@/components/org/useOrgAuth";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
@@ -87,6 +87,8 @@ export default function StatsPage() {
   const [nouvelEmail, setNouvelEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [pret, setPret] = useState(false);
+  // Le classement officiel : c'est lui qui dit qui a gagné.
+  const [classement, setClassement] = useState<RankingData | null>(null);
 
   const charger = useCallback(async () => {
     const [g, t, p, c, s, ph] = await Promise.all([
@@ -124,6 +126,13 @@ export default function StatsPage() {
       setAvis(await rpc<Avis>("get_ratings", { p_game_id: gameId }));
     } catch {
       setAvis(null);
+    }
+    try {
+      const code = (g.data as Game | null)?.code;
+      const r = code ? await rpc<RankingData>("get_ranking", { p_code: code }) : null;
+      setClassement(r && !r.error ? r : null);
+    } catch {
+      setClassement(null);
     }
     setPret(true);
   }, [gameId]);
@@ -185,10 +194,19 @@ export default function StatsPage() {
 
   // LES ÉQUIPES DANS L'ORDRE DU RÉSULTAT, pas de leur inscription : cette page
   // sert d'abord à trouver quelqu'un — le gagnant, en général, pour le
-  // prévenir. Trois familles : arrivées (au temps), encore en course (à
-  // l'heure de départ), pas parties.
+  // prévenir. L'ordre est donc celui du CLASSEMENT OFFICIEL (get_ranking),
+  // pénalités, bonus et mode points compris : trié ici sur le temps brut, il
+  // donnait la médaille d'or à une équipe que le podium plaçait deuxième.
+  // Repli, si le classement ne répond pas : arrivées (au temps brut), encore
+  // en course (à l'heure de départ), pas parties.
+  const officiel = new Map((classement?.teams ?? []).map((t, i) => [t.id, { ...t, rang: i }]));
+  const auxPoints = classement?.game.scoring === "points";
   const rang = (t: Team) => (t.finished_at ? 0 : t.started_at ? 1 : 2);
   const classees = [...teams].sort((a, b) => {
+    const ra = officiel.get(a.id)?.rang;
+    const rb = officiel.get(b.id)?.rang;
+    if (ra != null && rb != null) return ra - rb;
+    if (ra != null || rb != null) return ra != null ? -1 : 1;
     if (rang(a) !== rang(b)) return rang(a) - rang(b);
     if (a.finished_at) return (a.final_time_ms ?? 0) - (b.final_time_ms ?? 0);
     if (a.started_at) return String(a.started_at).localeCompare(String(b.started_at ?? ""));
@@ -354,8 +372,10 @@ export default function StatsPage() {
               // prénom comme nom d'équipe ET comme pseudo. C'est l'affichage
               // qui s'adapte.
               const solo = membres.length === 1 && membres[0] === t.name;
-              // Le rang n'a de sens que pour les arrivées.
-              const place = t.finished_at ? i + 1 : null;
+              // Le rang n'a de sens que pour les arrivées — et, aux points, pour
+              // toute équipe partie : le classement les range toutes ensemble.
+              const place = t.finished_at || (auxPoints && t.started_at) ? i + 1 : null;
+              const score = officiel.get(t.id);
               return (
                 <Card key={t.id} className={`p-3.5 ${place === 1 ? "ring-4 ring-gold" : ""}`}>
                   <div className="flex items-baseline gap-2.5">
@@ -374,11 +394,14 @@ export default function StatsPage() {
                     />
                     <p className="font-display text-lg leading-tight flex-1 min-w-0">{t.name}</p>
                     <p className="font-bold text-ink/50 text-xs tabular-nums shrink-0">
-                      {t.finished_at
-                        ? duree(t.final_time_ms)
-                        : t.started_at
-                          ? "en course"
-                          : "pas partie"}
+                      {auxPoints && score && (t.finished_at || t.started_at)
+                        ? `${t.finished_at ? "" : "en course · "}${Math.round(score.points)} pts`
+                        : t.finished_at
+                          ? // Le temps officiel, pénalités comprises
+                            duree(score?.time_ms ?? t.final_time_ms)
+                          : t.started_at
+                            ? "en course"
+                            : "pas partie"}
                     </p>
                   </div>
                   <p className="font-bold text-ink/55 text-sm mt-1">

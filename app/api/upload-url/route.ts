@@ -54,6 +54,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Requête invalide" }, { status: 400 });
     }
 
+    // Nom du fichier d'une photo d'épreuve : il porte l'équipe (voir plus bas).
+    let prefixePhoto = "sub-";
     if (purpose === "submission") {
       // Épreuve photo : le joueur doit appartenir à la partie (images uniquement)
       if (!["webp", "jpg", "jpeg", "png"].includes(ext)) {
@@ -72,16 +74,25 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Les deux plafonds se comptent sur `submissions` et non sur le
-      // Storage : c'est indexé, c'est instantané, et ça compte des photos
-      // réellement envoyées plutôt que des fichiers.
+      // DEUX PLAFONDS, deux façons de compter.
+      //
+      // Par équipe : les FICHIERS déposés, pas les lignes de `submissions`.
+      // L'URL signée s'obtient AVANT l'envoi, et la ligne n'apparaît qu'à
+      // submit_photo : compter les lignes laissait un client demander des URL
+      // en boucle, déposer, ne jamais déclarer — sans aucune limite. Le nom
+      // du fichier porte l'équipe, ce qui ramène le compte à une liste courte
+      // (au plus MAX_PHOTOS_PAR_EQUIPE + 1 entrées).
+      //
+      // Par partie : les photos déclarées (`submissions`, indexé). Lister des
+      // milliers de fichiers à chaque photo serait lent, et le plafond par
+      // équipe borne déjà ce qu'un client peut déposer sans le déclarer.
       const equipeId = (player as { team_id: string | null }).team_id;
       if (equipeId) {
-        const { count } = await admin
-          .from("submissions")
-          .select("id", { count: "exact", head: true })
-          .eq("team_id", equipeId);
-        if ((count ?? 0) >= MAX_PHOTOS_PAR_EQUIPE) {
+        prefixePhoto = `sub-${equipeId}-`;
+        const { data: deposes } = await admin.storage
+          .from("media")
+          .list(gameId, { limit: MAX_PHOTOS_PAR_EQUIPE + 1, search: `sub-${equipeId}` });
+        if ((deposes?.length ?? 0) >= MAX_PHOTOS_PAR_EQUIPE) {
           return NextResponse.json(
             { error: "Ton équipe a atteint son nombre maximum de photos." },
             { status: 429 }
@@ -91,7 +102,8 @@ export async function POST(req: NextRequest) {
       const { count: total } = await admin
         .from("submissions")
         .select("id", { count: "exact", head: true })
-        .eq("game_id", gameId);
+        .eq("game_id", gameId)
+        .not("url", "is", null);
       if ((total ?? 0) >= MAX_PHOTOS_PAR_PARTIE) {
         return NextResponse.json(
           { error: "Limite de photos atteinte pour cette partie." },
@@ -121,7 +133,7 @@ export async function POST(req: NextRequest) {
 
     const path =
       purpose === "submission"
-        ? `${gameId}/sub-${crypto.randomUUID()}.${ext}`
+        ? `${gameId}/${prefixePhoto}${crypto.randomUUID()}.${ext}`
         : `${gameId}/${crypto.randomUUID()}.${ext}`;
     const { data, error } = await admin.storage.from("media").createSignedUploadUrl(path);
     if (error || !data) {

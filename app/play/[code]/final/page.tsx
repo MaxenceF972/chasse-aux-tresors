@@ -92,7 +92,10 @@ export default function FinalPage() {
   const [data, setData] = useState<RankingData | null>(null);
   const [winnerPhotos, setWinnerPhotos] = useState<{ url: string; team_id: string }[]>([]);
   const [teamPhotos, setTeamPhotos] = useState<TeamPhoto[]>([]);
-  const myTeamId = getPlayerSession()?.team_id;
+  // Lue UNE fois : la session est oubliée dès que la partie est close (plus
+  // bas). Relue à chaque rendu, elle s'effaçait à cet instant précis — et avec
+  // elle la note, les photos souvenir et le repère ⭐ de mon équipe.
+  const [equipeSession] = useState(() => getPlayerSession()?.team_id);
 
   const load = useCallback(async () => {
     try {
@@ -161,6 +164,9 @@ export default function FinalPage() {
   }
 
   const { game, teams } = data;
+  // Le serveur reconnaît le joueur même après un rechargement en fin de
+  // partie, quand la session locale n'est plus là. Ancien SQL : la session.
+  const myTeamId = data.my_team_id ?? equipeSession;
   const isPoints = game.scoring === "points";
   const finished = game.status === "finished";
   // MON ÉQUIPE est-elle arrivée ? Ce n'est PAS `finished`, qui dit que la

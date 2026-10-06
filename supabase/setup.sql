@@ -191,6 +191,21 @@ alter table public.team_routes add column if not exists timed_out boolean not nu
 -- de l'étape ET annule la pénalité du skip.
 alter table public.team_routes add column if not exists redeemed_at timestamptz;
 
+-- PARTIES LANCÉES AVANT LE CHRONO PAR ÉQUIPE : leurs équipes ont un parcours
+-- mais pas de départ propre (teams.started_at vient d'apparaître, vide). Elles
+-- sont pourtant bien parties — avec la partie. Sans ce rattrapage, l'écran de
+-- jeu les renverrait au lobby, où « Partir » referait leur parcours de zéro :
+-- progression perdue en pleine chasse. Elles prennent donc le départ de la
+-- partie et ses pauses, ce qui laisse leur chrono exactement où il était.
+-- Idempotent : ne touche que des équipes sans départ qui ont déjà un parcours.
+update public.teams t
+set started_at = g.started_at, paused_total_ms = g.paused_total_ms
+from public.games g
+where g.id = t.game_id
+  and t.started_at is null
+  and g.started_at is not null
+  and exists (select 1 from public.team_routes r where r.team_id = t.id);
+
 create table if not exists public.events (
   id         bigint generated always as identity primary key,
   game_id    uuid not null references public.games(id) on delete cascade,
@@ -482,6 +497,44 @@ set search_path = public
 as $$
   select coalesce(g.settings->>'route_mode', 'disperse') = 'fixe'
 $$;
+
+-- FERMETURE DU SOIR : l'heure est-elle passée pour cette partie ?
+--
+-- Une seule règle pour deux usages : le passage quotidien qui ferme les
+-- parties (close_expired_games), et les inscriptions et départs, refusés dès
+-- l'heure passée. Le second compte autant que le premier : le passage n'a lieu
+-- qu'une fois par jour (cron Vercel, 23 h UTC), et sans ce refus une partie
+-- qui devait fermer à 21 h accueillerait encore, le lendemain matin, les
+-- visiteurs du jour suivant.
+--
+--   • l'heure se lit dans le fuseau de la partie. Un fuseau que Postgres ne
+--     connaît pas retombe sur celui par défaut au lieu de faire échouer
+--     l'appel — et, avec lui, la fermeture de toutes les autres parties ;
+--   • 0 h veut dire MINUIT : la partie ferme au changement de jour. Lu
+--     « heure >= 0 », il la fermait dès son ouverture ;
+--   • une partie ouverte un jour antérieur est toujours échue.
+create or replace function public.auto_close_due(g public.games) returns boolean
+language plpgsql stable
+set search_path = public
+as $$
+declare
+  v_tz    text := coalesce(nullif(g.settings->>'timezone', ''), 'America/Martinique');
+  v_heure int;
+  v_local timestamp;
+begin
+  if not coalesce((g.settings->>'auto_close')::boolean, false)
+     or g.status not in ('running', 'paused')
+     or g.started_at is null then
+    return false;
+  end if;
+  if not exists (select 1 from pg_timezone_names where lower(name) = lower(v_tz)) then
+    v_tz := 'America/Martinique';
+  end if;
+  v_heure := coalesce(floor(nullif(g.settings->>'close_hour', '')::numeric)::int, 19);
+  v_local := now() at time zone v_tz;
+  return v_local::date > (g.started_at at time zone v_tz)::date
+      or (v_heure > 0 and extract(hour from v_local) >= v_heure);
+end $$;
 
 -- Choisit la PROCHAINE étape d'une équipe — ANTI-PELOTON et RYTHME.
 -- La trame des positions reste maîtresse (épreuve de départ, paliers communs et
@@ -1093,6 +1146,22 @@ begin
     return jsonb_build_object('ok', true, 'already', true);
   end if;
 
+  -- Une équipe qui a DÉJÀ un parcours est partie, même sans départ inscrit
+  -- (partie lancée avant la colonne started_at, si le rattrapage en tête de
+  -- fichier n'a pas encore tourné). La relancer referait son parcours :
+  -- build_team_route efface d'abord l'existant. On inscrit le départ de la
+  -- partie, et rien d'autre.
+  if exists (select 1 from public.team_routes where team_id = v_team.id) then
+    update public.teams
+    set started_at = coalesce(v_game.started_at, now()),
+        paused_total_ms = v_game.paused_total_ms
+    where id = v_team.id;
+    return jsonb_build_object('ok', true, 'already', true);
+  end if;
+
+  -- Passé l'heure de fermeture du soir, plus de départ (voir auto_close_due).
+  if public.auto_close_due(v_game) then raise exception 'PARTIE_TERMINEE'; end if;
+
   v_b := public.game_block_count(v_team.game_id);
   if v_b = 0 and not exists (select 1 from public.steps where game_id = v_team.game_id) then
     raise exception 'AUCUNE_ETAPE';
@@ -1592,6 +1661,13 @@ begin
   on conflict (team_id) do update set contact = excluded.contact;
 end $$;
 
+-- INTERNE : seul create_team (security definer) l'appelle. Laissée ouverte,
+-- elle permettait à n'importe quel visiteur de réécrire — ou d'effacer — le
+-- contact de n'importe quelle équipe, celui-là même qui sert à prévenir le
+-- gagnant : les identifiants d'équipe et de partie sont publics (get_ranking,
+-- get_lobby), et la fonction ne vérifie rien.
+revoke all on function public.poser_contact(uuid, uuid, text) from public, anon, authenticated;
+
 -- Crée une équipe et y inscrit le caller (capitaine), avec la liste d'équipage.
 -- Les anciennes signatures sont RETIREES et pas seulement remplacees :
 -- `create or replace` sur une liste d'arguments differente cree une SURCHARGE,
@@ -1631,6 +1707,8 @@ begin
   if v_game.status <> 'lobby' and not public.is_continuous(v_game) then
     raise exception 'PARTIE_DEJA_LANCEE';
   end if;
+  -- Passé l'heure de fermeture du soir, plus d'inscription (voir auto_close_due).
+  if public.auto_close_due(v_game) then raise exception 'PARTIE_TERMINEE'; end if;
   if p_team_name is null or length(trim(p_team_name)) = 0 then raise exception 'NOM_EQUIPE_REQUIS'; end if;
   if p_nickname is null or length(trim(p_nickname)) = 0 then raise exception 'PSEUDO_REQUIS'; end if;
 
@@ -2861,7 +2939,13 @@ begin
       -- Temps de course à cet instant, pauses déduites, HORS pénalités (null
       -- tant que l'équipe n'est pas partie). Le classement en direct s'appuie
       -- dessus ; time_ms, lui, reste le temps final figé de l'arrivée.
-      'elapsed_ms', case when coalesce(t.started_at, v_game.started_at) is null
+      -- Pas de repli sur l'ouverture de la partie : en jeu continu, une équipe
+      -- qui attend au lobby afficherait au classement tout le temps écoulé
+      -- depuis le matin. Seule exception, l'équipe d'avant la colonne
+      -- started_at : elle a un parcours, elle est bien partie.
+      'elapsed_ms', case when t.started_at is null
+                              and not exists (select 1 from public.team_routes r
+                                              where r.team_id = t.id)
                          then null else public.team_elapsed_ms(t.id) end,
       'done', (select count(*) from public.team_routes tr where tr.team_id = t.id and tr.status = 'done'),
       'total', (select count(*) from public.team_routes tr where tr.team_id = t.id),
@@ -2931,6 +3015,12 @@ begin
                                'continuous', public.is_continuous(v_game),
                                'ask_rating', coalesce((v_game.settings->>'ask_rating')::boolean, false)),
     'teams', v_teams,
+    -- L'équipe du demandeur (null pour l'organisateur et la page publique) :
+    -- l'écran de fin la retrouve ainsi même après avoir oublié la session
+    -- locale — ce qu'il fait dès que la partie est close. Sans elle, la note
+    -- et les photos souvenir disparaissaient à l'instant de la fermeture.
+    'my_team_id', (select p.team_id from public.players p
+                   where p.auth_uid = auth.uid() and p.game_id = v_game.id),
     -- Récompenses de l'organisateur AVEC leur motif : sans ça, les joueurs
     -- voient des points tomber sans comprendre pourquoi. Servies ici (security
     -- definer) car la RLS d'events ne montre à un joueur que sa propre équipe.
@@ -3598,9 +3688,7 @@ set search_path = public
 as $$
 declare
   v_game   public.games%rowtype;
-  v_tz     text;
   v_heure  int;
-  v_local  timestamp;
   v_closed jsonb := '[]'::jsonb;
 begin
   for v_game in
@@ -3611,13 +3699,11 @@ begin
       and started_at is not null
     for update
   loop
-    -- Le fuseau est posé par l'éditeur (celui du navigateur de l'organisateur).
-    v_tz := coalesce(nullif(v_game.settings->>'timezone', ''), 'America/Martinique');
-    v_heure := coalesce(nullif(v_game.settings->>'close_hour', '')::int, 19);
-    v_local := now() at time zone v_tz;
+    -- L'heure se lit dans le fuseau posé par l'éditeur (celui du navigateur
+    -- de l'organisateur) : voir auto_close_due, qui sert aussi aux départs.
+    v_heure := coalesce(floor(nullif(v_game.settings->>'close_hour', '')::numeric)::int, 19);
 
-    if (v_local::date > (v_game.started_at at time zone v_tz)::date)
-       or extract(hour from v_local) >= v_heure then
+    if public.auto_close_due(v_game) then
       -- Même comptabilité de pause que la fermeture manuelle : une partie
       -- fermée pendant une pause ne doit pas laisser la pause dans le temps
       -- des équipes encore en course.

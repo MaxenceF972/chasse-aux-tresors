@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ensureAnonSession, frError, rpc } from "@/lib/supabase/client";
 import type { GameSettings, LobbyState } from "@/lib/types";
-import { getPlayerSession, setPlayerSession } from "@/lib/game/session";
+import { setPlayerSession } from "@/lib/game/session";
 import { marquerPreflight, preflightFait } from "@/lib/game/prefs";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
@@ -104,14 +104,14 @@ export default function JoinPage() {
     setBusy(true);
     setError(null);
     try {
-      // Une seule équipe par joueur, quoi qu'il arrive : on reprend celle de
-      // l'essai précédent, ou celle qu'une session gardait déjà pour ce code.
-      const dejaVue = getPlayerSession();
-      let equipe =
-        equipeRef.current ??
-        (dejaVue?.code === code && dejaVue.team_code
-          ? { team_id: dejaVue.team_id, team_code: dejaVue.team_code }
-          : null);
+      // Une seule équipe par joueur : on reprend celle de l'essai précédent
+      // (départ refusé, réseau). PAS celle d'une session locale : on n'arrive
+      // ici que si le serveur ne connaît ce joueur dans aucune équipe de la
+      // partie (`lobby.me` vide). Une session gardée désignerait une équipe
+      // supprimée, ou une identité renouvelée — et `start_team` répondrait
+      // NON_INSCRIT à chaque nouvel essai. Le doublon, lui, est empêché côté
+      // serveur : create_team reprend l'équipe pas encore partie du joueur.
+      let equipe = equipeRef.current;
 
       if (!equipe) {
         // `p_contact` seulement s'il est rempli : voir le lobby (PostgREST
@@ -144,6 +144,9 @@ export default function JoinPage() {
       await rpc("start_team", {});
       router.replace(`/play/${code}/game`);
     } catch (err) {
+      // Équipe disparue entre deux essais (supprimée depuis le live) : le
+      // prochain appui en recrée une au lieu de buter sur la même erreur.
+      if (err instanceof Error && err.message.includes("NON_INSCRIT")) equipeRef.current = null;
       setError(messageErreur(err));
       setBusy(false);
       // Retour au formulaire : pendant la vérification du téléphone, l'écran
