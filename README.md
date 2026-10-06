@@ -109,7 +109,10 @@ dans les variables d'environnement, déployer.
 
 Pour la fermeture automatique du soir : définir aussi `CRON_SECRET` (valeur
 aléatoire longue). `vercel.json` planifie `/api/cron/close-day` chaque jour à
-23 h UTC ; la route ne ferme que les parties qui ont coché l'option.
+23 h UTC (19 h aux Antilles, 1 h en France) ; la route ne ferme que les parties
+qui ont coché l'option. Le passage n'a lieu qu'une fois par jour : c'est la base
+qui fait respecter l'heure choisie, en refusant inscriptions et départs dès
+qu'elle est passée (`auto_close_due` dans `supabase/setup.sql`).
 
 ⚠️ Les variables `NEXT_PUBLIC_*` sont figées **au build** : après les avoir
 changées chez Vercel, relancer un déploiement.
