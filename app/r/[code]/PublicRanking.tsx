@@ -85,6 +85,9 @@ export default function PublicRanking({
   const scoreLabel = (team: RankedTeam) => {
     if (isPoints) return `${Math.round(team.points)} pts`;
     if (team.time_ms != null) return formatDuration(team.time_ms);
+    // Jeu en continu : encore en course, son propre temps depuis SON départ.
+    if (game.continuous && team.elapsed_ms != null)
+      return `${team.done}/${team.total} · ${formatDuration(team.elapsed_ms)}`;
     return `${team.done}/${team.total}`;
   };
   const teamName = (id: string) => teams.find((t) => t.id === id)?.name ?? "Une équipe";

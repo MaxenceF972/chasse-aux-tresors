@@ -6,12 +6,19 @@ import { AnimatePresence, motion } from "framer-motion";
 import { usePlayState, type OrgMessage } from "@/components/play/usePlayState";
 import { useWakeLock } from "@/lib/hooks/useWakeLock";
 import { useGeoShare } from "@/lib/hooks/useGeoShare";
-import { isAudioUrl, isVideoUrl } from "@/lib/game/media";
 import StepGuidance from "@/components/play/StepGuidance";
 import { renderRich } from "@/lib/game/rich";
 import { sfx } from "@/lib/game/sounds";
 import { haptics } from "@/lib/game/haptics";
-import { getGeoConsent, isMuted, setGeoConsent, setMuted, type GeoConsent } from "@/lib/game/prefs";
+import {
+  getGeoConsent,
+  isMuted,
+  marquerPreflight,
+  preflightFait,
+  setGeoConsent,
+  setMuted,
+  type GeoConsent,
+} from "@/lib/game/prefs";
 import { enablePush, isPushEnabled, pushSupported } from "@/lib/push";
 import type { PlayState, SkippedStep, ValidateKind } from "@/lib/types";
 import { clearPlayerSession } from "@/lib/game/session";
@@ -29,6 +36,8 @@ import Chrono from "@/components/ui/Chrono";
 import Spinner from "@/components/ui/Spinner";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
+import Media from "@/components/play/Media";
+import Preflight from "@/components/play/Preflight";
 import { useConfirm } from "@/components/ui/Confirm";
 
 const SKIPPED_ICONS: Record<string, string> = {
@@ -92,6 +101,7 @@ export default function GameScreen() {
     loading,
     notJoined,
     offline,
+    bootError,
     pendingCount,
     orgMessage,
     clearOrgMessage,
@@ -112,12 +122,19 @@ export default function GameScreen() {
   const [geo, setGeo] = useState<GeoConsent>(null);
   const [pushState, setPushState] = useState<"off" | "on" | "busy">("off");
   const [pushError, setPushError] = useState<string | null>(null);
+  // `null` = pas encore lu. La réponse vit dans localStorage, donc hors du
+  // rendu serveur : tant qu'on ne l'a pas, on garde le voile de chargement
+  // plutôt que de laisser paraître une demi-seconde de jeu avant la
+  // vérification. Un écran qui clignote au départ, c'est un écran cassé.
+  const [verifFaite, setVerifFaite] = useState<boolean | null>(null);
+  const [verifOuverte, setVerifOuverte] = useState(false);
 
   useEffect(() => {
     setMutedState(isMuted());
     setGeo(getGeoConsent());
+    setVerifFaite(preflightFait(code));
     void isPushEnabled().then((on) => setPushState(on ? "on" : "off"));
-  }, []);
+  }, [code]);
 
   useWakeLock(!!state && state.game.status === "running");
   useGeoShare(geo === "granted" && state?.game.status === "running");
@@ -130,6 +147,12 @@ export default function GameScreen() {
     if (!state) return;
     if (state.game.status === "lobby") router.replace(`/play/${code}/lobby`);
     if (state.game.status === "finished") router.replace(`/play/${code}/final`);
+    // Jeu en continu : équipe formée mais pas encore partie. Il n'y a aucune
+    // étape à montrer — cet écran rendrait un en-tête, un chrono faux et rien
+    // d'autre (on y arrive par « Reprendre »). Le lobby est le bon endroit :
+    // c'est là qu'on appuie sur « Partir ». `undefined` = SQL pas ré-appliqué.
+    if (state.game.status === "running" && state.team.started_at === null)
+      router.replace(`/play/${code}/lobby`);
   }, [state, code, router]);
 
   // Message de l'organisateur → vibration + son ; une récompense se fête, une
@@ -156,7 +179,27 @@ export default function GameScreen() {
     return () => clearInterval(t);
   }, [hasTimer]);
 
-  if (loading || !state) {
+  // Panne au démarrage : on le DIT. Un voile de chargement qui ne se lève
+  // jamais se lit comme un téléphone en panne, et le joueur ferme l'onglet.
+  if (!loading && !state && bootError) {
+    return (
+      <main className="min-h-dvh parchment-texture text-ink flex items-center justify-center px-5">
+        <div className="max-w-sm text-center space-y-4">
+          <div className="text-6xl">🗺️💥</div>
+          <h1 className="font-display text-2xl leading-tight">La carte ne s&apos;est pas ouverte</h1>
+          <p className="font-bold text-sm text-ink/70 leading-relaxed">{bootError}</p>
+          <Button full size="lg" onClick={() => void refetch()}>
+            🔄 RÉESSAYER
+          </Button>
+          <p className="font-bold text-sm text-ink/55 leading-relaxed">
+            Si le message revient, montre cet écran à l&apos;organisateur.
+          </p>
+        </div>
+      </main>
+    );
+  }
+
+  if (loading || !state || verifFaite === null) {
     return (
       <main className="min-h-dvh parchment-texture text-ink flex items-center justify-center">
         <Spinner label="Lecture de la carte…" />
@@ -165,13 +208,66 @@ export default function GameScreen() {
   }
 
   const { game, team, progress, current, finished } = state;
+  const unattended = !!game.settings.unattended;
+
+  // La redirection vers le lobby part d'un effet, donc APRÈS le rendu : sans
+  // ce voile, l'écran vide s'afficherait le temps d'une image.
+  if (game.status === "running" && team.started_at === null) {
+    return (
+      <main className="min-h-dvh parchment-texture text-ink flex items-center justify-center">
+        <Spinner label="Lecture de la carte…" />
+      </main>
+    );
+  }
+
+  // LA VÉRIFICATION DU TÉLÉPHONE PASSE AVANT LA PREMIÈRE ÉPREUVE.
+  //
+  // Branchée ici parce qu'ici passe TOUT LE MONDE : le départ groupé, le
+  // départ solo, l'arrivée par une balise NFC, le coéquipier qui rejoint en
+  // cours de route. Une fois par partie et par téléphone (la clé est le code
+  // de la PARTIE : c'est le téléphone qu'on vérifie, pas le groupe). Sans
+  // elle, la fenêtre système de la localisation tomberait en pleine épreuve.
+  //
+  // Les gardes `notJoined` et `finished` ne sont pas décoratives : chacun
+  // déclenche une redirection depuis un effet, APRÈS le rendu. Sans elles, la
+  // vérification s'afficherait le temps d'une image avant l'éjection.
+  if (
+    game.status === "running" &&
+    !notJoined &&
+    !finished &&
+    team.started_at !== null &&
+    (verifOuverte || !verifFaite)
+  ) {
+    return (
+      <Preflight
+        contexte={verifOuverte ? "menu" : "depart"}
+        charter={game.settings.charter}
+        onTermine={() => {
+          marquerPreflight(code);
+          setVerifFaite(true);
+          setVerifOuverte(false);
+          setGeo(getGeoConsent());
+          void isPushEnabled().then((on) => setPushState(on ? "on" : "off"));
+        }}
+        onFermer={() => {
+          setVerifOuverte(false);
+          setGeo(getGeoConsent());
+        }}
+      />
+    );
+  }
   // Épreuves à rattraper : nouveau format tous-types, ou repli sur l'ancien
   // (mini-jeux seuls) tant que le SQL n'est pas ré-appliqué.
   const skippedSteps: SkippedStep[] =
     state.skipped_steps ??
     state.skipped_minigames.map((m) => ({ ...m, type: "minigame" as const, media_urls: [] }));
-  const teamElapsedMs = team.final_time_ms ?? game.elapsed_ms;
-  const chronoTicking = game.status === "running" && !team.finished_at;
+  // Chrono de l'ÉQUIPE : en jeu continu elle est partie à son heure, la partie
+  // couvre la journée. Repli sur le chrono de partie tant que le SQL n'est pas
+  // ré-appliqué (en départ groupé, les deux sont identiques).
+  const teamElapsedMs = team.final_time_ms ?? team.elapsed_ms ?? game.elapsed_ms;
+  // `started_at` à null = équipe pas encore partie (undefined = ancien SQL).
+  const chronoTicking =
+    game.status === "running" && !team.finished_at && team.started_at !== null;
   const isPoints = game.settings.scoring === "points";
   // Pénalité de skip de l'étape en cours : propre à l'étape ou défaut de la partie
   const currentSkipLabel = (() => {
@@ -250,7 +346,12 @@ export default function GameScreen() {
     setContactBusy(true);
     try {
       await rpc("send_team_message", { p_message: contactMessage.trim() });
-      showToast("Message envoyé au maître du jeu 📣", "success");
+      showToast(
+        unattended
+          ? "Signalement envoyé 📣 Continue à jouer — n'attends pas de réponse."
+          : "Message envoyé au maître du jeu 📣",
+        "success"
+      );
       setContactMessage("");
       setContactOpen(false);
     } catch {
@@ -316,35 +417,9 @@ export default function GameScreen() {
           </p>
         )}
 
-        {/* Consentement au partage de position (suivi organisateur) */}
-        {geo === null && game.status === "running" && (
-          <div className="mt-3 rounded-xl border-[3px] border-ink bg-white/60 p-3">
-            <p className="font-bold text-sm text-ink/80 mb-2">
-              📍 Partager la position de l&apos;équipe avec l&apos;organisateur ? (sécurité et
-              suivi sur sa carte — rien n&apos;est visible par les autres équipes)
-            </p>
-            <div className="flex gap-2">
-              <button
-                className="flex-1 h-10 rounded-xl border-[3px] border-ink bg-gold font-display text-sm"
-                onClick={() => {
-                  setGeoConsent("granted");
-                  setGeo("granted");
-                }}
-              >
-                OUI, ACTIVER
-              </button>
-              <button
-                className="flex-1 h-10 rounded-xl border-[3px] border-ink bg-white font-display text-sm"
-                onClick={() => {
-                  setGeoConsent("denied");
-                  setGeo("denied");
-                }}
-              >
-                Non merci
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Le consentement au partage de position se demande sur l'écran de
+            vérification du téléphone, au départ — plus en bandeau par-dessus
+            l'énigme en cours. Il reste réglable depuis le menu ☰. */}
 
         {/* Compte à rebours d'étape — bien visible, pleine largeur */}
         {timerLeftSec != null && current && (
@@ -463,37 +538,14 @@ export default function GameScreen() {
 
               <h1 className="font-display text-3xl leading-tight">{current.step.title}</h1>
 
-              {/* Médias */}
+              {/* Médias de l'énoncé. Le composant gère son propre échec :
+                  un cadre mort barré d'un point d'interrogation, c'est
+                  exactement ce qui fait croire à une appli cassée. */}
               {current.step.media_urls.length > 0 && (
                 <div className="space-y-3">
-                  {current.step.media_urls.map((url) =>
-                    isAudioUrl(url) ? (
-                      <div
-                        key={url}
-                        className="rounded-2xl border-[3px] border-ink bg-white/70 shadow-[4px_4px_0_0_#111111] p-3"
-                      >
-                        <p className="font-display text-sm mb-2">🎵 MESSAGE AUDIO — écoutez bien !</p>
-                        <audio src={url} controls preload="metadata" className="w-full" />
-                      </div>
-                    ) : isVideoUrl(url) ? (
-                      <video
-                        key={url}
-                        src={url}
-                        controls
-                        playsInline
-                        preload="metadata"
-                        className="w-full rounded-2xl border-[3px] border-ink shadow-[4px_4px_0_0_#111111] bg-ink"
-                      />
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        key={url}
-                        src={url}
-                        alt=""
-                        className="w-full rounded-2xl border-[3px] border-ink shadow-[4px_4px_0_0_#111111]"
-                      />
-                    )
-                  )}
+                  {current.step.media_urls.map((url) => (
+                    <Media key={url} url={url} titreAudio="🎵 MESSAGE AUDIO — écoutez bien !" />
+                  ))}
                 </div>
               )}
 
@@ -517,6 +569,7 @@ export default function GameScreen() {
                 gameId={game.id}
                 submission={current.submission}
                 disabled={game.status !== "running"}
+                unattended={unattended}
                 onSubmit={handleSubmit}
                 onRefetch={refetch}
                 onAdvanced={(wasFinished) => {
@@ -547,7 +600,7 @@ export default function GameScreen() {
               )}
 
               <Button full size="md" variant="outline" onClick={() => setContactOpen(true)}>
-                🆘 CONTACTER LE MAÎTRE DU JEU
+                {unattended ? "🆘 SIGNALER UN PROBLÈME" : "🆘 CONTACTER LE MAÎTRE DU JEU"}
               </Button>
             </motion.div>
           </AnimatePresence>
@@ -581,6 +634,7 @@ export default function GameScreen() {
           kind={redeemStep.content.minigame.kind}
           config={redeemStep.content.minigame.config}
           seed={`${team.id}:${redeemStep.id}`}
+          unattended={unattended}
           onClose={() => setRedeemStep(null)}
           onComplete={async (result) => {
             try {
@@ -629,12 +683,20 @@ export default function GameScreen() {
         />
       )}
 
-      {/* Contacter le maître du jeu */}
-      <Dialog open={contactOpen} onClose={() => setContactOpen(false)} title="🆘 Maître du jeu">
+      {/* Contacter le maître du jeu. Sans surveillance, le canal garde tout son
+          sens — les messages arrivent au tableau de bord et se lisent plus tard
+          (« la balise du parc est décollée ») — mais il ne promet plus de
+          réponse : personne n'est de garde. D'où le renvoi vers « Passer ». */}
+      <Dialog
+        open={contactOpen}
+        onClose={() => setContactOpen(false)}
+        title={unattended ? "🆘 Signaler un problème" : "🆘 Maître du jeu"}
+      >
         <div className="space-y-4">
           <p className="font-bold text-ink/60 text-sm">
-            Balise introuvable, souci sur le terrain, question ? Il reçoit ton message
-            immédiatement sur son dashboard.
+            {unattended
+              ? "Balise décollée, énigme qui bloque, souci sur le terrain ? Décris-le ici : le message sera lu. Mais ne l'attends pas — personne n'est de garde pendant la partie. Si une étape te bloque, passe-la et continue."
+              : "Balise introuvable, souci sur le terrain, question ? Il reçoit ton message immédiatement sur son dashboard."}
           </p>
           <div>
             <Label>Ton message</Label>
@@ -735,7 +797,17 @@ export default function GameScreen() {
               setContactOpen(true);
             }}
           >
-            🆘 CONTACTER LE MAÎTRE DU JEU
+            {unattended ? "🆘 SIGNALER UN PROBLÈME" : "🆘 CONTACTER LE MAÎTRE DU JEU"}
+          </Button>
+          <Button
+            full
+            variant="parchment"
+            onClick={() => {
+              setMenuOpen(false);
+              setVerifOuverte(true);
+            }}
+          >
+            📱 VÉRIFIER MON TÉLÉPHONE
           </Button>
           <Button
             full

@@ -6,7 +6,8 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { ensureAnonSession, frError, rpc } from "@/lib/supabase/client";
 import type { LobbyState, LobbyTeam } from "@/lib/types";
-import { setPlayerSession } from "@/lib/game/session";
+import { getPlayerSession, setPlayerSession } from "@/lib/game/session";
+import { marquerPreflight, preflightFait } from "@/lib/game/prefs";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import { sfx } from "@/lib/game/sounds";
 import Button from "@/components/ui/Button";
@@ -16,6 +17,8 @@ import { Input, Label, TextArea } from "@/components/ui/Input";
 import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
 import Briefing from "@/components/play/Briefing";
+import Consignes from "@/components/play/Consignes";
+import Preflight from "@/components/play/Preflight";
 import { showToast } from "@/components/ui/Toaster";
 import { charterRules } from "@/lib/game/charter";
 import { renderRich } from "@/lib/game/rich";
@@ -32,6 +35,7 @@ export default function LobbyPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [teamName, setTeamName] = useState("");
   const [nickname, setNickname] = useState("");
+  const [contact, setContact] = useState("");
   const [membersText, setMembersText] = useState("");
   const [rejoinOpen, setRejoinOpen] = useState(false);
   const [rejoinCode, setRejoinCode] = useState("");
@@ -42,6 +46,12 @@ export default function LobbyPage() {
   const [invitedTeamCode, setInvitedTeamCode] = useState<string | null>(null);
   const [teamCode, setTeamCode] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Vérification du téléphone : avant le départ (jeu en continu), ou en
+  // attendant le lancement (départ groupé).
+  const [verifDepart, setVerifDepart] = useState(false);
+  const [verifLobby, setVerifLobby] = useState(false);
+  const [verifFaite, setVerifFaite] = useState(false);
+  const [veutCreer, setVeutCreer] = useState(false);
   const startedRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -52,8 +62,29 @@ export default function LobbyPage() {
         return;
       }
       setLobby(data);
-      // La partie démarre → tous les joueurs inscrits basculent sur l'énigme
-      if (data.game.status !== "lobby" && data.me && !startedRef.current) {
+
+      // Le code d'équipe est ce qui permet d'INVITER. Il n'existait qu'en
+      // mémoire, posé à la création : un rafraîchissement, un passage par
+      // l'appareil photo pour montrer le QR, et le capitaine le perdait. On le
+      // relit de la session du téléphone, s'il désigne bien l'équipe où l'on est.
+      const session = getPlayerSession();
+      if (session?.code === code && session.team_code && session.team_id === data.me?.team_id) {
+        setTeamCode(session.team_code);
+      }
+
+      // Bascule sur l'écran de jeu quand MON ÉQUIPE est partie.
+      //
+      // En jeu continu, seul `started_at` le dit : la partie vaut « running »
+      // toute la journée, y compris pour une équipe qui vient de se former —
+      // s'en servir jetterait le capitaine dans le jeu à la seconde où il crée
+      // son équipe, sans lien d'invitation ni personne à attendre.
+      // En départ groupé, le lancement de la partie fait partir tout le monde :
+      // le statut suffit (et couvre une base où le SQL n'est pas ré-appliqué).
+      const monEquipe = data.me ? data.teams?.find((t) => t.id === data.me!.team_id) : null;
+      const continu = !!data.game.settings?.continuous;
+      const partie =
+        monEquipe?.started_at != null || (!continu && data.game.status !== "lobby");
+      if (data.me && partie && !startedRef.current) {
         startedRef.current = true;
         sfx.fanfare();
         router.replace(`/play/${code}/game`);
@@ -64,22 +95,38 @@ export default function LobbyPage() {
   }, [code, router]);
 
   useEffect(() => {
+    setVerifFaite(preflightFait(code));
     void ensureAnonSession().then(load).catch((err) => {
       setError(frError(err, "Connexion impossible — recharge la page"));
     });
     const poll = setInterval(load, 4000);
     return () => clearInterval(poll);
-  }, [load]);
+  }, [load, code]);
 
-  // Lien d'invitation ?team=CODE → rejoindre l'équipe en un tap
+  // Lien d'invitation ?team=CODE → rejoindre l'équipe en un tap.
+  // ?creer=1 → on vient de « On forme une équipe » : la création est
+  // l'intention, pas la liste des équipages déjà là.
   useEffect(() => {
     try {
-      const teamParam = new URLSearchParams(window.location.search).get("team");
+      const q = new URLSearchParams(window.location.search);
+      const teamParam = q.get("team");
       if (teamParam) setInvitedTeamCode(teamParam.toUpperCase());
+      if (q.get("creer")) setVeutCreer(true);
     } catch {
       /* noop */
     }
   }, []);
+
+  // Ouverte une fois le lobby chargé, et seulement si on n'a pas déjà une
+  // équipe (retour arrière, page rouverte).
+  useEffect(() => {
+    if (veutCreer && lobby?.game && !lobby.me && !invitedTeamCode) {
+      setVeutCreer(false);
+      setTeamName("");
+      setNickname("");
+      setCreateOpen(true);
+    }
+  }, [veutCreer, lobby, invitedTeamCode]);
 
   useGameInvalidate(lobby?.game?.id, load);
 
@@ -128,6 +175,7 @@ export default function LobbyPage() {
         p_team_name: teamName,
         p_nickname: nickname,
         p_members: membersText.split("\n").map((m) => m.trim()).filter(Boolean),
+        p_contact: lobby?.game?.settings?.ask_contact ? contact.trim() || null : null,
       });
       setPlayerSession({ code, team_id: res.team_id, team_code: res.team_code, nickname });
       setTeamCode(res.team_code);
@@ -137,6 +185,38 @@ export default function LobbyPage() {
     } catch (err) {
       showToast(frenchError(err), "error");
     } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Jeu en continu : un membre appuie sur « Partir ». On vérifie d'abord son
+   * téléphone, PENDANT QUE LE CHRONO EST ENCORE À ZÉRO — vérifier après le
+   * départ ferait payer sa vérification à chaque équipe, et une pénalité de
+   * plusieurs minutes à celle qui doit aller rallumer un réglage.
+   */
+  function demarrer() {
+    if (preflightFait(code)) {
+      void partir();
+      return;
+    }
+    setVerifDepart(true);
+  }
+
+  /**
+   * Départ de l'équipe (jeu en continu) : c'est ici que naît le parcours et
+   * que le chrono se déclenche. Idempotent côté base — deux coéquipiers qui
+   * appuient en même temps ne remettent pas le chrono à zéro.
+   */
+  async function partir() {
+    setBusy(true);
+    try {
+      await rpc("start_team", {});
+      sfx.fanfare();
+      startedRef.current = true;
+      router.replace(`/play/${code}/game`);
+    } catch (err) {
+      showToast(frenchError(err), "error");
       setBusy(false);
     }
   }
@@ -176,12 +256,9 @@ export default function LobbyPage() {
       setRejoinOpen(false);
       setInvitedTeamCode(null);
       sfx.pop();
-      // Partie en cours → écran de jeu ; sinon on reste au lobby
-      if (lobby?.game?.status && lobby.game.status !== "lobby") {
-        router.replace(`/play/${code}/game`);
-      } else {
-        await load();
-      }
+      // On recharge, et c'est `load` qui tranche : si l'équipe rejointe est
+      // déjà partie, on bascule sur le jeu ; sinon on l'attend ici.
+      await load();
     } catch (err) {
       showToast(
         err instanceof Error && err.message.includes("CODE_EQUIPE_INVALIDE")
@@ -205,13 +282,56 @@ export default function LobbyPage() {
     );
   }
 
+  // La vérification du téléphone avant le départ (jeu en continu). Les
+  // réglages sont lus à la source : `settings` n'est déclaré qu'après le garde
+  // de chargement, plus bas.
+  if (verifDepart) {
+    return (
+      <Preflight
+        charter={lobby?.game?.settings?.charter}
+        onTermine={() => {
+          marquerPreflight(code);
+          setVerifFaite(true);
+          setVerifDepart(false);
+          void partir();
+        }}
+      />
+    );
+  }
+
+  // La même vérification, en attendant le lancement (départ groupé) : chacun
+  // règle SON téléphone au calme, plutôt que tout le monde au coup d'envoi.
+  if (verifLobby) {
+    return (
+      <Preflight
+        contexte="lobby"
+        charter={lobby?.game?.settings?.charter}
+        onTermine={() => {
+          marquerPreflight(code);
+          setVerifFaite(true);
+          setVerifLobby(false);
+        }}
+        onFermer={() => setVerifLobby(false)}
+      />
+    );
+  }
+
   if (!lobby?.game) return <Spinner label="Ouverture du lobby…" />;
 
   const me = lobby.me;
   const myTeam = me ? lobby.teams?.find((t) => t.id === me.team_id) : null;
   const settings = lobby.game.settings;
-  const maxPlayers = settings.max_players_per_team ?? null;
+  const continu = !!settings.continuous;
+  const status = lobby.game.status;
+  // 0, absent ou négatif = PAS DE PLAFOND — même lecture que create_team et
+  // join_team côté SQL. Avec un 0 en base, toutes les équipes paraissaient
+  // complètes et le compteur affichait « 2/0 ».
+  const maxBrut = settings.max_players_per_team;
+  const maxPlayers = maxBrut != null && maxBrut > 0 ? maxBrut : null;
   const rules = charterRules(settings.charter);
+  // Départ groupé et partie lancée : les inscriptions sont fermées. Un
+  // retardataire rejoint SON équipe par le code que lui donne son capitaine.
+  const inscriptionsFermees = !continu && status !== "lobby";
 
   return (
     <main className="min-h-dvh px-5 py-8 pt-safe-page pb-safe-page max-w-lg mx-auto flex flex-col gap-6">
@@ -282,18 +402,58 @@ export default function LobbyPage() {
                 </p>
               </div>
             )}
-            <motion.p
-              animate={{ opacity: [0.5, 1, 0.5] }}
-              transition={{ repeat: Infinity, duration: 2 }}
-              className="font-display text-lg text-leaf"
-            >
-              ⏳ En attente du lancement…
-            </motion.p>
+            {status === "lobby" ? (
+              <motion.p
+                animate={{ opacity: [0.5, 1, 0.5] }}
+                transition={{ repeat: Infinity, duration: 2 }}
+                className="font-display text-lg text-leaf"
+              >
+                {continu ? "⏳ En attente de l'ouverture…" : "⏳ En attente du lancement…"}
+              </motion.p>
+            ) : continu && status === "paused" ? (
+              <p className="font-display text-lg text-ink/60">
+                ⏸️ Partie en pause — le départ attend la reprise.
+              </p>
+            ) : continu ? (
+              // Jeu en continu : la partie est ouverte, c'est l'équipe qui
+              // décide de son départ. Le chrono ne court qu'à partir de là.
+              <Button full size="xl" variant="leaf" onClick={demarrer} disabled={busy}>
+                {busy ? "…" : "🚀 PARTIR MAINTENANT"}
+              </Button>
+            ) : null}
           </Card>
           <p className="text-center font-bold text-parchment/50 text-sm">
-            Garde cette page ouverte : la chasse démarre automatiquement ! 🏴‍☠️
+            {continu && status !== "lobby"
+              ? "Rien ne presse : le chrono ne part qu'à cet appui, une fois tout le groupe là. ⏱️"
+              : "Garde cette page ouverte : la chasse démarre automatiquement ! 🏴‍☠️"}
           </p>
-          <Briefing charter={settings.charter} />
+
+          {/* La vérification du téléphone, au calme. En jeu continu elle
+              s'impose au départ ; ici, chacun peut la faire en attendant. */}
+          {verifFaite ? (
+            <Button full size="md" variant="ghost" onClick={() => setVerifLobby(true)}>
+              ✅ TÉLÉPHONE VÉRIFIÉ — REVOIR
+            </Button>
+          ) : (
+            <Button full size="lg" variant="parchment" onClick={() => setVerifLobby(true)}>
+              📱 VÉRIFIER MON TÉLÉPHONE
+            </Button>
+          )}
+
+          {/* La charte EN CLAIR pour les coéquipiers en jeu continu : seul celui
+              qui appuie sur « Partir » traverse la vérification (et sa charte).
+              Les autres n'ont que cette page, et peu de temps pour la lire. */}
+          {continu && (
+            <Card className="p-4">
+              <Consignes charter={settings.charter} />
+            </Card>
+          )}
+          <Briefing
+            charter={settings.charter}
+            ordreFixe={settings.route_mode === "fixe"}
+            unattended={!!settings.unattended}
+            continuous={continu}
+          />
         </>
       ) : invitedTeamCode ? (
         <Card className="p-5 text-center">
@@ -329,54 +489,78 @@ export default function LobbyPage() {
       ) : (
         <>
           {/* À lire AVANT de choisir son équipage */}
-          <Briefing charter={settings.charter} />
-          <h2 className="font-display text-xl text-parchment -mb-2">Choisis ton équipage :</h2>
-          <div className="space-y-3">
-            {(lobby.teams ?? []).map((team) => {
-              const full = maxPlayers != null && team.players.length >= maxPlayers;
-              const allNames = Array.from(new Set([...team.players, ...(team.roster ?? [])]));
-              return (
-                <button
-                  key={team.id}
-                  disabled={full}
-                  onClick={() => {
-                    setNickname("");
-                    setJoinTarget(team);
-                  }}
-                  className="w-full text-left parchment-texture rounded-2xl border-[3px] border-ink shadow-[4px_4px_0_0_#111111] p-4 active:translate-y-[2px] active:shadow-[2px_2px_0_0_#111111] transition-all disabled:opacity-50"
-                >
-                  <div className="flex items-center gap-3">
-                    <span
-                      className="w-5 h-5 rounded-full border-[3px] border-ink shrink-0"
-                      style={{ backgroundColor: team.color }}
-                    />
-                    <span className="font-display text-lg text-ink flex-1">{team.name}</span>
-                    <span className="font-bold text-ink/50 text-sm">
-                      {team.players.length}
-                      {maxPlayers != null ? `/${maxPlayers}` : ""} 👤
-                    </span>
-                  </div>
-                  {allNames.length > 0 && (
-                    <p className="font-bold text-ink/50 text-sm mt-1 truncate">
-                      {allNames.join(", ")}
-                    </p>
-                  )}
-                  {full && <p className="font-bold text-crimson text-sm">Équipe complète</p>}
-                </button>
-              );
-            })}
-          </div>
-          <Button
-            size="lg"
-            variant="gold"
-            onClick={() => {
-              setTeamName("");
-              setNickname("");
-              setCreateOpen(true);
-            }}
-          >
-            ➕ CRÉER UNE ÉQUIPE
-          </Button>
+          <Briefing
+            charter={settings.charter}
+            ordreFixe={settings.route_mode === "fixe"}
+            unattended={!!settings.unattended}
+            continuous={continu}
+          />
+          {inscriptionsFermees ? (
+            <Card className="p-5 text-center">
+              <div className="text-4xl mb-1">⛵</div>
+              <h2 className="font-display text-xl mb-1">La chasse a commencé !</h2>
+              <p className="font-bold text-ink/60">
+                Les inscriptions sont fermées. Pour rejoindre ton équipe, demande son code
+                d&apos;équipe à ton capitaine (menu ☰ de son téléphone).
+              </p>
+            </Card>
+          ) : (
+            <>
+              <h2 className="font-display text-xl text-parchment -mb-2">Choisis ton équipage :</h2>
+              <div className="space-y-3">
+                {(lobby.teams ?? []).length === 0 && (
+                  <p className="font-bold text-parchment/50 text-sm text-center">
+                    Aucune équipe pour l&apos;instant — crée la tienne !
+                  </p>
+                )}
+                {(lobby.teams ?? []).map((team) => {
+                  const full = maxPlayers != null && team.players.length >= maxPlayers;
+                  const allNames = Array.from(new Set([...team.players, ...(team.roster ?? [])]));
+                  return (
+                    <button
+                      key={team.id}
+                      type="button"
+                      disabled={full}
+                      onClick={() => {
+                        setNickname("");
+                        setJoinTarget(team);
+                      }}
+                      className="w-full text-left parchment-texture rounded-2xl border-[3px] border-ink shadow-[4px_4px_0_0_#111111] p-4 active:translate-y-[2px] active:shadow-[2px_2px_0_0_#111111] transition-all disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="w-5 h-5 rounded-full border-[3px] border-ink shrink-0"
+                          style={{ backgroundColor: team.color }}
+                        />
+                        <span className="font-display text-lg text-ink flex-1">{team.name}</span>
+                        <span className="font-bold text-ink/50 text-sm">
+                          {team.players.length}
+                          {maxPlayers != null ? `/${maxPlayers}` : ""} 👤
+                        </span>
+                      </div>
+                      {allNames.length > 0 && (
+                        <p className="font-bold text-ink/50 text-sm mt-1 truncate">
+                          {allNames.join(", ")}
+                        </p>
+                      )}
+                      {full && <p className="font-bold text-crimson text-sm">Équipe complète</p>}
+                    </button>
+                  );
+                })}
+              </div>
+              <Button
+                size="lg"
+                variant="gold"
+                onClick={() => {
+                  setTeamName("");
+                  setNickname("");
+                  setCreateOpen(true);
+                }}
+              >
+                ➕ CRÉER UNE ÉQUIPE
+              </Button>
+            </>
+          )}
           <Button
             full
             size="md"
@@ -419,6 +603,29 @@ export default function LobbyPage() {
               C&apos;est bien TON prénom ici, pas le nom de l&apos;équipe.
             </p>
           </div>
+          {/* Le contact, FACULTATIF : un seul pour l'équipe, celui du capitaine
+              — et seulement si l'organisateur l'a demandé. C'est lui qu'on
+              joindra si l'équipe gagne. */}
+          {settings.ask_contact && (
+            <div>
+              <Label>
+                E-mail ou téléphone <span className="text-ink/45 normal-case">— facultatif</span>
+              </Label>
+              <Input
+                type="text"
+                inputMode="email"
+                autoComplete="email"
+                value={contact}
+                onChange={(e) => setContact(e.target.value)}
+                placeholder="pour être prévenus si vous gagnez"
+                maxLength={160}
+              />
+              <p className="text-xs font-bold text-ink/50 mt-1 leading-relaxed">
+                Uniquement pour vous prévenir si votre équipe gagne. Rien d&apos;autre n&apos;en sera
+                fait, et le champ peut rester vide.
+              </p>
+            </div>
+          )}
           <div>
             <Label>Tes coéquipiers (facultatif, un prénom par ligne)</Label>
             <TextArea
@@ -579,10 +786,12 @@ export default function LobbyPage() {
 
 function frenchError(err: unknown): string {
   const raw = err instanceof Error ? err.message : "";
-  if (raw.includes("PARTIE_DEJA_LANCEE")) return "La partie est déjà lancée !";
+  if (raw.includes("PARTIE_DEJA_LANCEE"))
+    return "La partie est déjà lancée : demande le code d'équipe à ton capitaine pour la rejoindre.";
   if (raw.includes("EQUIPE_PLEINE")) return "Cette équipe est complète.";
   if (raw.includes("MAX_EQUIPES_ATTEINT")) return "Le nombre maximum d'équipes est atteint.";
   if (raw.includes("PSEUDO_REQUIS")) return "Choisis un pseudo !";
   if (raw.includes("NOM_EQUIPE_REQUIS")) return "Donne un nom à ton équipe !";
+  if (raw.includes("NON_INSCRIT")) return "Forme d'abord ton équipe !";
   return frError(err, "Erreur inconnue — réessaie");
 }

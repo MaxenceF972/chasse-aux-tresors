@@ -34,12 +34,16 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 }
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
-  { variant = "gold", size = "md", full, className = "", children, ...props },
+  // `type="button"` par défaut : un bouton posé dans un formulaire l'ENVOIE si
+  // on ne dit rien (bouton « Lire la charte », touches d'un pavé…). Les
+  // boutons d'envoi des formulaires le déclarent tous explicitement.
+  { variant = "gold", size = "md", full, className = "", children, type = "button", ...props },
   ref
 ) {
   return (
     <button
       ref={ref}
+      type={type}
       className={[
         "font-display tracking-wide leading-tight text-center rounded-2xl border-[3px]",
         "shadow-[0_5px_0_0_#111111] active:translate-y-[4px] active:shadow-[0_1px_0_0_#111111]",

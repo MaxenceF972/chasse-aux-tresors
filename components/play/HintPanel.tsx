@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import type { HintMeta } from "@/lib/types";
 import { sfx } from "@/lib/game/sounds";
-import { isAudioUrl, isVideoUrl } from "@/lib/game/media";
 import Button from "@/components/ui/Button";
 import RdvMap from "./RdvMap";
+import Media from "./Media";
 
 /** Étiquette de la nature d'un indice — connue avant même de le débloquer. */
 const KIND_LABEL: Record<string, string> = {
@@ -50,28 +50,15 @@ export default function HintPanel({ hints, onUnlock }: HintPanelProps) {
             >
               {hint.text && <p className="font-bold text-ink/85">💡 {hint.text}</p>}
 
-              {hint.media_url &&
-                (isAudioUrl(hint.media_url) ? (
-                  <div className="rounded-xl border-[3px] border-ink bg-white/70 p-2.5">
-                    <p className="font-display text-sm mb-1.5">🎵 INDICE SONORE — écoutez bien !</p>
-                    <audio src={hint.media_url} controls preload="metadata" className="w-full" />
-                  </div>
-                ) : isVideoUrl(hint.media_url) ? (
-                  <video
-                    src={hint.media_url}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    className="w-full rounded-xl border-[3px] border-ink bg-ink"
-                  />
-                ) : (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={hint.media_url}
-                    alt="Indice"
-                    className="w-full rounded-xl border-[3px] border-ink"
-                  />
-                ))}
+              {/* Le composant gère son propre échec : un cadre mort barré
+                  d'un point d'interrogation fait croire à une appli cassée. */}
+              {hint.media_url && (
+                <Media
+                  url={hint.media_url}
+                  legende="Indice"
+                  titreAudio="🎵 INDICE SONORE — écoutez bien !"
+                />
+              )}
 
               {hint.gps && (
                 <div className="space-y-2">

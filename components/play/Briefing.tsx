@@ -1,110 +1,96 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { charterRules } from "@/lib/game/charter";
-import { getGeoConsent, isMuted, setGeoConsent, setMuted, type GeoConsent } from "@/lib/game/prefs";
-import { enablePush, isPushEnabled, pushSupported } from "@/lib/push";
-import { sfx } from "@/lib/game/sounds";
-import { haptics } from "@/lib/game/haptics";
 import Button from "@/components/ui/Button";
 import Dialog from "@/components/ui/Dialog";
 
 interface BriefingProps {
   /** Charte personnalisée (settings.charter), sinon la charte par défaut */
   charter?: string[];
+  /** Ordre imposé par l'organisateur : toutes les équipes suivent le même sens. */
+  ordreFixe?: boolean;
+  /** Partie sans surveillance : personne ne répond en direct. */
+  unattended?: boolean;
+  /** Jeu en continu : chaque équipe part quand elle veut, avec son propre chrono. */
+  continuous?: boolean;
 }
 
-const RULES = [
-  {
-    icon: "🗺️",
-    title: "Chaque équipe a SA route",
-    text: "Vous ne ferez pas les épreuves dans le même ordre que les autres : inutile de suivre une équipe, elle ne va pas au même endroit que vous.",
-  },
-  {
-    icon: "🏷️",
-    title: "Scanner les balises",
-    text: "Sur place, posez le haut du téléphone sur la puce NFC, écran allumé : la validation s'ouvre toute seule. Balise abîmée ou introuvable ? Contactez le maître du jeu.",
-  },
-  {
-    icon: "🧩",
-    title: "Énigmes et mini-jeux",
-    text: "Les réponses se tapent dans l'app. Ni les majuscules ni les accents ne comptent. Réfléchissez à plusieurs, c'est tout l'intérêt !",
-  },
-  {
-    icon: "💡",
-    title: "Coincés ? Les indices",
-    text: "Chaque étape peut proposer des indices : certains deviennent gratuits après un délai, d'autres coûtent des minutes de pénalité. À utiliser en équipe, pas en panique.",
-  },
-  {
-    icon: "🚪",
-    title: "Vraiment bloqués ? Passez",
-    text: "Le bouton « Passer l'étape » vous fait avancer contre une pénalité. Certaines épreuves sont rattrapables plus tard : les réussir annule la pénalité.",
-  },
-  {
-    icon: "📶",
-    title: "Pas de réseau ? Pas de panique",
-    text: "Vos validations sont mémorisées sur le téléphone et repartent toutes seules dès que ça capte à nouveau. Continuez à jouer.",
-  },
-  {
-    icon: "🆘",
-    title: "Un souci sur le terrain",
-    text: "Le menu ☰ permet d'écrire au maître du jeu à tout moment : balise introuvable, doute, pépin. Il reçoit le message immédiatement.",
-  },
-  {
-    icon: "🏁",
-    title: "Le sprint final",
-    text: "La dernière étape est la même pour tout le monde et se débloque quand tout le reste est validé. Le classement se joue au chrono (ou aux points) — pénalités comprises.",
-  },
-];
-
 /**
- * Le document d'accueil du lobby : le concept de la chasse, les règles, la
- * charte, et surtout un vrai réglage du téléphone — les permissions se
- * demandent ICI, au calme, plutôt qu'en pleine course sur le terrain.
+ * Le document d'accueil du lobby : le concept de la chasse, les règles et la
+ * charte.
+ *
+ * Il ne demande PLUS aucune autorisation. Il en réclamait trois — position,
+ * notifications, son — et l'écran de vérification du téléphone les
+ * redemandait derrière. Deux endroits pour la même question, c'est un endroit
+ * de trop : voir components/play/Preflight.tsx.
  */
-export default function Briefing({ charter }: BriefingProps) {
+export default function Briefing({ charter, ordreFixe, unattended, continuous }: BriefingProps) {
   const [open, setOpen] = useState(false);
-  const [muted, setMutedState] = useState(false);
-  const [geo, setGeo] = useState<GeoConsent>(null);
-  const [geoError, setGeoError] = useState<string | null>(null);
-  const [geoBusy, setGeoBusy] = useState(false);
-  const [pushState, setPushState] = useState<"off" | "on" | "busy">("off");
-  const [pushError, setPushError] = useState<string | null>(null);
 
-  // Relit les réglages à chaque ouverture : ils peuvent changer ailleurs
-  useEffect(() => {
-    if (!open) return;
-    setMutedState(isMuted());
-    setGeo(getGeoConsent());
-    void isPushEnabled().then((on) => setPushState(on ? "on" : "off"));
-  }, [open]);
-
-  /** Déclenche la vraie demande d'autorisation du navigateur, ici et maintenant. */
-  function askGeo() {
-    setGeoError(null);
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setGeoError("Ce téléphone ne propose pas la localisation.");
-      return;
-    }
-    setGeoBusy(true);
-    navigator.geolocation.getCurrentPosition(
-      () => {
-        setGeoConsent("granted");
-        setGeo("granted");
-        setGeoBusy(false);
-        haptics.success();
-      },
-      (err) => {
-        setGeoBusy(false);
-        setGeoError(
-          err.code === err.PERMISSION_DENIED
-            ? "Refusé. Autorise la localisation pour ce site dans les réglages du téléphone, puis réessaie."
-            : "Position introuvable pour l'instant — réessaie dehors, ça marchera sur le terrain."
-        );
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
-  }
+  const regles = [
+    ordreFixe
+      ? {
+          icon: "🗺️",
+          title: "Un seul sens de parcours",
+          text: "Toutes les équipes suivent le même parcours, dans le même ordre. Si une autre équipe occupe l'épreuve, laissez-lui le temps de finir : rien ne se perd.",
+        }
+      : {
+          icon: "🗺️",
+          title: "Chaque équipe a SA route",
+          text: "Vous ne ferez pas les épreuves dans le même ordre que les autres : inutile de suivre une équipe, elle ne va pas au même endroit que vous.",
+        },
+    {
+      icon: "🏷️",
+      title: "Scanner les balises",
+      text: unattended
+        ? "Sur place, posez le DOS du téléphone sur la puce NFC, écran allumé : la validation s'ouvre toute seule. Rien ne vient ? Faites-le glisser doucement — le capteur est en haut sur iPhone, au milieu sur la plupart des Android. Balise abîmée ? Saisissez son code s'il est écrit dessus, sinon passez l'étape."
+        : "Sur place, posez le DOS du téléphone sur la puce NFC, écran allumé : la validation s'ouvre toute seule. Rien ne vient ? Faites-le glisser doucement — le capteur est en haut sur iPhone, au milieu sur la plupart des Android. Balise abîmée ou introuvable ? Contactez le maître du jeu.",
+    },
+    {
+      icon: "🧩",
+      title: "Énigmes et mini-jeux",
+      text: "Les réponses se tapent dans l'app. Ni les majuscules ni les accents ne comptent. Réfléchissez à plusieurs, c'est tout l'intérêt !",
+    },
+    {
+      icon: "💡",
+      title: "Coincés ? Les indices",
+      text: "Chaque étape peut proposer des indices : certains deviennent gratuits après un délai, d'autres coûtent des minutes de pénalité. À utiliser en équipe, pas en panique.",
+    },
+    {
+      icon: "🚪",
+      title: "Vraiment bloqués ? Passez",
+      text: "Le bouton « Passer l'étape » vous fait avancer contre une pénalité. Certaines épreuves sont rattrapables plus tard : les réussir annule la pénalité.",
+    },
+    {
+      icon: "📶",
+      title: "Pas de réseau ? Pas de panique",
+      text: "Vos validations sont mémorisées sur le téléphone et repartent toutes seules dès que ça capte à nouveau. Continuez à jouer.",
+    },
+    unattended
+      ? {
+          icon: "🆘",
+          title: "Un souci sur le terrain",
+          text: "Le menu ☰ permet de signaler un problème (balise décollée, énigme qui bloque). Le message sera lu, mais ne l'attendez pas : personne n'est de garde pendant la partie. Si une étape vous bloque, passez-la et continuez.",
+        }
+      : {
+          icon: "🆘",
+          title: "Un souci sur le terrain",
+          text: "Le menu ☰ permet d'écrire au maître du jeu à tout moment : balise introuvable, doute, pépin. Il reçoit le message immédiatement.",
+        },
+    continuous
+      ? {
+          icon: "⏱️",
+          title: "Votre propre chrono",
+          text: "Chaque équipe part quand elle est prête et court son propre temps : partir plus tard ne pénalise pas. Le classement compare les temps de parcours, pénalités comprises.",
+        }
+      : null,
+    {
+      icon: "🏁",
+      title: "Le sprint final",
+      text: "La dernière étape est la même pour tout le monde et se débloque quand tout le reste est validé. Le classement se joue au chrono (ou aux points) — pénalités comprises.",
+    },
+  ].filter((r): r is { icon: string; title: string; text: string } => r !== null);
 
   const rules = charterRules(charter);
 
@@ -135,148 +121,44 @@ export default function Briefing({ charter }: BriefingProps) {
               réussir, une balise à retrouver et à scanner, un lieu où se rendre, ou une photo à
               réaliser. Chaque réussite débloque la suivante, jusqu&apos;au trésor.
             </p>
-            <p className="font-bold text-ink/75 text-sm leading-relaxed mt-2">
-              Toutes les équipes font les mêmes épreuves, mais{" "}
-              <strong>dans un ordre différent</strong> — impossible de se suivre, et le classement
-              se joue vraiment sur ce que vous faites.
-            </p>
+            {ordreFixe ? (
+              <p className="font-bold text-ink/75 text-sm leading-relaxed mt-2">
+                Toutes les équipes font les mêmes épreuves, <strong>dans le même ordre</strong> :
+                le parcours a un sens, suivez-le.
+              </p>
+            ) : (
+              <p className="font-bold text-ink/75 text-sm leading-relaxed mt-2">
+                Toutes les équipes font les mêmes épreuves, mais{" "}
+                <strong>dans un ordre différent</strong> — impossible de se suivre, et le
+                classement se joue vraiment sur ce que vous faites.
+              </p>
+            )}
           </section>
 
-          {/* 2. Le téléphone — les réglages se font ICI */}
+          {/* 2. Le téléphone : plus de réglages ICI, seulement ce qui ne se règle
+              pas depuis une page web. Le reste se fait sur l'écran de
+              vérification du téléphone. */}
           <section className="rounded-xl border-[3px] border-ink bg-white/60 p-3">
-            <h3 className="font-display text-lg mb-1">📱 Prépare ton téléphone</h3>
-            <p className="font-bold text-ink/55 text-xs mb-3">
-              Fais-le maintenant, pendant que tu es au calme et connecté.
+            <h3 className="font-display text-lg mb-1">📱 Ton téléphone</h3>
+            <p className="font-bold text-ink/65 text-sm leading-relaxed mb-2">
+              Avant le départ, le jeu vérifie ton téléphone (son, localisation, boussole,
+              notifications) et te dit quoi faire si quelque chose manque. Tu peux aussi la
+              relancer à tout moment depuis le menu ☰. D&apos;ici là, quatre choses que toi seul
+              peux régler :
             </p>
-
-            <div className="space-y-2.5">
-              {/* Son */}
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="flex-1 min-w-0 font-bold text-sm">
-                    🔊 Sons &amp; vibrations
-                    <span className="block text-ink/50 text-xs">
-                      Ils confirment chaque validation et chaque récompense.
-                    </span>
-                  </span>
-                  <Button
-                    size="sm"
-                    variant={muted ? "outline" : "leaf"}
-                    className="shrink-0"
-                    onClick={() => {
-                      const next = !muted;
-                      setMuted(next);
-                      setMutedState(next);
-                      if (!next) {
-                        sfx.pop();
-                        haptics.scan();
-                      }
-                    }}
-                  >
-                    {muted ? "ACTIVER" : "✅ ACTIVÉS"}
-                  </Button>
-                </div>
-                {!muted && (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="mt-1.5"
-                      onClick={() => {
-                        sfx.success();
-                        haptics.success();
-                      }}
-                    >
-                      ▶️ TESTER LE SON
-                    </Button>
-                    <p className="font-bold text-crimson text-xs mt-1.5 leading-snug">
-                      ⚠️ Tu n&apos;entends rien ? Ton téléphone est en <strong>mode silencieux</strong> :
-                      sur iPhone, bascule le petit bouton sur la tranche gauche ; sur Android,
-                      monte le volume « multimédia ». Sans ça, tu rateras les sons de toute la
-                      partie.
-                    </p>
-                  </>
-                )}
-              </div>
-
-              {/* Position */}
-              <div className="border-t-2 border-ink/10 pt-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="flex-1 min-w-0 font-bold text-sm">
-                    📍 Localisation
-                    <span className="block text-ink/50 text-xs">
-                      Indispensable pour les étapes « rendez-vous à un lieu », et le maître du jeu
-                      vous retrouve en cas de pépin. Invisible pour les autres équipes.
-                    </span>
-                  </span>
-                  <Button
-                    size="sm"
-                    variant={geo === "granted" ? "leaf" : "gold"}
-                    className="shrink-0"
-                    disabled={geoBusy}
-                    onClick={askGeo}
-                  >
-                    {geoBusy ? "…" : geo === "granted" ? "✅ OK" : "AUTORISER"}
-                  </Button>
-                </div>
-                {geoError && (
-                  <p className="font-bold text-crimson text-xs mt-1">{geoError}</p>
-                )}
-              </div>
-
-              {/* Notifications */}
-              {pushSupported() && (
-                <div className="border-t-2 border-ink/10 pt-2.5">
-                  <div className="flex items-center gap-2">
-                    <span className="flex-1 min-w-0 font-bold text-sm">
-                      🔔 Notifications
-                      <span className="block text-ink/50 text-xs">
-                        Pour recevoir les messages du maître du jeu même écran éteint.
-                      </span>
-                    </span>
-                    <Button
-                      size="sm"
-                      variant={pushState === "on" ? "leaf" : "gold"}
-                      className="shrink-0"
-                      disabled={pushState !== "off"}
-                      onClick={async () => {
-                        setPushState("busy");
-                        setPushError(null);
-                        const res = await enablePush();
-                        if (res.ok) {
-                          setPushState("on");
-                          haptics.success();
-                        } else {
-                          setPushState("off");
-                          setPushError(res.error ?? null);
-                        }
-                      }}
-                    >
-                      {pushState === "on" ? "✅ OK" : pushState === "busy" ? "…" : "AUTORISER"}
-                    </Button>
-                  </div>
-                  {pushError && <p className="font-bold text-crimson text-xs mt-1">{pushError}</p>}
-                </div>
-              )}
-
-              {/* Conseils non réglables */}
-              <div className="border-t-2 border-ink/10 pt-2.5">
-                <p className="font-bold text-sm mb-1">🔋 Et aussi, avant de partir :</p>
-                <ul className="space-y-1 font-bold text-ink/70 text-sm">
-                  <li>• Batterie chargée — une chasse dure souvent 1 à 2 h avec l&apos;écran allumé.</li>
-                  <li>• NFC activé (Android : Réglages → Connexions). Sur iPhone, rien à faire.</li>
-                  <li>• Garde cette page ouverte : l&apos;app empêche l&apos;écran de s&apos;éteindre pendant la partie.</li>
-                  <li>• Mets la luminosité au maximum : dehors, en plein soleil, ça change tout.</li>
-                </ul>
-              </div>
-            </div>
+            <ul className="space-y-1 font-bold text-ink/70 text-sm">
+              <li>🔋 Batterie chargée — une chasse dure souvent 1 à 2 h avec l&apos;écran allumé.</li>
+              <li>☀️ Luminosité au maximum : dehors, en plein soleil, ça change tout.</li>
+              <li>🏷️ NFC activé sur Android (cherche « NFC » dans les Réglages). Sur iPhone, rien à faire.</li>
+              <li>🔕 Pas de mode silencieux : sinon tu rateras les sons de la partie.</li>
+            </ul>
           </section>
 
           {/* 3. Les règles */}
           <section>
             <h3 className="font-display text-lg mb-2">📖 Comment on joue</h3>
             <div className="space-y-3">
-              {RULES.map((rule) => (
+              {regles.map((rule) => (
                 <div key={rule.title} className="flex gap-3">
                   <span className="text-2xl shrink-0" aria-hidden>
                     {rule.icon}

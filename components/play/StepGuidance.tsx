@@ -104,6 +104,7 @@ export default function StepGuidance({ step }: StepGuidanceProps) {
                   if (d <= target.radius) markArrived();
                 }}
                 withinLabel="Vous y êtes ! Cherchez sur place 🔎"
+                sansDistance={step.content.gps_hide_distance}
               />
             )}
             {arrivedBanner}

@@ -20,6 +20,7 @@ type ScanState =
   | "wrong"
   | "already"
   | "notjoined"
+  | "notstarted"
   | "notnfc"
   | "offline"
   | "test"
@@ -85,6 +86,11 @@ export default function TagScanPage() {
           setState("already");
         } else if (res.error === "NON_INSCRIT") {
           setState("notjoined");
+        } else if (res.error === "PAS_PARTIE") {
+          // Jeu en continu : l'équipe est inscrite mais n'a pas encore appuyé
+          // sur « Partir ». Lui dire « parcours déjà bouclé » serait l'exact
+          // contraire de la vérité.
+          setState("notstarted");
         } else if (res.error === "ETAPE_PAS_BALISE") {
           setState("notnfc");
         } else if (res.error === "PARCOURS_TERMINE") {
@@ -96,7 +102,7 @@ export default function TagScanPage() {
               ? "La partie est en pause — patiente un instant !"
               : res.error === "PARTIE_NON_ACTIVE"
                 ? "La partie n'est pas (ou plus) en cours."
-                : res.error
+                : frError(new Error(res.error))
           );
           setState("error");
         } else {
@@ -201,6 +207,11 @@ export default function TagScanPage() {
       title: "PAS ENCORE EMBARQUÉ ?",
       text: "Tu as trouvé une balise TOYAH GAMES ! Rejoins d'abord la partie avec le code fourni par l'organisateur, puis reviens scanner.",
     },
+    notstarted: {
+      icon: "⛺",
+      title: "PAS ENCORE PARTIS !",
+      text: "Ton équipe est inscrite mais n'a pas encore lancé son chrono. Retourne au lobby et appuie sur « Partir maintenant » — puis reviens scanner cette balise.",
+    },
     notnfc: {
       icon: "🧩",
       title: "PAS SI VITE !",
@@ -242,6 +253,10 @@ export default function TagScanPage() {
       {state === "notjoined" ? (
         <Link href="/play" className="contents">
           <Button size="xl">🗺️ REJOINDRE LA PARTIE</Button>
+        </Link>
+      ) : state === "notstarted" ? (
+        <Link href={gameCode ? `/play/${gameCode}/lobby` : "/play"} className="contents">
+          <Button size="xl">⛺ RETOUR AU LOBBY</Button>
         </Link>
       ) : (
         <Link href={finished && gameCode ? `/play/${gameCode}/final` : gameHref} className="contents">

@@ -77,12 +77,13 @@ export default function RedeemModal({ step, gameId, onClose, onDone }: RedeemMod
           } » !`
         );
       } else if (res.error) {
-        setStatus(`⚠️ ${res.error}`);
+        setStatus(`⚠️ ${frError(new Error(res.error))}`);
       } else {
         sfx.fail();
         haptics.fail();
         setStatus(
-          step.type === "gps" && res.distance_m != null
+          // Boussole sans distance : l'échec ne doit pas la redonner.
+          step.type === "gps" && res.distance_m != null && !step.content.gps_hide_distance
             ? `🧭 Pas encore ! Vous êtes à environ ${
                 res.distance_m >= 1000
                   ? `${(res.distance_m / 1000).toFixed(1)} km`
@@ -218,6 +219,7 @@ export default function RedeemModal({ step, gameId, onClose, onDone }: RedeemMod
             {target ? (
               <GpsCompass
                 target={target}
+                sansDistance={step.content.gps_hide_distance}
                 onUpdate={(lat, lng) => {
                   livePos.current = { lat, lng };
                   setHasPos(true);
@@ -278,7 +280,7 @@ export default function RedeemModal({ step, gameId, onClose, onDone }: RedeemMod
               ref={photoInputRef}
               type="file"
               accept="image/*"
-              capture="environment"
+              // Pas de `capture` : sur iPhone il supprime « Photothèque ».
               className="hidden"
               onChange={(e) => void sendPhoto(e.target.files)}
             />

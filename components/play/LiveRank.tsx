@@ -20,6 +20,15 @@ interface LiveRankProps {
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
+/** Temps de course d'une équipe pour le classement : final si elle est
+ *  arrivée, courant + pénalités sinon, null tant qu'elle n'est pas partie
+ *  (ou que le SQL n'est pas ré-appliqué). */
+function raceMs(eq: RankedTeam): number | null {
+  if (eq.time_ms != null) return eq.time_ms;
+  if (eq.elapsed_ms == null) return null;
+  return eq.elapsed_ms + eq.penalty_seconds * 1000;
+}
+
 /**
  * Classement live sur l'écran de jeu, dosé « ni trop ni pas assez » :
  * - un bandeau une ligne (pastille tampon encre/or) toujours visible ;
@@ -44,7 +53,14 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
   useEffect(() => {
     void load();
   }, [load]);
-  useGameInvalidate(gameId, load);
+  // Pas `players` : cette table encaisse un `report_position` par téléphone
+  // toutes les douze secondes, et le classement se rechargeait au rythme des
+  // pas de tout le monde. Deux secondes d'agrégation, aussi : un classement
+  // n'a pas besoin d'être à la milliseconde, et CHAQUE téléphone le relit.
+  useGameInvalidate(gameId, load, {
+    tables: ["games", "teams", "team_routes", "events", "submissions"],
+    debounceMs: 2000,
+  });
   // Filet de sécurité si le Realtime décroche
   useEffect(() => {
     const t = setInterval(() => void load(), 45000);
@@ -54,17 +70,27 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
   const teams = useMemo(() => data?.teams ?? [], [data]);
   const isPoints = data?.game.scoring === "points";
 
-  // « o devant t » selon le VRAI barème de la partie :
+  // « o devant t » selon le VRAI barème de la partie — même ordre que
+  // get_ranking côté serveur :
   // - points : plus de points (pénalités déjà déduites par le serveur) ;
-  // - chrono : progression, puis temps final (arrivés), puis pénalités de
-  //   temps — le chrono courant étant commun, à progression égale c'est
-  //   bien la pénalité qui fait la différence de temps.
+  // - chrono : les arrivées d'abord, au temps final ; puis celles encore en
+  //   course, à la progression puis au temps de course + pénalités (en jeu
+  //   continu chaque équipe a SON chrono ; en départ groupé, à progression
+  //   égale, c'est la pénalité qui fait la différence).
   const isAhead = useCallback(
     (o: RankedTeam, t: RankedTeam) => {
       if (isPoints) return o.points > t.points;
+      // Une équipe ARRIVÉE passe devant toutes celles qui courent encore, et
+      // entre deux arrivées seul le temps final compte. La progression ne
+      // départage que les équipes en course : elles n'ont pas forcément le
+      // même nombre d'étapes (étape ajoutée ou neutralisée en cours de route).
+      const oFini = o.time_ms != null;
+      const tFini = t.time_ms != null;
+      if (oFini !== tFini) return oFini;
+      if (oFini && tFini) return (o.time_ms as number) < (t.time_ms as number);
       if (o.done !== t.done) return o.done > t.done;
-      if (o.time_ms != null || t.time_ms != null)
-        return o.time_ms != null && (t.time_ms == null || o.time_ms < t.time_ms);
+      const [ro, rt] = [raceMs(o), raceMs(t)];
+      if (ro != null || rt != null) return ro != null && (rt == null || ro < rt);
       return o.penalty_seconds < t.penalty_seconds;
     },
     [isPoints]
@@ -106,7 +132,10 @@ export default function LiveRank({ code, gameId, teamId }: LiveRankProps) {
     if (isPoints) return `${Math.round(t.points)} pts`;
     if (t.time_ms != null) return formatDuration(t.time_ms);
     const penMin = Math.round(t.penalty_seconds / 60);
-    return `${t.done}/${t.total}${penMin > 0 ? ` · +${penMin} min` : ""}`;
+    // Jeu en continu : sa progression et SON temps (pas celui de la journée).
+    const run =
+      data?.game.continuous && t.elapsed_ms != null ? ` · ${formatDuration(t.elapsed_ms)}` : "";
+    return `${t.done}/${t.total}${run}${penMin > 0 ? ` · +${penMin} min` : ""}`;
   };
   const subline =
     myRank === 1

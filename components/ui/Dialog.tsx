@@ -11,9 +11,25 @@ interface DialogProps {
   fullScreen?: boolean;
   /** Passe au-dessus d'un autre dialog déjà ouvert (ex : Bonus par-dessus Stats) */
   elevated?: boolean;
+  /**
+   * Un doigt posé sur le voile ferme le panneau. C'est le bon défaut pour un
+   * dialogue qu'on consulte — jamais pour un mini-jeu en cours : le panneau
+   * est collé en bas de l'écran, il reste toujours une bande de voile au-
+   * dessus, et un appui malheureux effaçait douze minutes de cryptogramme
+   * sans rien demander. `false` rend le voile inerte ; la croix reste.
+   */
+  dismissible?: boolean;
 }
 
-export default function Dialog({ open, onClose, children, title, fullScreen, elevated }: DialogProps) {
+export default function Dialog({
+  open,
+  onClose,
+  children,
+  title,
+  fullScreen,
+  elevated,
+  dismissible = true,
+}: DialogProps) {
   // Verrouille le scroll de la page derrière le dialog
   useEffect(() => {
     if (!open) return;
@@ -37,7 +53,7 @@ export default function Dialog({ open, onClose, children, title, fullScreen, ele
         >
           <div
             className="absolute inset-0 bg-ink/80 backdrop-blur-sm"
-            onClick={onClose}
+            onClick={dismissible ? onClose : undefined}
             aria-hidden
           />
           <motion.div

@@ -6,6 +6,8 @@ import { rpc } from "@/lib/supabase/client";
 import { haptics } from "@/lib/game/haptics";
 import { tone } from "@/lib/game/sounds";
 import { HOTCOLD_DEFAULT_THRESHOLDS, HOTCOLD_TIERS, heatIndex } from "@/lib/game/hotcold";
+import { distanceM } from "@/lib/game/boussole";
+import GeoManquante, { PositionApproximative } from "@/components/play/GeoManquante";
 
 interface GpsHotColdProps {
   stepId: string;
@@ -27,16 +29,8 @@ interface PingResult {
   error?: string;
 }
 
-/** Distance en mètres entre deux points GPS (haversine) — pour nos propres pas. */
-function selfDistance(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const R = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
+/** Au-delà, la position ne désigne plus un lieu : voir GeoManquante. */
+const PRECISION_INUTILISABLE_M = 1000;
 
 function fmtDist(d: number): string {
   if (d >= 1000) return `${(d / 1000).toFixed(d < 10000 ? 1 : 0)} km`;
@@ -61,7 +55,8 @@ export default function GpsHotCold({
   const [within, setWithin] = useState(false);
   const [trend, setTrend] = useState<"up" | "down" | null>(null);
   const [acc, setAcc] = useState<number | null>(null);
-  const [geoErr, setGeoErr] = useState<string | null>(null);
+  const [geoCause, setGeoCause] = useState<"refus" | "introuvable" | "absent" | null>(null);
+  const [relanceGeo, setRelanceGeo] = useState(0);
   // RPC gps_ping injoignable (SQL pas encore ré-appliqué, ou réseau coupé) :
   // on invite alors à valider manuellement, ce qui fonctionne sans elle.
   const [softErr, setSoftErr] = useState(false);
@@ -93,7 +88,7 @@ export default function GpsHotCold({
         if (!mountedRef.current || !res.ok || res.distance_m == null) return;
         const d = res.distance_m;
         setDist(d);
-        setGeoErr(null);
+        setGeoCause(null);
         setSoftErr(false);
 
         const isWithin = !!res.within;
@@ -133,7 +128,7 @@ export default function GpsHotCold({
     }
 
     if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setGeoErr("Pas de GPS sur ce téléphone.");
+      setGeoCause("absent");
       return;
     }
 
@@ -151,15 +146,10 @@ export default function GpsHotCold({
         const gap = now - lastPingAtRef.current;
         if (gap < 1500) return;
         const moved =
-          !lastSelfRef.current || selfDistance(lastSelfRef.current, { lat, lng }) >= 5;
+          !lastSelfRef.current || distanceM(lastSelfRef.current, { lat, lng }) >= 5;
         if (moved || gap >= 3000) void ping(lat, lng, now);
       },
-      (err) =>
-        setGeoErr(
-          err.code === err.PERMISSION_DENIED
-            ? "Localisation refusée — autorise-la dans les réglages."
-            : "Position introuvable — sors à découvert et patiente."
-        ),
+      (err) => setGeoCause(err.code === err.PERMISSION_DENIED ? "refus" : "introuvable"),
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
     );
 
@@ -167,13 +157,19 @@ export default function GpsHotCold({
       mountedRef.current = false;
       navigator.geolocation.clearWatch(id);
     };
-  }, [stepId]);
+  }, [stepId, relanceGeo]);
 
-  const ready = dist != null && !geoErr;
+  const ready = dist != null && !geoCause;
   const idx = dist == null ? 0 : heatIndex(dist, thresholds);
   const tier = HOTCOLD_TIERS[idx];
   // Plus c'est chaud, plus le cœur pulse vite (indicateur « de plus en plus fort »)
   const pulseDur = within ? 0.5 : 2.3 - idx * 0.28;
+
+  // Sans position, il n'y a rien à montrer : le cadran est remplacé par la
+  // marche à suivre, pas posé au-dessus.
+  if (geoCause) {
+    return <GeoManquante cause={geoCause} onReessayer={() => setRelanceGeo((n) => n + 1)} />;
+  }
 
   return (
     <div className="rounded-2xl border-[3px] border-ink bg-white/70 p-4 text-center">
@@ -228,7 +224,7 @@ export default function GpsHotCold({
             : trend === "down"
               ? "🧊 Ça refroidit — vous vous éloignez"
               : "Déplacez-vous : le thermomètre vous guide"}
-          {acc != null && acc > 30 ? " · signal GPS faible" : ""}
+          {acc != null && acc > 30 && acc <= PRECISION_INUTILISABLE_M ? " · signal GPS faible" : ""}
         </p>
       ) : (
         <p className="font-bold text-ink/60 text-sm mt-2">
@@ -238,7 +234,9 @@ export default function GpsHotCold({
         </p>
       )}
 
-      {geoErr && <p className="text-crimson font-bold text-sm mt-2">{geoErr}</p>}
+      {acc != null && acc > PRECISION_INUTILISABLE_M && (
+        <PositionApproximative precisionM={acc} />
+      )}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ensureAnonSession, rpc, sb } from "@/lib/supabase/client";
-import type { AwardedBonus, RankedTeam, RankingData } from "@/lib/types";
+import type { AwardedBonus, RankedTeam, RankingData, TeamPhoto } from "@/lib/types";
 import { clearPlayerSession, getPlayerSession } from "@/lib/game/session";
 import { useGameInvalidate } from "@/lib/hooks/useGameChannel";
 import { formatDuration } from "@/lib/game/format";
@@ -15,6 +15,8 @@ import Card from "@/components/ui/Card";
 import Spinner from "@/components/ui/Spinner";
 import Logo from "@/components/ui/Logo";
 import TeamBonuses from "@/components/play/TeamBonuses";
+import NoteExperience from "@/components/play/NoteExperience";
+import Souvenirs from "@/components/play/Souvenirs";
 
 interface Award {
   icon: string;
@@ -89,6 +91,7 @@ export default function FinalPage() {
   const code = params.code?.toUpperCase() ?? "";
   const [data, setData] = useState<RankingData | null>(null);
   const [winnerPhotos, setWinnerPhotos] = useState<{ url: string; team_id: string }[]>([]);
+  const [teamPhotos, setTeamPhotos] = useState<TeamPhoto[]>([]);
   const myTeamId = getPlayerSession()?.team_id;
 
   const load = useCallback(async () => {
@@ -96,6 +99,10 @@ export default function FinalPage() {
       const ranking = await rpc<RankingData>("get_ranking", { p_code: code });
       if (!ranking.error) {
         setData(ranking);
+        // Les photos souvenir de MON équipe : seul get_ranking connaît à la
+        // fois la partie et l'identité du demandeur. Absentes (ancien SQL) :
+        // le composant Souvenirs les charge lui-même.
+        setTeamPhotos(ranking.team_photos ?? []);
         if (ranking.winner_photos !== undefined) {
           // Servies par get_ranking (visibles par TOUTES les équipes)
           setWinnerPhotos(ranking.winner_photos ?? []);
@@ -122,7 +129,12 @@ export default function FinalPage() {
     const t = setInterval(load, 15000);
     return () => clearInterval(t);
   }, [load]);
-  useGameInvalidate(data?.game?.id, load);
+  // L'écran de fin montre un classement et des photos, pas des positions :
+  // inutile de se recharger au rythme des pas de tous les joueurs (players).
+  useGameInvalidate(data?.game?.id, load, {
+    tables: ["games", "teams", "team_routes", "events", "submissions"],
+    debounceMs: 2000,
+  });
 
   // Partie terminée → on oublie la session pour que « Reprendre » disparaisse
   useEffect(() => {
@@ -151,6 +163,13 @@ export default function FinalPage() {
   const { game, teams } = data;
   const isPoints = game.scoring === "points";
   const finished = game.status === "finished";
+  // MON ÉQUIPE est-elle arrivée ? Ce n'est PAS `finished`, qui dit que la
+  // chasse entière est close. En jeu continu la partie tourne toute la journée
+  // et n'est presque jamais fermée : conditionner sur `finished` ce qui parle
+  // de MON équipe (la note, le partage, « Retour à l'énigme »), c'est ne
+  // jamais l'afficher — ou proposer de reprendre un parcours terminé.
+  const monEquipe = teams.find((t) => t.id === myTeamId);
+  const jeSuisArrive = monEquipe?.finished_at != null;
   const podium = teams.slice(0, 3);
   const podiumOrder = [1, 0, 2]; // 2e, 1er, 3e
   const podiumHeights = ["h-20", "h-28", "h-14"];
@@ -159,6 +178,10 @@ export default function FinalPage() {
   function scoreLabel(team: RankedTeam): string {
     if (isPoints) return `${Math.round(team.points)} pts`;
     if (team.time_ms != null) return formatDuration(team.time_ms);
+    // Encore en course (jeu en continu) : sa progression et son temps depuis
+    // SON départ.
+    if (game.continuous && team.elapsed_ms != null)
+      return `${team.done}/${team.total} · ${formatDuration(team.elapsed_ms)}`;
     return `${team.done}/${team.total}`;
   }
 
@@ -191,7 +214,7 @@ export default function FinalPage() {
           transition={{ type: "spring", stiffness: 200, damping: 14, delay: 0.2 }}
           className="font-display text-4xl text-gold text-cartoon-outline mt-4"
         >
-          {finished ? "CLASSEMENT FINAL" : "CLASSEMENT"}
+          {finished ? "CLASSEMENT FINAL" : game.continuous ? "CLASSEMENT DU JOUR" : "CLASSEMENT"}
         </motion.h1>
         <p className="font-bold text-parchment/60 mt-1">
           {game.name}
@@ -234,6 +257,22 @@ export default function FinalPage() {
         </div>
       )}
 
+      {/* LA NOTE, AVANT LES PHOTOS ET AVANT LE CLASSEMENT COMPLET.
+          Elle ne s'obtient que si on la voit : les photos forment une grille
+          qui peut faire plusieurs écrans de haut, tout ce qui les suit part
+          loin. Aux joueurs dont l'équipe est ARRIVÉE seulement — demander son
+          avis à quelqu'un qui court encore, c'est le lui demander au milieu de
+          la phrase. Et seulement si l'organisateur l'a voulu. */}
+      {game.ask_rating && jeSuisArrive && myTeamId && <NoteExperience teamId={myTeamId} />}
+
+      {/* LES PHOTOS SOUVENIR DE MON ÉQUIPE, avant la liste complète : le
+          podium dit qui a gagné, la liste n'intéresse que ceux qui s'y
+          cherchent, les photos sont ce que le groupe emporte. Rien n'est
+          rendu sans photo. */}
+      {myTeamId && (
+        <Souvenirs gameId={game.id} teamId={myTeamId} code={code} photos={teamPhotos} />
+      )}
+
       {/* Liste complète */}
       <div className="space-y-3">
         {teams.map((entry, i) => (
@@ -263,7 +302,11 @@ export default function FinalPage() {
                 <TeamBonuses bonuses={bonusesByTeam.get(entry.id) ?? []} />
               </div>
               <span className="font-display text-lg tabular-nums">
-                {entry.time_ms == null && !isPoints ? "⏳" : scoreLabel(entry)}
+                {entry.time_ms == null && !isPoints
+                  ? game.continuous && entry.elapsed_ms != null
+                    ? `⏳ ${formatDuration(entry.elapsed_ms)}`
+                    : "⏳"
+                  : scoreLabel(entry)}
               </span>
             </div>
           </Card>
@@ -343,13 +386,17 @@ export default function FinalPage() {
         </>
       )}
 
+      {/* Ces boutons parlent de MON équipe, pas de la partie : en jeu continu,
+          `finished` reste faux jusqu'au soir — personne ne pouvait partager son
+          résultat, et une équipe arrivée se voyait proposer de reprendre un
+          parcours terminé. */}
       <div className="mt-10 flex flex-col items-center gap-3">
-        {finished && (
+        {(finished || jeSuisArrive) && (
           <Button size="lg" variant="gold" onClick={share}>
             📣 PARTAGER LE RÉSULTAT
           </Button>
         )}
-        {!finished && myTeamId && (
+        {!finished && !jeSuisArrive && myTeamId && (
           <Link href={`/play/${code}/game`} className="contents">
             <Button size="lg">🗺️ RETOUR À L&apos;ÉNIGME</Button>
           </Link>

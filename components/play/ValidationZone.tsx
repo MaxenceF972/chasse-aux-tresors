@@ -24,6 +24,8 @@ interface ValidationZoneProps {
   gameId: string;
   submission: NonNullable<PlayState["current"]>["submission"];
   disabled: boolean;
+  /** Partie sans surveillance : on ne promet pas l'aide d'un maître du jeu. */
+  unattended?: boolean;
   onSubmit: (kind: ValidateKind, payload: Record<string, unknown>) => Promise<SubmitOutcome>;
   onRefetch: () => Promise<void>;
   /** Photo envoyée → l'équipe avance (déclenche l'animation de succès) */
@@ -37,6 +39,7 @@ export default function ValidationZone({
   gameId,
   submission,
   disabled,
+  unattended = false,
   onSubmit,
   onRefetch,
   onAdvanced,
@@ -60,7 +63,8 @@ export default function ValidationZone({
       if (outcome.status === "wrong") feedbackWrong();
       if (outcome.status === "queued")
         setInfo("📶 Pas de réseau — ta validation est enregistrée et partira automatiquement.");
-      if (outcome.status === "error") setInfo(`⚠️ ${outcome.message}`);
+      // Le serveur rend parfois un code brut (PARTIE_EN_PAUSE…) : on le traduit.
+      if (outcome.status === "error") setInfo(`⚠️ ${frError(new Error(outcome.message))}`);
       return outcome;
     } finally {
       setBusy(false);
@@ -78,7 +82,13 @@ export default function ValidationZone({
       {step.type === "nfc" && <NfcValidation disabled={disabled || busy} onRun={run} />}
       {step.type === "gps" && <GpsValidation step={step} disabled={disabled || busy} onRun={run} />}
       {step.type === "minigame" && (
-        <MinigameValidation step={step} teamId={teamId} disabled={disabled || busy} onRun={run} />
+        <MinigameValidation
+          step={step}
+          teamId={teamId}
+          disabled={disabled || busy}
+          unattended={unattended}
+          onRun={run}
+        />
       )}
       {step.type === "photo" && (
         <PhotoValidation
@@ -323,8 +333,9 @@ function NfcValidation({
             POSITIONNE TON TÉLÉPHONE SUR LA BALISE
           </p>
           <p className="font-bold text-ink/60 text-sm mt-1">
-            Colle le haut du téléphone sur la balise, écran allumé : la validation
-            s&apos;ouvre toute seule !
+            Pose le dos du téléphone sur la balise, écran allumé : la validation s&apos;ouvre
+            toute seule ! Rien ne vient ? Fais-le glisser doucement — le capteur est en haut sur
+            iPhone, au milieu sur la plupart des Android.
           </p>
         </div>
       )}
@@ -389,13 +400,19 @@ function GpsValidation({
     setStatus(null);
     const outcome = await onRun("gps", { lat, lng });
     if (outcome.status === "wrong") {
+      // « Boussole sans distance » : l'échec de validation ne doit pas devenir
+      // la porte dérobée qui la redonne — sinon appuyer sur « Valider » serait
+      // le moyen le plus rapide de jouer. Le serveur la renvoie toujours, c'est
+      // l'affichage qui se tait.
+      const distance =
+        outcome.distanceM == null || step.content.gps_hide_distance
+          ? null
+          : outcome.distanceM >= 1000
+            ? `${(outcome.distanceM / 1000).toFixed(1)} km`
+            : `${Math.round(outcome.distanceM)} m`;
       setStatus(
-        outcome.distanceM != null
-          ? `🧭 Pas encore ! Vous êtes à environ ${
-              outcome.distanceM >= 1000
-                ? `${(outcome.distanceM / 1000).toFixed(1)} km`
-                : `${Math.round(outcome.distanceM)} m`
-            } du lieu.`
+        distance != null
+          ? `🧭 Pas encore ! Vous êtes à environ ${distance} du lieu.`
           : "🧭 Pas encore au bon endroit — continuez à avancer !"
       );
     }
@@ -409,6 +426,7 @@ function GpsValidation({
       <div className="space-y-3">
         <GpsCompass
           target={target}
+          sansDistance={step.content.gps_hide_distance}
           onUpdate={(lat, lng, d) => {
             livePos.current = { lat, lng };
             setLiveDist(d);
@@ -646,7 +664,9 @@ function PhotoValidation({
         ref={inputRef}
         type="file"
         accept="image/*"
-        capture="environment"
+        // PAS de `capture` : sur iPhone, il supprime le choix « Photothèque »,
+        // et un appareil photo bloqué laisse alors un bouton qui ne fait rien —
+        // une étape sans issue. Sans lui, le système propose les deux.
         className="hidden"
         onChange={(e) => handleFile(e.target.files)}
       />
@@ -661,11 +681,13 @@ function MinigameValidation({
   step,
   teamId,
   disabled,
+  unattended,
   onRun,
 }: {
   step: PublicStep;
   teamId: string;
   disabled: boolean;
+  unattended: boolean;
   onRun: (kind: ValidateKind, payload: Record<string, unknown>) => Promise<SubmitOutcome>;
 }) {
   const [open, setOpen] = useState(false);
@@ -685,6 +707,7 @@ function MinigameValidation({
           kind={step.content.minigame.kind}
           config={step.content.minigame.config}
           seed={`${teamId}:${step.id}`}
+          unattended={unattended}
           onClose={() => setOpen(false)}
           onComplete={async (result) => {
             const outcome = await onRun("minigame", {

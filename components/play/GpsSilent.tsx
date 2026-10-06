@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { rpc } from "@/lib/supabase/client";
+import { distanceM } from "@/lib/game/boussole";
+import GeoManquante, { PositionApproximative } from "@/components/play/GeoManquante";
 
 interface GpsSilentProps {
   stepId: string;
@@ -18,16 +20,8 @@ interface PingResult {
   error?: string;
 }
 
-/** Distance en mètres entre deux points GPS (haversine) — pour nos propres pas. */
-function selfDistance(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-  const R = 6371000;
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180;
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180;
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(s));
-}
+/** Au-delà, la position ne désigne plus un lieu : voir GeoManquante. */
+const PRECISION_INUTILISABLE_M = 1000;
 
 /**
  * Mode « aucun indice » : suit la position et interroge le serveur en silence.
@@ -37,7 +31,9 @@ function selfDistance(a: { lat: number; lng: number }, b: { lat: number; lng: nu
  */
 export default function GpsSilent({ stepId, onPosition, onWithin }: GpsSilentProps) {
   const [tracking, setTracking] = useState(false);
-  const [geoErr, setGeoErr] = useState<string | null>(null);
+  const [geoCause, setGeoCause] = useState<"refus" | "introuvable" | "absent" | null>(null);
+  const [relanceGeo, setRelanceGeo] = useState(0);
+  const [acc, setAcc] = useState<number | null>(null);
   // RPC gps_ping injoignable (SQL pas ré-appliqué, réseau coupé) : repli manuel
   const [softErr, setSoftErr] = useState(false);
 
@@ -79,7 +75,7 @@ export default function GpsSilent({ stepId, onPosition, onWithin }: GpsSilentPro
     }
 
     if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setGeoErr("Pas de GPS sur ce téléphone.");
+      setGeoCause("absent");
       return;
     }
 
@@ -88,7 +84,8 @@ export default function GpsSilent({ stepId, onPosition, onWithin }: GpsSilentPro
         const lat = p.coords.latitude;
         const lng = p.coords.longitude;
         setTracking(true);
-        setGeoErr(null);
+        setAcc(p.coords.accuracy ?? null);
+        setGeoCause(null);
         onPositionRef.current(lat, lng);
 
         // Cadence discrète : rien à afficher, on vérifie l'arrivée dès ~10 m
@@ -98,15 +95,10 @@ export default function GpsSilent({ stepId, onPosition, onWithin }: GpsSilentPro
         const gap = now - lastPingAtRef.current;
         if (gap < 3000) return;
         const moved =
-          !lastSelfRef.current || selfDistance(lastSelfRef.current, { lat, lng }) >= 10;
+          !lastSelfRef.current || distanceM(lastSelfRef.current, { lat, lng }) >= 10;
         if (moved || gap >= 8000) void ping(lat, lng, now);
       },
-      (err) =>
-        setGeoErr(
-          err.code === err.PERMISSION_DENIED
-            ? "Localisation refusée — autorise-la dans les réglages."
-            : "Position introuvable — sors à découvert et patiente."
-        ),
+      (err) => setGeoCause(err.code === err.PERMISSION_DENIED ? "refus" : "introuvable"),
       { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
     );
 
@@ -114,7 +106,13 @@ export default function GpsSilent({ stepId, onPosition, onWithin }: GpsSilentPro
       mountedRef.current = false;
       navigator.geolocation.clearWatch(id);
     };
-  }, [stepId]);
+  }, [stepId, relanceGeo]);
+
+  // Sans position, il n'y a rien à montrer : le cadran est remplacé par la
+  // marche à suivre, pas posé au-dessus.
+  if (geoCause) {
+    return <GeoManquante cause={geoCause} onReessayer={() => setRelanceGeo((n) => n + 1)} />;
+  }
 
   return (
     <div className="rounded-2xl border-[3px] border-ink bg-white/70 p-4 text-center">
@@ -135,7 +133,9 @@ export default function GpsSilent({ stepId, onPosition, onWithin }: GpsSilentPro
             ? "Aucun indice ne viendra : à vous de trouver le lieu. Une fois dessus, la validation se fait toute seule."
             : "Acquisition du signal GPS…"}
       </p>
-      {geoErr && <p className="text-crimson font-bold text-sm mt-2">{geoErr}</p>}
+      {acc != null && acc > PRECISION_INUTILISABLE_M && (
+        <PositionApproximative precisionM={acc} />
+      )}
     </div>
   );
 }
