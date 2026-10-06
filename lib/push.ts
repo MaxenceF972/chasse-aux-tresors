@@ -7,12 +7,19 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
   return Uint8Array.from(raw, (c) => c.charCodeAt(0));
 }
 
+/**
+ * Le push est-il proposable ici ? Le navigateur ne suffit pas : sans clé VAPID
+ * à la construction, l'abonnement échouerait. Sans cette condition, le bouton
+ * « activer les notifications » s'affiche, et taper dessus répond « Push non
+ * configuré » — un cul-de-sac qui se lit comme une panne.
+ */
 export function pushSupported(): boolean {
   return (
     typeof window !== "undefined" &&
     "serviceWorker" in navigator &&
     "PushManager" in window &&
-    "Notification" in window
+    "Notification" in window &&
+    !!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
   );
 }
 

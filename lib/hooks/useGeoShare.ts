@@ -60,7 +60,7 @@ export function useGeoShare(enabled: boolean) {
           if (err.code === err.PERMISSION_DENIED && !deniedNotified) {
             deniedNotified = true;
             showToast(
-              "📍 Position bloquée par le téléphone. Pour que l'organisateur te voie sur la carte, autorise la localisation dans les réglages du navigateur, puis réactive le partage dans le menu ☰.",
+              "📍 Position bloquée par le téléphone : l'organisateur ne te voit pas sur sa carte. Menu ☰ → « Vérifier mon téléphone » pour la marche à suivre.",
               "error"
             );
           }

@@ -25,6 +25,41 @@ export type MinigameKind =
   | "bonto";
 
 export interface GameSettings {
+  /**
+   * JEU EN CONTINU : chaque équipe part quand elle est prête (seule ou en
+   * groupe), les inscriptions restent ouvertes pendant la partie, et chacune
+   * court son propre chrono. Éteint par défaut : départ groupé, lancé par
+   * l'organisateur.
+   */
+  continuous?: boolean;
+  /**
+   * Mode sans surveillance : personne ne regarde le tableau de bord. Les
+   * photos ne bloquent jamais l'équipe, l'énigme bonus se juge seule, et
+   * l'app ne promet pas d'aide humaine en direct. Il ne ferme rien — voir
+   * `auto_close`.
+   */
+  unattended?: boolean;
+  /**
+   * Fermeture automatique du soir. ÉTEINTE par défaut : une chasse tourne
+   * jusqu'à ce que l'organisateur la coupe. Rien d'autre ne ferme une partie.
+   */
+  auto_close?: boolean;
+  /** Heure de fermeture (0–23), dans le fuseau ci-dessous. Si auto_close. */
+  close_hour?: number;
+  /** Fuseau de la partie (celui de l'organisateur). Défaut : America/Martinique. */
+  timezone?: string;
+  /**
+   * Sens du parcours, entre le départ et le sprint final :
+   *  - 'disperse' (défaut) : ordre propre à chaque équipe, réorienté en direct
+   *    vers l'épreuve la moins fréquentée — personne ne se suit ;
+   *  - 'fixe' : l'ordre de l'éditeur, le même pour toutes.
+   */
+  route_mode?: "disperse" | "fixe";
+  /** Demander un contact (e-mail ou téléphone, facultatif) à l'inscription,
+      pour prévenir les gagnants. Visible de l'organisateur seul. */
+  ask_contact?: boolean;
+  /** Demander une note de 1 à 5 étoiles à chaque joueur arrivé. */
+  ask_rating?: boolean;
   max_teams?: number | null;
   max_players_per_team?: number | null;
   hint_default_penalty_sec?: number;
@@ -87,6 +122,13 @@ export interface StepContent {
       Autres types (l'arrivée guide seulement, la validation reste l'épreuve) :
       "map" (carte + itinéraire, défaut), "compass" ou "hotcold". */
   gps_guidance?: "compass" | "hotcold" | "none" | "map";
+  /** Boussole SANS le compte de mètres : la flèche seule.
+      Le nombre est ce qui transforme une recherche en approche calculée — on
+      regarde l'écran descendre au lieu de regarder autour de soi. Sans lui,
+      il reste une direction, ce qui est exactement ce qu'une boussole donne.
+      Vaut pour les deux modes boussole : celui d'une balise GPS comme celui
+      qui guide vers le lieu d'une autre épreuve. */
+  gps_hide_distance?: boolean;
   /** Chaud/froid : 6 seuils en m (FROID→BRÛLANT, décroissants ; au-delà = glacial) */
   gps_hotcold_thresholds?: number[];
   /** Compat : ancienne portée unique (au-delà = glacial) — remplacée par les seuils */
@@ -149,6 +191,10 @@ export interface Team {
   /** Membres listés par le capitaine à la création */
   roster: string[];
   penalty_seconds: number;
+  /** Départ de CETTE équipe — en jeu continu chacune part à son heure */
+  started_at: string | null;
+  /** Pauses subies depuis son départ (jamais celles d'avant) */
+  paused_total_ms: number;
   finished_at: string | null;
   /** Temps effectif figé à l'arrivée (pauses déduites, hors pénalités) */
   final_time_ms: number | null;
@@ -165,6 +211,9 @@ export interface Player {
   last_lat: number | null;
   last_lng: number | null;
   pos_updated_at: string | null;
+  /** Note de l'expérience, 1 à 5. Par JOUEUR : dans un groupe, chacun la sienne. */
+  rating: number | null;
+  rated_at: string | null;
 }
 
 export interface Submission {
@@ -212,6 +261,9 @@ export interface LobbyTeam {
   name: string;
   color: string;
   created_at: string;
+  /** Départ de l'équipe — null si elle n'est pas encore partie (jeu continu).
+   *  Absent tant que le SQL n'est pas ré-appliqué. */
+  started_at?: string | null;
   /** Membres listés par le capitaine */
   roster: string[];
   /** Pseudos des joueurs connectés (devices) */
@@ -285,6 +337,11 @@ export interface PlayState {
     penalty_seconds: number;
     finished_at: string | null;
     final_time_ms: number | null;
+    /** Départ de l'équipe — null tant qu'elle n'est pas partie (SQL à jour) */
+    started_at?: string | null;
+    /** Temps de course de l'ÉQUIPE au moment du fetch, pauses déduites,
+     *  hors pénalités — absent tant que le SQL n'est pas ré-appliqué */
+    elapsed_ms?: number;
   };
   progress: { done: number; total: number };
   current: {
@@ -332,6 +389,11 @@ export interface RankedTeam {
   roster: string[];
   penalty_seconds: number;
   finished_at: string | null;
+  /** Départ de l'équipe (absent tant que le SQL n'est pas ré-appliqué) */
+  started_at?: string | null;
+  /** Temps de course courant, hors pénalités — null tant qu'elle n'est pas
+   *  partie, absent tant que le SQL n'est pas ré-appliqué */
+  elapsed_ms?: number | null;
   done: number;
   total: number;
   /** Temps final pénalités incluses (null si pas fini) */
@@ -353,6 +415,14 @@ export interface AwardedBonus {
   created_at: string;
 }
 
+/** Photo prise par MON équipe, que je retrouve à la fin pour la télécharger. */
+export interface TeamPhoto {
+  id: string;
+  url: string;
+  step_title: string;
+  created_at: string;
+}
+
 export interface RankingData {
   error?: string;
   game: {
@@ -364,10 +434,20 @@ export interface RankingData {
     finished_at: string | null;
     scoring: "time" | "points";
     elapsed_ms: number;
+    /** Jeu en continu (absent tant que le SQL n'est pas ré-appliqué) */
+    continuous?: boolean;
+    /** La partie demande une note aux joueurs arrivés */
+    ask_rating?: boolean;
   };
   teams: RankedTeam[];
   /** Récompenses de l'organisateur avec leur motif — absent tant que le SQL n'est pas ré-appliqué */
   bonuses?: AwardedBonus[];
+  /**
+   * Photos souvenir de MON équipe — jamais celles des autres. Vide pour
+   * l'organisateur, la page publique et la clé de service, qui n'appartiennent
+   * à aucune équipe.
+   */
+  team_photos?: TeamPhoto[];
   /** Photos à l'honneur (servies par get_ranking : la RLS submissions ne laisse pas les autres équipes les lire) */
   winner_photos?: { url: string; team_id: string }[];
   /** Compat ancien schéma : première photo à l'honneur */

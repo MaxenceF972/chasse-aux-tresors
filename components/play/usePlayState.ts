@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ensureAnonSession, isNetworkError, rpc, sb } from "@/lib/supabase/client";
+import { ensureAnonSession, frError, isNetworkError, rpc, sb } from "@/lib/supabase/client";
 import type { BroadcastKind, PlayState, ValidateKind, ValidateResult } from "@/lib/types";
 import { enqueueValidation, flushQueue, listQueued } from "@/lib/game/offline-queue";
+import { showToast } from "@/components/ui/Toaster";
 import { bonusLabel } from "@/lib/game/format";
 import { precacheUrls } from "@/lib/pwa";
 
@@ -58,7 +59,17 @@ export function usePlayState(expectedCode?: string) {
   const [offline, setOffline] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [orgMessage, setOrgMessage] = useState<OrgMessage | null>(null);
+  /**
+   * Panne au démarrage AUTRE qu'une coupure réseau : quota de connexions
+   * anonymes atteint un jour d'affluence, 5xx, exception SQL. On ne la voyait
+   * nulle part — l'erreur était avalée, `loading` retombait à false et l'écran
+   * restait sur « Lecture de la carte… » pour toujours. Renseigné seulement
+   * quand on n'a RIEN à afficher : une partie déjà chargée continue de vivre.
+   */
+  const [bootError, setBootError] = useState<string | null>(null);
   const stateRef = useRef<PlayState | null>(null);
+  /** Validations encore en file — lu par le filet de sécurité, hors rendu. */
+  const pendingRef = useRef(0);
 
   const refetch = useCallback(async () => {
     try {
@@ -69,6 +80,7 @@ export function usePlayState(expectedCode?: string) {
         stateRef.current = data;
         setState(data);
         setOffline(false);
+        setBootError(null);
         // Rattrapage : un message général envoyé pendant que le téléphone
         // dormait n'a jamais atteint le canal temps réel. On le rejoue ici,
         // une seule fois (chaque refetch le renverrait sinon), et seulement
@@ -106,6 +118,8 @@ export function usePlayState(expectedCode?: string) {
             /* cache illisible */
           }
         }
+      } else if (!stateRef.current) {
+        setBootError(frError(err, "La partie n'a pas pu être chargée."));
       }
     } finally {
       setLoading(false);
@@ -114,7 +128,9 @@ export function usePlayState(expectedCode?: string) {
 
   const refreshPending = useCallback(async () => {
     try {
-      setPendingCount((await listQueued()).length);
+      const n = (await listQueued()).length;
+      pendingRef.current = n;
+      setPendingCount(n);
     } catch {
       /* IndexedDB indisponible */
     }
@@ -130,8 +146,15 @@ export function usePlayState(expectedCode?: string) {
           await refetch();
           await refreshPending();
         }
-      } catch {
-        if (!cancelled) setLoading(false);
+      } catch (err) {
+        if (!cancelled) {
+          if (!isNetworkError(err)) {
+            setBootError(frError(err, "La connexion à la partie a échoué."));
+          } else {
+            setOffline(true);
+          }
+          setLoading(false);
+        }
       }
     })();
     return () => {
@@ -212,7 +235,26 @@ export function usePlayState(expectedCode?: string) {
     const onOnline = () => {
       setOffline(false);
       void (async () => {
-        await flushQueue();
+        // Le sort des validations rejouées se DIT. L'écran a promis qu'elles
+        // partiraient toutes seules : les voir disparaître de la file sans un
+        // mot laisse l'équipe planter devant une épreuve qu'elle croit finie.
+        const sorts = await flushQueue();
+        const refuses = sorts.filter((r) => !r.accepte);
+        if (refuses.length > 0) {
+          showToast(
+            refuses.length > 1
+              ? `${refuses.length} validations mises en attente n'ont pas été retenues — ces épreuves t'attendent toujours.`
+              : "La validation mise en attente n'a pas été retenue — l'épreuve t'attend toujours.",
+            "error"
+          );
+        } else if (sorts.length > 0) {
+          showToast(
+            sorts.length > 1
+              ? `✅ ${sorts.length} validations en attente sont bien enregistrées.`
+              : "✅ Ta validation en attente est bien enregistrée.",
+            "success"
+          );
+        }
         await refreshPending();
         await refetch();
       })();
@@ -226,9 +268,28 @@ export function usePlayState(expectedCode?: string) {
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
     document.addEventListener("visibilitychange", onVisible);
-    // filet de sécurité : retente régulièrement s'il reste des validations en attente
+    // FILET DE SÉCURITÉ, PAS UN BATTEMENT DE CŒUR.
+    //
+    // Ce minuteur rappelait `get_play_state` toutes les 20 secondes sur CHAQUE
+    // téléphone, qu'il y ait quelque chose à rejouer ou non — trois requêtes
+    // par minute et par visiteur, plus la radio qui ne se rendort jamais. Le
+    // temps réel fait déjà le travail ; il ne reste à couvrir que deux cas :
+    // une validation en attente (on insiste, toutes les 20 s), et un canal
+    // temps réel tombé sans qu'on le sache (on resynchronise, toutes les
+    // 2 minutes).
+    let tics = 0;
     const interval = setInterval(() => {
-      if (navigator.onLine) void onOnline();
+      if (!navigator.onLine) return;
+      if (pendingRef.current > 0) {
+        tics = 0;
+        void onOnline();
+        return;
+      }
+      tics++;
+      if (tics >= 6) {
+        tics = 0;
+        void refetch();
+      }
     }, 20000);
     return () => {
       window.removeEventListener("online", onOnline);
@@ -321,6 +382,7 @@ export function usePlayState(expectedCode?: string) {
     loading,
     notJoined,
     offline,
+    bootError,
     pendingCount,
     orgMessage,
     clearOrgMessage: () => setOrgMessage(null),

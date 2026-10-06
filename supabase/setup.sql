@@ -2923,7 +2923,13 @@ begin
     'game', jsonb_build_object('id', v_game.id, 'code', v_game.code, 'name', v_game.name,
                                'status', v_game.status, 'started_at', v_game.started_at,
                                'finished_at', v_game.finished_at, 'scoring', v_scoring,
-                               'elapsed_ms', public.game_elapsed_ms(v_game)),
+                               'elapsed_ms', public.game_elapsed_ms(v_game),
+                               -- Ce que l'écran de fin doit savoir de la partie :
+                               -- en continu, « partie terminée » et « mon équipe
+                               -- est arrivée » ne coïncident plus ; et la note
+                               -- n'est demandée que si l'organisateur l'a voulu.
+                               'continuous', public.is_continuous(v_game),
+                               'ask_rating', coalesce((v_game.settings->>'ask_rating')::boolean, false)),
     'teams', v_teams,
     -- Récompenses de l'organisateur AVEC leur motif : sans ça, les joueurs
     -- voient des points tomber sans comprendre pourquoi. Servies ici (security
