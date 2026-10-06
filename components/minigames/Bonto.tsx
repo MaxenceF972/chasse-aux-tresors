@@ -118,7 +118,9 @@ function BontoGame({ config, seed, onComplete }: MiniGameProps) {
       setPositions(Array.from({ length: cups }, (_, i) => i));
       setCoinAt(0);
       setLifted(0); // on montre la pièce sous le gobelet de gauche
-      await sleep(1100);
+      // Une seconde pour repérer une pièce, c'est court quand c'est TOUT le
+      // jeu : le mélange qui suit ne vaut que si le départ a été vu.
+      await sleep(1500);
       if (!alive || cancelRef.current) return;
       setLifted(null);
       await sleep(350);
@@ -225,27 +227,34 @@ function BontoGame({ config, seed, onComplete }: MiniGameProps) {
               disabled={phase !== "pick"}
               aria-label={`Gobelet ${slot + 1}`}
             >
-              {/* Emplacement pièce : IDENTIQUE pour tous les gobelets (aucun tell).
-                  La pièce n'apparaît que sous le bon gobelet ET seulement soulevé. */}
-              <div className="h-10 flex items-end justify-center">
+              {/* La pièce est posée SUR LA TABLE, le gobelet par-dessus : c'est
+                  en se soulevant que le gobelet la découvre.
+                  Elle était auparavant EMPILÉE AU-DESSUS du gobelet, et le
+                  gobelet montait de 40 px dans cet emplacement même : il venait
+                  donc la recouvrir au moment précis où il fallait la repérer.
+                  Le gabarit reste identique pour tous les gobelets (aucun
+                  tell) : la pièce est en position absolue, hors du flux, et
+                  n'apparaît que sous le bon gobelet ET seulement soulevé. */}
+              <div className="relative w-full flex justify-center px-1">
                 {hasCoin && (
                   <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: isLifted ? 1 : 0, y: isLifted ? 0 : 8 }}
+                    className="absolute inset-x-0 bottom-0 flex justify-center"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: isLifted ? 1 : 0 }}
                     transition={{ duration: 0.2 }}
                   >
                     <Coin />
                   </motion.div>
                 )}
+                {/* Le gobelet (SVG plus grand, contours cartoon) */}
+                <motion.div
+                  animate={{ y: isLifted ? -48 : 0, rotate: isWrongPick ? [0, -8, 8, 0] : 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="relative w-full flex justify-center"
+                >
+                  <Cup grayscale={isWrongPick} />
+                </motion.div>
               </div>
-              {/* Le gobelet (SVG plus grand, contours cartoon) */}
-              <motion.div
-                animate={{ y: isLifted ? -40 : 0, rotate: isWrongPick ? [0, -8, 8, 0] : 0 }}
-                transition={{ duration: 0.3 }}
-                className="w-full flex justify-center px-1"
-              >
-                <Cup grayscale={isWrongPick} />
-              </motion.div>
             </motion.button>
           );
         })}
@@ -283,7 +292,7 @@ function BontoEditor({ value, onChange }: ConfigEditorProps) {
               type="button"
               onClick={() => onChange({ ...value, ...o })}
               className={`px-3 h-11 rounded-xl border-[3px] border-ink font-display text-sm ${
-                (cfg.cups ?? 3) === o.cups && (cfg.shuffles ?? 8) === o.shuffles
+                (cfg.cups ?? 3) === o.cups && (cfg.shuffles ?? 10) === o.shuffles
                   ? "bg-gold"
                   : "bg-white"
               }`}
