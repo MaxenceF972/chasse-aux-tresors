@@ -33,7 +33,7 @@ jobs:
             exit 1
           fi
 
-      - name: Tests unitaires (algos critiques)
+      - name: Tests (algos critiques + scénarios SQL sur Postgres embarqué)
         run: npm test
 
       - name: Build Next.js

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsx --test tests/normalize.test.ts tests/prng.test.ts tests/roundrobin.test.ts tests/minigames.test.ts",
+    "test": "tsx --test tests/normalize.test.ts tests/prng.test.ts tests/roundrobin.test.ts tests/minigames.test.ts && npm run test:sql",
+    "test:sql": "node --test tests/sql/*.test.mjs",
     "lint": "eslint .",
     "db:apply": "node scripts/apply-sql.mjs",
     "icons": "node scripts/make-icons.mjs"
@@ -23,6 +24,7 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@eslint/eslintrc": "^3.3.6",
     "@tailwindcss/postcss": "^4.1.0",
     "@types/leaflet": "^1.9.21",
