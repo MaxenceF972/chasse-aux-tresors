@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isAudioUrl, isVideoUrl } from "@/lib/game/media";
 
 interface MediaProps {
@@ -22,6 +22,21 @@ interface MediaProps {
  */
 export default function Media({ url, legende, titreAudio }: MediaProps) {
   const [casse, setCasse] = useState(false);
+  const imgRef = useRef<HTMLImageElement>(null);
+
+  // Une image qui a échoué AVANT que React n'attache ses écouteurs (rendue
+  // côté serveur, ou déjà en échec dans le cache) ne déclenche plus jamais
+  // `onError` : le cadre barré resterait. On relance alors son chargement —
+  // l'erreur se redéclenche, cette fois sur un écouteur branché. On ne
+  // conclut pas directement à la panne : une image différée (`lazy`) pas
+  // encore chargée a, elle aussi, une largeur nulle.
+  useEffect(() => {
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth === 0) {
+      const src = img.src;
+      img.src = src;
+    }
+  }, [url]);
 
   if (casse) {
     return (
@@ -76,6 +91,7 @@ export default function Media({ url, legende, titreAudio }: MediaProps) {
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
+      ref={imgRef}
       src={url}
       alt={legende ?? ""}
       loading="lazy"

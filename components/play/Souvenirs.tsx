@@ -85,7 +85,8 @@ export default function Souvenirs({ gameId, teamId, code, photos }: SouvenirsPro
         📸 {liste.length > 1 ? `VOS ${liste.length} PHOTOS SOUVENIRS` : "VOTRE PHOTO SOUVENIR"}
       </h2>
       <p className="text-center font-bold text-parchment/50 text-xs mt-1 mb-4 leading-relaxed">
-        Visibles par ton équipe seulement. Télécharge-les : elles disparaîtront avec la partie.
+        Visibles par votre équipe seulement. Téléchargez-les : elles disparaîtront avec la
+        partie.
       </p>
 
       <div className={liste.length > 1 ? "grid grid-cols-2 gap-3" : ""}>
